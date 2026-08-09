@@ -12,7 +12,7 @@
 - `null`(显式 None)· 不启用(provisioning 明确无限期不 enforce · 与 0 区分)
 - `0`(显式 int 0)· 显式无限 · reserve 恒 True · used 仍计
 - `>0`(int)· 具体上限
-- **拒**:bool / 负数 / str / float · 配置错误 · 视 as 缺失 · fail-open + audit
+- **拒**:bool / 负数 / str / float · 抛 `BudgetConfigError` · enforcement 上层必须 fail-CLOSED
 
 **UTC daily bucket**:key = (tenant_id, utc_date_str) · 天粒度 · pending reservations 与
 used 一起判断超支。
@@ -80,7 +80,8 @@ def validate_daily_budget(value: Any) -> Optional[int]:
     None → None(未启用)
     0    → 0(显式无限)
     正整数 → 正整数
-    bool / 负数 / str / float → raise BudgetConfigError · 上层视 as None(fail-open + audit)
+    bool / 负数 / str / float → raise BudgetConfigError · enforcement 上层必须
+    返回结构化 fail-CLOSED response，禁止转换为 None 后继续 provider 调用。
     """
     if value is None:
         return None
@@ -205,3 +206,4 @@ def register(ctx: Any) -> None:
     """
     ctx.register_hook("pre_api_request", _on_pre_api_request_observer)
     ctx.register_hook("post_api_request", _on_post_api_request_observer)
+
