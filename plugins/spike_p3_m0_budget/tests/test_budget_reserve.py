@@ -1,10 +1,11 @@
-"""P3-M0 Spike · budget service 测试(观察 hook · 无 enforcement).
+"""P3-M0 Spike · budget service 测试(observer hook · service API).
 
-**Codex §I 契约调整**:
-- Budget 不再由 `pre_api_request` hook 抛 BudgetExceeded(生产调用点吞异常)
-- 现由 `spike_p3_m0_cache` 注册的 `llm_execution` middleware 调用 budget service
-- 本文件测 service 函数 · orchestration 端到端由 `spike_p3_m0_cache` 测试覆盖
-- Discovery 侧仍通过真实 PluginManager 验证:hook 挂上、observer 只做 audit
+**Codex 第三轮 §IV 契约(修订)**:
+- settle 仅结算**仍存在**的 reservation · unknown/double settle → raise BudgetSettleError · **不改** used
+- release 幂等 · 返回 True(存在)/ False(不存在)· 不改 used
+- 40 线程 barrier 精确超限测试:budget = N * per-req · 超过 N 个必 raise
+- UTC 跨日 rollover 真测试(monkeypatch `_today_utc`)
+- observer hooks 恒 no-op(无 enforcement)
 """
 from __future__ import annotations
 
@@ -34,14 +35,11 @@ def _enable_budget(tmp_path, monkeypatch):
 
 
 def test_discovery_registers_observer_hooks(tmp_path, monkeypatch):
-    """PluginContext.register_hook 生效 · pre/post_api_request 均挂上。"""
     from hermes_cli.plugins import has_hook
 
     manager, mod = _enable_budget(tmp_path, monkeypatch)
-    # observer 挂上(无 enforcement · 见模块 docstring)
     assert has_hook("pre_api_request") is True
     assert has_hook("post_api_request") is True
-    # 不 register llm_execution middleware(orchestration 是 cache 的责任)
     assert manager._middleware.get("llm_execution") in (None, [])
 
 
@@ -50,7 +48,6 @@ def test_disabled_plugin_not_loaded(tmp_path, monkeypatch):
 
     write_config(tmp_path, [])
     install_fresh_manager(monkeypatch, tmp_path)
-    # 无 hook 挂上
     assert has_hook("pre_api_request") is False
 
 
@@ -60,7 +57,7 @@ def test_disabled_plugin_not_loaded(tmp_path, monkeypatch):
 def test_validate_daily_budget_states(tmp_path, monkeypatch):
     _, mod = _enable_budget(tmp_path, monkeypatch)
     assert mod.validate_daily_budget(None) is None
-    assert mod.validate_daily_budget(0) == 0        # 显式无限
+    assert mod.validate_daily_budget(0) == 0
     assert mod.validate_daily_budget(1000) == 1000
 
 
@@ -79,7 +76,6 @@ def test_validate_daily_budget_rejects(tmp_path, monkeypatch, bad_value):
 
 
 def test_reserve_none_budget_no_op(tmp_path, monkeypatch):
-    """budget=None(未启用)· reserve no-op · 不 raise。"""
     _, mod = _enable_budget(tmp_path, monkeypatch)
     mod.reserve("t1", "req_a", 500, budget=None)
     assert mod.get_pending_total("t1") == 0
@@ -95,12 +91,30 @@ def test_reserve_then_settle_charges_actual(tmp_path, monkeypatch):
     assert mod.get_pending_total("t1") == 0
 
 
-def test_release_removes_reservation_no_charge(tmp_path, monkeypatch):
+def test_release_removes_reservation_returns_true(tmp_path, monkeypatch):
+    """release 存在的 reservation · 返回 True · used 不变。"""
     _, mod = _enable_budget(tmp_path, monkeypatch)
     mod.reserve("t1", "req_x", 200, budget=10_000)
-    mod.release("t1", "req_x")
+    assert mod.release("t1", "req_x") is True
     assert mod.get_used("t1") == 0
     assert mod.get_pending_total("t1") == 0
+
+
+def test_release_unknown_returns_false_no_op(tmp_path, monkeypatch):
+    """Codex §IV:release unknown reservation · 返回 False · no-op(幂等)。"""
+    _, mod = _enable_budget(tmp_path, monkeypatch)
+    assert mod.release("t1", "never_reserved") is False
+    assert mod.get_used("t1") == 0
+    assert mod.get_pending_total("t1") == 0
+
+
+def test_release_after_release_returns_false(tmp_path, monkeypatch):
+    """double release · 第二次返回 False · 无副作用。"""
+    _, mod = _enable_budget(tmp_path, monkeypatch)
+    mod.reserve("t1", "req_x", 100, budget=1000)
+    assert mod.release("t1", "req_x") is True
+    assert mod.release("t1", "req_x") is False
+    assert mod.get_used("t1") == 0
 
 
 # ── reserve 超预算 · raise BudgetExceeded ────────────────────────
@@ -110,21 +124,19 @@ def test_reserve_over_budget_raises(tmp_path, monkeypatch):
     _, mod = _enable_budget(tmp_path, monkeypatch)
     with pytest.raises(mod.BudgetExceeded, match="daily budget exhausted"):
         mod.reserve("t1", "req_over", 200, budget=100)
-    # 不能 leak reservation
     assert mod.get_pending_total("t1") == 0
 
 
 def test_used_plus_pending_plus_new_over_budget_raises(tmp_path, monkeypatch):
     _, mod = _enable_budget(tmp_path, monkeypatch)
     mod.reserve("t1", "r_a", 60, budget=200)
-    mod.settle("t1", "r_a", 60)   # used=60
-    mod.reserve("t1", "r_b", 100, budget=200)   # pending=100 · used=60 · sum=160
+    mod.settle("t1", "r_a", 60)
+    mod.reserve("t1", "r_b", 100, budget=200)
     with pytest.raises(mod.BudgetExceeded):
-        mod.reserve("t1", "r_c", 50, budget=200)   # 60+100+50=210 > 200
+        mod.reserve("t1", "r_c", 50, budget=200)
 
 
 def test_budget_zero_is_unlimited(tmp_path, monkeypatch):
-    """budget=0 显式无限 · 大额 reserve 仍成功 · used 仍累加供审计。"""
     _, mod = _enable_budget(tmp_path, monkeypatch)
     mod.reserve("t1", "r_big", 10_000_000, budget=0)
     mod.settle("t1", "r_big", 5_000_000)
@@ -147,7 +159,42 @@ def test_empty_api_request_id_raises(tmp_path, monkeypatch):
         mod.reserve("t1", "", 50, budget=1000)
 
 
-# ── UTC daily bucket 隔离 ──────────────────────────────────────────
+# ── settle 严格幂等(Codex §IV 修订)─────────────────────────────
+
+
+def test_settle_unknown_id_raises_and_does_not_charge(tmp_path, monkeypatch):
+    """Codex §IV 修订:settle 无 reservation · **raise BudgetSettleError · 不改 used**。
+
+    旧契约"unknown settle 累加 used"是**错误**的 · 会导致 unknown id 洗钱。
+    """
+    _, mod = _enable_budget(tmp_path, monkeypatch)
+    with pytest.raises(mod.BudgetSettleError, match="no reservation"):
+        mod.settle("t1", "unknown_req", 25)
+    assert mod.get_used("t1") == 0
+
+
+def test_double_settle_raises_after_first_ok(tmp_path, monkeypatch):
+    """double settle · 第二次 raise · used 不再加。"""
+    _, mod = _enable_budget(tmp_path, monkeypatch)
+    mod.reserve("t1", "req_1", 50, budget=1000)
+    mod.settle("t1", "req_1", 50)   # 首次 OK
+    assert mod.get_used("t1") == 50
+    with pytest.raises(mod.BudgetSettleError):
+        mod.settle("t1", "req_1", 999)   # 第二次 · reservation 已消 · raise
+    assert mod.get_used("t1") == 50   # 未增
+
+
+def test_settle_after_release_raises(tmp_path, monkeypatch):
+    """release 后 settle · reservation 不存在 · raise · used 不变。"""
+    _, mod = _enable_budget(tmp_path, monkeypatch)
+    mod.reserve("t1", "req_1", 50, budget=1000)
+    mod.release("t1", "req_1")
+    with pytest.raises(mod.BudgetSettleError):
+        mod.settle("t1", "req_1", 25)
+    assert mod.get_used("t1") == 0
+
+
+# ── 多 tenant 隔离 ──────────────────────────────────────────────────
 
 
 def test_multiple_tenants_isolated(tmp_path, monkeypatch):
@@ -160,7 +207,7 @@ def test_multiple_tenants_isolated(tmp_path, monkeypatch):
     assert mod.get_used("tB") == 90
 
 
-# ── 并发 reserve/settle · threading.Lock 正确 ─────────────────────
+# ── 并发 reserve/settle · 无 race ────────────────────────────────
 
 
 def test_concurrent_reserve_settle_thread_safe(tmp_path, monkeypatch):
@@ -183,42 +230,95 @@ def test_concurrent_reserve_settle_thread_safe(tmp_path, monkeypatch):
     assert mod.get_pending_total("t_shared") == 0
 
 
-# ── settle/release 幂等 · 未知 req_id 不 raise ───────────────────
+# ── 真并发超限:Codex §IV 强要求 · 精确 N 成功 / rest 失败 ─────────
 
 
-def test_settle_unknown_id_still_accumulates_used(tmp_path, monkeypatch):
-    """settle 允许在没有 reservation 的 req_id 上调用 · 仅累加 used(observer 语义)。"""
+def test_concurrent_reserve_precise_success_and_exceeded_counts(tmp_path, monkeypatch):
+    """40 线程 barrier reserve · budget 只允许 N 个成功 · 精确 N 成功 · 40-N 失败。
+
+    Codex §IV:证明无超扣、无 race race-double-count。
+    """
     _, mod = _enable_budget(tmp_path, monkeypatch)
-    mod.settle("t1", "unknown_req", 25)
-    assert mod.get_used("t1") == 25
+    N_THREADS = 40
+    PER_REQ = 10
+    N_SUCCESS = 15   # 只允许 15 个成功
+    BUDGET = N_SUCCESS * PER_REQ   # 150
+    barrier = threading.Barrier(N_THREADS)
+    successes = []
+    exceeded = []
+    success_lock = threading.Lock()
+
+    def worker(i):
+        barrier.wait()
+        try:
+            mod.reserve("t_precise", f"r{i}", PER_REQ, budget=BUDGET)
+            with success_lock:
+                successes.append(i)
+        except mod.BudgetExceeded:
+            with success_lock:
+                exceeded.append(i)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(N_THREADS)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(successes) == N_SUCCESS, (
+        f"expected exactly {N_SUCCESS} successes · got {len(successes)}"
+    )
+    assert len(exceeded) == N_THREADS - N_SUCCESS
+    assert mod.get_pending_total("t_precise") == BUDGET   # 全部成功者仍 pending
+
+    # settle 全部成功者 · 无超扣
+    for i in successes:
+        mod.settle("t_precise", f"r{i}", PER_REQ)
+    assert mod.get_used("t_precise") == BUDGET
+    assert mod.get_pending_total("t_precise") == 0
 
 
-def test_release_unknown_id_no_op(tmp_path, monkeypatch):
+# ── UTC 跨日 rollover 真测试(Codex §IV) ────────────────────────
+
+
+def test_utc_day_rollover_isolates_bucket(tmp_path, monkeypatch):
+    """monkeypatch `_today_utc` 模拟跨日 · 昨日 used 不影响今日 budget。"""
     _, mod = _enable_budget(tmp_path, monkeypatch)
-    mod.release("t1", "unknown_req")   # 不 raise
-    assert mod.get_used("t1") == 0
+
+    day1 = "2026-08-09"
+    day2 = "2026-08-10"
+
+    # Day 1 · 用满 budget=100 的 80
+    monkeypatch.setattr(mod, "_today_utc", lambda: day1)
+    mod.reserve("t_roll", "r_d1", 80, budget=100)
+    mod.settle("t_roll", "r_d1", 80)
+    assert mod.get_used("t_roll") == 80
+
+    # Day 2 · 昨日 used 不算入今日 · 今日仍可 reserve 满 100
+    monkeypatch.setattr(mod, "_today_utc", lambda: day2)
+    # 新 bucket · used 归 0
+    assert mod.get_used("t_roll") == 0
+    mod.reserve("t_roll", "r_d2", 100, budget=100)
+    mod.settle("t_roll", "r_d2", 100)
+    assert mod.get_used("t_roll") == 100
+
+    # 回到 Day 1 · 昨日 bucket 仍 80(未被今日污染)
+    monkeypatch.setattr(mod, "_today_utc", lambda: day1)
+    assert mod.get_used("t_roll") == 80
 
 
 # ── observer hooks 不 enforce(§I 契约) ─────────────────────────
 
 
 def test_pre_api_request_observer_never_enforces(tmp_path, monkeypatch):
-    """`pre_api_request` observer hook 恒 no-op · 不 raise · 不改 state。
-
-    Codex §I 强制:budget enforcement 已经搬进 llm_execution middleware(见
-    spike_p3_m0_cache)· 本 observer 只做 audit trigger point。
-    """
     from hermes_cli.plugins import invoke_hook
 
     _, mod = _enable_budget(tmp_path, monkeypatch)
-    # 无 tenant context · 无 config · 直接调 observer · 不 raise · state 不变
     results = invoke_hook(
         "pre_api_request",
         api_request_id="r1",
         approx_input_tokens=999999,
         max_tokens=999999,
     )
-    # observer 返回 None(_on_pre_api_request_observer)· invoke_hook 过滤 None → 空 list
     assert results == []
     assert mod.get_used("t_any") == 0
     assert mod.get_pending_total("t_any") == 0

@@ -26,8 +26,10 @@ from plugins.spike_p3_m0_fixtures.citation_cases import (
     enumerate_byte_split_chunks,
 )
 from plugins.spike_p3_m0_fixtures.pluginmgr_helper import (
+    assert_no_plugin_module_leak,
     get_discovered_module,
     install_fresh_manager,
+    snapshot_plugin_modules,
     write_config,
 )
 
@@ -37,20 +39,45 @@ _HERE = Path(__file__).parent
 _FIXTURE_DIR = _HERE.parent.parent / "spike_p3_m0_fixtures"
 
 # 与 Hermes_AI `tests/test_p3_m0_fixture_gate.py::EXPECTED_SHA256` 完全一致
+# **规范 LF 字节** SHA-256(Git normalized · 见 fork .gitattributes 声明)
 EXPECTED_FIXTURE_SHA256 = (
     "47155c24dfd58019d1c7abdf3870e30099da29f56fe9535d4054d16b50168666"
 )
 
 
-# ── Fixture SHA-256 校验(跨仓一致性 门槛) ─────────────────────
+def _canonical_lf_bytes(path: Path) -> bytes:
+    """Read file bytes with CRLF/CR line endings normalized to LF.
+
+    Cross-repo SHA gate contract locks the **canonical LF bytes** (not disk
+    bytes) so Windows autocrlf checkout does not produce a false SHA mismatch.
+    Paired with fork `.gitattributes text eol=lf` rule for this file.
+    """
+    raw = path.read_bytes()
+    return raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
+# ── Fixture SHA-256 校验(跨仓一致性 门槛 · 规范 LF 字节) ─────
 
 
 def test_fixture_sha256_matches_hermes_ai():
     fixture_path = _FIXTURE_DIR / "citation_cases.py"
-    actual = hashlib.sha256(fixture_path.read_bytes()).hexdigest()
+    actual = hashlib.sha256(_canonical_lf_bytes(fixture_path)).hexdigest()
     assert actual == EXPECTED_FIXTURE_SHA256, (
-        f"fixture SHA-256 mismatch:\n  expected: {EXPECTED_FIXTURE_SHA256}\n  "
+        f"fixture canonical LF SHA-256 mismatch:\n  expected: {EXPECTED_FIXTURE_SHA256}\n  "
         f"actual:   {actual}\n跨仓 fixture 不一致 · 需双仓同步更新"
+    )
+
+
+def test_fixture_sha256_crlf_input_normalizes():
+    """CRLF checkout(Windows autocrlf 模拟)仍匹配 SHA gate · 契约锁 LF 字节。"""
+    fixture_path = _FIXTURE_DIR / "citation_cases.py"
+    lf_bytes = fixture_path.read_bytes()
+    if b"\r\n" in lf_bytes:
+        pytest.skip("checkout 本就是 CRLF · 直接由 test_fixture_sha256_matches_hermes_ai 覆盖")
+    crlf_bytes = lf_bytes.replace(b"\n", b"\r\n")
+    normalized = crlf_bytes.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    assert hashlib.sha256(normalized).hexdigest() == EXPECTED_FIXTURE_SHA256, (
+        "CRLF → LF 规范化后 SHA 与冻结值不符"
     )
 
 
@@ -69,6 +96,55 @@ def test_discover_registers_transform_llm_output_hook(tmp_path, monkeypatch):
 
     manager, mod = _enable_strip(tmp_path, monkeypatch)
     assert has_hook("transform_llm_output") is True
+
+
+def test_pluginmgr_helper_cleanup_leaves_no_sys_modules_residue(tmp_path):
+    """Codex 第三轮 §VI:证明 fixture teardown 后 sys.modules 完全恢复(names + object ids)。
+
+    比 name-only 快照更强的契约:每个 hermes_plugins.* 键的 module OBJECT 在 teardown
+    后必须还是**同一实例**(delitem+monkeypatch.undo 恢复原对象)。若 discover 新建的
+    module 对象泄漏 · id() 会不同 · 直接暴露污染。
+    """
+    import sys
+    import pytest as _pytest
+
+    before_names = snapshot_plugin_modules()
+    before_ids = {k: id(sys.modules[k]) for k in before_names}
+
+    mp = _pytest.MonkeyPatch()
+    finalizers = []
+
+    class _FakeRequest:
+        def addfinalizer(self, fn):
+            finalizers.append(fn)
+
+    try:
+        write_config(tmp_path, [STRIP_KEY])
+        install_fresh_manager(mp, tmp_path, request=_FakeRequest())
+        # 验证 discover 确实加载了(要么新键 · 要么替换了 object id)
+        during_names = snapshot_plugin_modules()
+        during_ids = {k: id(sys.modules[k]) for k in during_names}
+        discover_loaded = (during_names - before_names) or {
+            k for k in before_names & during_names if during_ids.get(k) != before_ids.get(k)
+        }
+        assert discover_loaded, "install_fresh_manager 未加载 · 也未替换任何 hermes_plugins.*"
+    finally:
+        # 手工 teardown:先 finalizers · 再 monkeypatch undo
+        for fn in reversed(finalizers):
+            fn()
+        mp.undo()
+
+    # 快照完全恢复:names 与 object ids 都必须与 before 一致
+    after_names = snapshot_plugin_modules()
+    assert after_names == before_names, (
+        f"name leak · new keys: {sorted(after_names - before_names)} · "
+        f"missing keys: {sorted(before_names - after_names)}"
+    )
+    for k in before_names:
+        assert id(sys.modules[k]) == before_ids[k], (
+            f"hermes_plugins module {k!r} object identity changed after teardown · "
+            "discover-inserted new object leaked past finalizer + monkeypatch.undo"
+        )
 
 
 def test_disabled_plugin_not_loaded(tmp_path, monkeypatch):

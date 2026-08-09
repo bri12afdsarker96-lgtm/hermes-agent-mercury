@@ -1,24 +1,54 @@
 """P3-M0 Spike · tenant-safe cache + orchestrator(llm_execution middleware).
 
-**Codex §I / §III / §IV 契约**:
+**Codex 第三轮 §I / §II / §III / §V 契约(修订)**:
 
 1. 注册 `llm_execution` middleware(`ctx.register_middleware("llm_execution", ...)`)·
    经过 `run_llm_execution_middleware`(`hermes_cli/middleware.py:187`)真正生产走位·
    fail-open on callback(fork middleware 语义 · 见 middleware.py:_run_execution_chain)
-2. 显式 orchestrate order:
-     cache lookup
-       ├─ hit → 返回 cached + 顶层 usage=0 · cache_meta.hit=True · **不 reserve budget**
-       └─ miss → budget reserve
-                 → next_call(request)
-                   ├─ success → cache insert(if cacheable) + budget settle(actual)
-                   └─ exception → budget release · re-raise
-3. 严格 tenant fail-closed:tenant_id/principal_id/permission_scope_version/
-   profile_version 任一缺失/空/非法 → 走 next_call(不 lookup 不 insert)· log context_invalid
-4. **只**支持 `api_mode == "chat_completions"`;其他 3 mode fail-closed pass-through
+
+2. **控制流严格解耦 · cache eligibility ≠ budget enforcement**:
+
+     插件禁用 → next_call(不 lookup 不 reserve)
+     插件启用 →
+       ├─ 硬依赖门:budget module 缺失 → fail-CLOSED(结构化 error response · 不 next_call)
+       ├─ tenant context 4 字段严格校验(缺/空/非白/超长)→ fail-CLOSED
+       ├─ budget config 校验(BudgetConfigError → fail-CLOSED · 不静默 None)
+       ├─ 非 chat_completions api_mode → fail-CLOSED(M0 明确缩小支持范围 · 见 §II)
+       ├─ 非 dict request → fail-CLOSED
+       │
+       ├─ 判 cacheable_request(streaming/tools 非 cacheable · **但仍 reserve/settle**)
+       │
+       ├─ cacheable_request → cache lookup
+       │   └─ HIT → 返回 cached + 顶层 usage=0(**不 reserve**)
+       │
+       ├─ (MISS 或 非 cacheable_request)→ budget.reserve
+       │   ├─ raise BudgetExceeded → 结构化非空 error response(**不 next_call**)
+       │   └─ 成功 → next_call
+       │            ├─ 成功 → budget.settle(actual) + cache insert(若 req+resp 皆 cacheable)
+       │            └─ 异常 → budget.release + re-raise
+
+3. 严格 tenant fail-CLOSED:tenant_id / principal_id / permission_scope_version /
+   profile_version 任一缺失/空/非法 → **不 next_call** · 返回结构化 fail-closed response
+   · **禁**默认填 "system"/"0" 等安全值(Codex §III)
+
+4. **只**支持 `api_mode == "chat_completions"`:其他 3 mode(anthropic_messages /
+   bedrock_converse / codex_responses)fail-CLOSED · **不 next_call**(见 §II 明令)·
+   M0 缩小支持范围到 chat_completions · 其他 mode 需 M1+ 补 token 估算
+
 5. 顶层 `usage` = billable_usage(全 0)· 原始生成 usage 只在 `cache_meta.origin_usage`
-6. 并发:threading.Lock 保护 LRU + insert 序
-7. 配置:从 `hermes_cli.config.load_config` 读 `plugins.spike_p3_m0_cache.enabled` 等
-   · **不**用 SPIKE_* env · **不**读 profile.yaml
+
+6. 并发:threading.RLock 保护 LRU + insert 序
+
+7. 配置:
+   - `plugins.spike_p3_m0_cache.enabled` **严格 bool**(v is True · 拒 "false"/1/等)
+   - `plugins.spike_p3_m0_cache.tenant.*`(4 字段 · str · 白名单 · len≤128)
+   - `plugins.spike_p3_m0_cache.tenant.daily_budget_tokens`(4 态 · BudgetConfigError 硬 fail-CLOSED)
+   - **不用** SPIKE_* env · **不**读 profile.yaml · **不**读 HERMES_DAILY_TOKEN_BUDGET
+
+8. **input token 估算**(Codex §V):不得静默 0 后宣称预算护栏成立。
+   - 优先信 ctx.approx_input_tokens(若 int/float > 0)
+   - 否则从 request.messages content 字符数 / 4(粗略英文 heuristic · M0 approximation · 见文档)
+   - 加上 request.max_tokens 上限 · 得 tokens_needed
 """
 from __future__ import annotations
 
@@ -41,6 +71,9 @@ def _budget_module():
     hermes_cli.plugins loads bundled plugins under ``hermes_plugins.*``; running
     the plugins directly from a checkout may see ``plugins.*`` instead. Lazy
     lookup avoids a hard ``from .. import`` that only works under one layout.
+
+    **Codex §III**:budget 模块缺失时 middleware **不**得 fail-open · 由调用方(orchestrator)
+    捕获 ImportError 走 fail-CLOSED response · 保持"cache 单独启用"场景可测。
     """
     parent = __name__.rsplit(".", 1)[0] if "." in __name__ else ""
     if parent:
@@ -51,12 +84,10 @@ def _budget_module():
             return importlib.import_module(candidate)
         except ImportError:
             pass
-    for name, mod in list(sys.modules.items()):
-        if name.endswith(".spike_p3_m0_budget") or name == "spike_p3_m0_budget":
-            return mod
     raise ImportError(
-        "spike_p3_m0_budget module not loaded; enable it in plugins.enabled"
+        "spike_p3_m0_budget module not loaded; enable spike-p3-m0-budget in plugins.enabled"
     )
+
 
 CACHE_CONTRACT_VERSION = "v1"
 CODEC_VERSION = "codec_v1"
@@ -66,6 +97,14 @@ CACHE_MAX_SIZE = 256   # LRU cap · 简单进程内 · M0 不 persistent
 # (类比 Hermes_AI `_validate_tenant_id` · 保守集合)
 _ID_ALLOWED_RE = re.compile(r"^[a-zA-Z0-9_\-]+$")
 _ID_MAX_LEN = 128
+
+# fail-closed 结构化 response 消息(非空 · 可展示 · finish_reason=content_filter 抑制 retry)
+_BUDGET_EXCEEDED_MESSAGE = (
+    "[请求已被拒绝 · tenant 每日预算已达上限 · 请稍后重试或联系管理员]"
+)
+_BUDGET_FAIL_CLOSED_MESSAGE = (
+    "[请求已被拒绝 · 预算护栏未就绪 · 请联系管理员]"
+)
 
 
 # ── Module state · thread-safe LRU ────────────────────────────────────
@@ -95,8 +134,12 @@ def _get_plugin_config() -> Dict[str, Any]:
 
 
 def _is_enabled() -> bool:
-    """`plugins.spike_p3_m0_cache.enabled` · 默认 False(opt-in)。"""
-    return bool(_get_plugin_config().get("enabled"))
+    """`plugins.spike_p3_m0_cache.enabled` **严格 bool** · 只接受 literal `True`。
+
+    Codex §III 硬约束:拒 `bool("false") == True`(str 转 bool 陷阱)· 拒 int/list/dict。
+    True → 启用;其他(False / None / "true" / 1 / [] / {} / ...)→ 视 as 禁用。
+    """
+    return _get_plugin_config().get("enabled") is True
 
 
 def _get_tenant_context() -> Optional[Dict[str, str]]:
@@ -111,6 +154,9 @@ def _get_tenant_context() -> Optional[Dict[str, str]]:
     进程仅信 config · 不信 prompt/tool_args。
     """
     tenant_block = _get_plugin_config().get("tenant") or {}
+    if not isinstance(tenant_block, dict):
+        logger.info("spike-cache: tenant context invalid · not a mapping")
+        return None
     required = ("tenant_id", "principal_id", "permission_scope_version", "profile_version")
     resolved: Dict[str, str] = {}
     for field in required:
@@ -134,28 +180,18 @@ def _get_tenant_context() -> Optional[Dict[str, str]]:
     return resolved
 
 
-def _get_budget_for_tenant() -> Optional[int]:
-    """`plugins.spike_p3_m0_cache.tenant.daily_budget_tokens` · 4 态归一化。
-
-    非法值(bool/负/str/float)→ 记录 audit · 返回 None(fail-open · 不 enforce)
-    """
-    raw = (_get_plugin_config().get("tenant") or {}).get("daily_budget_tokens")
-    budget_mod = _budget_module()
-    try:
-        return budget_mod.validate_daily_budget(raw)
-    except budget_mod.BudgetConfigError as exc:
-        logger.warning("spike-cache: daily_budget_tokens config invalid · not enforced: %s", exc)
-        return None
-
-
-# ── Cacheability guards(§4)── 只支持 chat_completions ────────────
+# ── Cacheability guards ─────────────────────────────────────────────
 
 def _api_mode_supported(api_mode: str) -> bool:
-    """M0 只支持 `chat_completions` · 其他 fail-closed pass-through。"""
+    """M0 只支持 `chat_completions`(见 §II)· 其他 mode fail-CLOSED · 不 next_call。"""
     return api_mode == "chat_completions"
 
 
 def is_cacheable_request(request: Any, *, api_mode: str = "chat_completions") -> bool:
+    """判 request 是否可 lookup/insert cache(**与 budget 决策解耦**)。
+
+    Codex §II:streaming / tools 可以不缓存 · 但**不能不计预算**。
+    """
     if not _api_mode_supported(api_mode):
         return False
     if not isinstance(request, dict):
@@ -256,84 +292,213 @@ def _extract_cacheable_response(response: Any) -> Dict[str, Any]:
     }
 
 
-# ── Orchestrator middleware(cache + budget 显式组合)────────────
+# ── Input token 估算(Codex §V:不得静默 0) ──────────────────────
+
+def _estimate_input_tokens_from_messages(request: Dict[str, Any]) -> int:
+    """从 messages content 字符数估算 input tokens · **M0 approximation**。
+
+    heuristic:总字符数 ÷ 4(rough 英文 char-per-token)· 中文/emoji 会低估 ·
+    但对 M0 预算护栏"防明显超支"目标足够 · 生产 M1+ 需接 tiktoken/tokenizer 精算
+    (out-of-band 契约字段 · 见 docs/fork/budget-hook.md §5b)。
+
+    保底:若 messages 全空/无 content · 返回 0 · 由调用方结合 max_tokens 判断。
+    """
+    if not isinstance(request, dict):
+        return 0
+    msgs = request.get("messages") or []
+    if not isinstance(msgs, list):
+        return 0
+    total_chars = 0
+    for m in msgs:
+        if not isinstance(m, dict):
+            continue
+        content = m.get("content")
+        if isinstance(content, str):
+            total_chars += len(content)
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict):
+                    t = part.get("text")
+                    if isinstance(t, str):
+                        total_chars += len(t)
+    return total_chars // 4
+
+
+def _estimate_needed_tokens(request: Any, ctx: Dict[str, Any]) -> int:
+    """总预留 = input 估算 + max_tokens · **不静默 0**(Codex §V)。
+
+    优先信 ctx.approx_input_tokens(若 int/float > 0);否则从 messages 估算 ·
+    加上 request.max_tokens(或 ctx.max_tokens)· 得 tokens_needed。
+    """
+    explicit = ctx.get("approx_input_tokens")
+    if isinstance(explicit, bool):
+        explicit = None
+    if isinstance(explicit, (int, float)) and explicit > 0:
+        approx_input = int(explicit)
+    else:
+        approx_input = _estimate_input_tokens_from_messages(request if isinstance(request, dict) else {})
+    max_tokens_raw = None
+    if isinstance(request, dict):
+        max_tokens_raw = request.get("max_tokens")
+    if max_tokens_raw is None:
+        max_tokens_raw = ctx.get("max_tokens")
+    try:
+        max_tokens = int(max_tokens_raw or 0)
+    except (TypeError, ValueError):
+        max_tokens = 0
+    if max_tokens < 0:
+        max_tokens = 0
+    return approx_input + max_tokens
+
+
+# ── Structured error responses(Codex §V:非空、安全、可展示) ─────
+
+def _fail_closed_response(model: str, *, reason_code: str, **extras: Any) -> Dict[str, Any]:
+    """结构化 fail-closed response · finish_reason=content_filter 抑制 retry/fallback。
+
+    Codex §V:BudgetExceeded / 预算护栏未就绪 时返回必须**非空** · 安全可展示 ·
+    不触发 retry。上层 orchestrator 若追加 retry 决策 · 需读 `cache_meta.reason_code`
+    做过滤(M1+ 契约:orchestrator 遇 content_filter + cache_meta.reason_code 明确 · 不 retry)。
+    """
+    return {
+        "model": model or "",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": _BUDGET_EXCEEDED_MESSAGE if reason_code == "budget_exceeded" else _BUDGET_FAIL_CLOSED_MESSAGE,
+            },
+            "finish_reason": "content_filter",
+        }],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0},
+        "cache_meta": {
+            "hit": False,
+            "budget_exceeded": reason_code == "budget_exceeded",
+            "budget_fail_closed": reason_code != "budget_exceeded",
+            "reason_code": reason_code,
+            **extras,
+        },
+    }
+
+
+# ── Orchestrator middleware(cache + budget 显式组合 · 解耦) ─────
 
 def cache_and_budget_middleware(
     request: Any,
     next_call: Callable[[Any], Any],
     **ctx: Any,
 ) -> Any:
-    """`llm_execution` middleware · 严格 Codex §I 顺序:
+    """`llm_execution` middleware · 严格 Codex 第三轮 §II 控制流(解耦 cache 与 budget)。
 
-    cache lookup → hit(返回 · 不 reserve)/ miss → reserve → next_call →
-      success(cache insert + settle actual)/ exception(release + re-raise)
-
-    fail-closed 无 tenant · fail-closed 非 chat_completions · fail-open 非 dict.
+    见模块 docstring §2 完整控制流。
     """
-    api_request_id = ctx.get("api_request_id") or ""
-    api_mode = ctx.get("api_mode") or "chat_completions"
-    provider = ctx.get("provider") or ""
-    model = ctx.get("model") or ""
+    api_request_id = str(ctx.get("api_request_id") or "")
+    api_mode = str(ctx.get("api_mode") or "chat_completions")
+    provider = str(ctx.get("provider") or "")
+    model = str(ctx.get("model") or "")
 
-    # Fast pass-through · 未启用 / 不支持 mode / 非 dict request
-    if not _is_enabled() or not _api_mode_supported(api_mode) or not isinstance(request, dict):
+    # 1. Plugin disabled → next_call 直通(Codex §II step 1)
+    if not _is_enabled():
         return next_call(request)
 
+    # 2. Budget module 硬依赖门(Codex §III:cache 单独启用不得因 budget 缺失 fail-open)
+    try:
+        budget_mod = _budget_module()
+    except ImportError as exc:
+        logger.error(
+            "spike-cache: budget module missing · enable spike-p3-m0-budget in plugins.enabled · fail-CLOSED: %s",
+            exc,
+        )
+        return _fail_closed_response(model, reason_code="budget_module_missing")
+
+    # 3. api_mode 支持范围收紧(Codex §II:非 chat_completions fail-CLOSED · 不静默 pass-through)
+    if not _api_mode_supported(api_mode):
+        logger.warning(
+            "spike-cache: unsupported api_mode=%s · M0 only supports chat_completions · fail-CLOSED",
+            api_mode,
+        )
+        return _fail_closed_response(model, reason_code="unsupported_api_mode", api_mode=api_mode)
+
+    # 4. request 类型门(non-dict 无法 estimate token · fail-CLOSED)
+    if not isinstance(request, dict):
+        logger.warning("spike-cache: request not a dict · fail-CLOSED · type=%s", type(request).__name__)
+        return _fail_closed_response(model, reason_code="non_dict_request")
+
+    # 5. tenant context 严格 fail-CLOSED(Codex §III:enforcement 开启时 next_call == 0)
     tenant_ctx = _get_tenant_context()
-    if not tenant_ctx:
-        # 严格 fail-closed · 无 tenant → 走 next_call(不 lookup 不 insert · 不 reserve)
-        return next_call(request)
-
-    if not is_cacheable_request(request, api_mode=api_mode):
-        return next_call(request)
-
-    key = build_cache_key(request, tenant_ctx, model=model, provider=provider)
+    if tenant_ctx is None:
+        return _fail_closed_response(model, reason_code="tenant_context_invalid")
     tenant_id = tenant_ctx["tenant_id"]
 
-    # ── 1. Cache lookup ──
-    with _lock:
-        hit = _cache.get(key)
+    # 6. Budget config 校验 · BudgetConfigError 硬 fail-CLOSED(Codex §III:不转 None 静默继续)
+    raw_budget = (_get_plugin_config().get("tenant") or {}).get("daily_budget_tokens")
+    try:
+        budget_value = budget_mod.validate_daily_budget(raw_budget)
+    except budget_mod.BudgetConfigError as exc:
+        logger.error("spike-cache: daily_budget_tokens config invalid · fail-CLOSED: %s", exc)
+        return _fail_closed_response(model, reason_code="budget_config_invalid")
+
+    # 7. api_request_id 门(reserve 需唯一 id · 空则无法 settle)
+    if not api_request_id:
+        logger.warning("spike-cache: empty api_request_id · fail-CLOSED · cannot track reservation")
+        return _fail_closed_response(model, reason_code="missing_api_request_id")
+
+    # 8. Cache eligibility 判定(与 budget 决策解耦 · Codex §II step 4)
+    cacheable_req = is_cacheable_request(request, api_mode=api_mode)
+
+    # 9. 若可缓存 → lookup · HIT 直接返回(不 reserve)
+    cache_key: Optional[str] = None
+    if cacheable_req:
+        cache_key = build_cache_key(request, tenant_ctx, model=model, provider=provider)
+        with _lock:
+            hit = _cache.get(cache_key)
+            if hit is not None:
+                _cache.move_to_end(cache_key)
         if hit is not None:
-            _cache.move_to_end(key)   # LRU touch
-    if hit is not None:
-        # Hit · 返回 cached · **不 reserve budget** · 顶层 usage=0
-        return dict(hit)   # shallow copy · 避免调用方 mutate
+            # cache hit · 不 reserve · 顶层 usage=0 · shallow copy 防调用方 mutate
+            return dict(hit)
 
-    # ── 2. Miss · budget reserve(basedon config budget) ──
-    budget_value = _get_budget_for_tenant()
-    approx_input = int(ctx.get("approx_input_tokens") or 0)
-    max_tokens = int(request.get("max_tokens") or ctx.get("max_tokens") or 0)
-    tokens_needed = approx_input + max_tokens
-
-    budget_mod = _budget_module()
+    # 10. MISS 或非 cacheable · 都必须 reserve(Codex §II step 6)
+    tokens_needed = _estimate_needed_tokens(request, ctx)
     try:
         budget_mod.reserve(tenant_id, api_request_id, tokens_needed, budget=budget_value)
     except budget_mod.BudgetExceeded:
-        # 预算超支 · 明确阻断 · 不调 next_call · 返回结构化 error response
-        logger.warning("spike-cache-orchestrator: budget exceeded · tenant=%s api_request_id=%s", tenant_id, api_request_id)
-        return {
-            "model": model,
-            "choices": [{"message": {"content": ""}, "finish_reason": "content_filter"}],
-            "usage": {"prompt_tokens": 0, "completion_tokens": 0},
-            "cache_meta": {"hit": False, "budget_exceeded": True, "tenant_id": tenant_id},
-        }
+        logger.warning(
+            "spike-cache: budget exceeded · tenant=%s api_request_id=%s tokens_needed=%s budget=%s",
+            tenant_id, api_request_id, tokens_needed, budget_value,
+        )
+        return _fail_closed_response(
+            model,
+            reason_code="budget_exceeded",
+            tenant_id=tenant_id,
+            tokens_needed=tokens_needed,
+            budget=budget_value,
+        )
 
-    # ── 3. next_call · success settle actual / exception release ──
+    # 11. next_call · success settle actual / exception release
     try:
         response = next_call(request)
     except Exception:
         budget_mod.release(tenant_id, api_request_id)
         raise
 
-    # ── 4. Cache insert(if cacheable) + budget settle actual ──
+    # 12. Settle 实际用量(所有非异常路径都 settle · cacheable/非 cacheable 无关)
     actual = _extract_actual_usage(response)
-    budget_mod.settle(tenant_id, api_request_id, actual)
+    try:
+        budget_mod.settle(tenant_id, api_request_id, actual)
+    except budget_mod.BudgetSettleError as exc:
+        # 理论不该发生(reserve 刚成功)· 记 audit · 不阻断 response
+        logger.error(
+            "spike-cache: settle raised BudgetSettleError post-reserve · api_request_id=%s: %s",
+            api_request_id, exc,
+        )
 
-    if is_cacheable_response(response):
+    # 13. 只有 req + resp 皆 cacheable 才 insert
+    if cacheable_req and cache_key is not None and is_cacheable_response(response):
         cached = _extract_cacheable_response(response)
         with _lock:
-            _cache[key] = cached
-            _cache.move_to_end(key)
+            _cache[cache_key] = cached
+            _cache.move_to_end(cache_key)
             while len(_cache) > CACHE_MAX_SIZE:
                 _cache.popitem(last=False)
 

@@ -36,7 +36,15 @@ class BudgetExceeded(RuntimeError):
 
 
 class BudgetConfigError(ValueError):
-    """budget 配置字段类型/值非法 · 视 as fail-open(不 enforce · 记录 audit)。"""
+    """budget 配置字段类型/值非法 · 由 orchestrator 硬 fail-CLOSED(**不**再静默转 None)。"""
+
+
+class BudgetSettleError(RuntimeError):
+    """settle/release 在无 reservation 上被调用 · **不改** used(严格幂等)。
+
+    Codex 第三轮 §IV:settle 必须仅结算仍存在的 reservation;unknown/double settle
+    不得增加 used。抛此异常供 orchestrator 记 audit 但不阻断。
+    """
 
 
 # ── Module state · 单进程 · 非 persistent ─────────────────────────────
@@ -119,20 +127,40 @@ def reserve(tenant_id: str, api_request_id: str, tokens_needed: int, *, budget: 
 
 
 def settle(tenant_id: str, api_request_id: str, actual_tokens: int) -> None:
-    """结算实际用量 · 移除 reservation · 累加 used。"""
+    """结算实际用量 · **仅结算仍存在的 reservation** · 累加 used。
+
+    Codex 第三轮 §IV(**严格幂等**):
+    - 若 reservation 存在 · 移除并累加 used
+    - 若 reservation 不存在(未 reserve / double settle / release 后 settle):
+      **不改** used · raise BudgetSettleError · 由 orchestrator 记 audit
+    """
     if actual_tokens < 0:
         actual_tokens = 0
     with _lock:
         b = _get_or_create_bucket(tenant_id)
-        b["reservations"].pop(api_request_id, None)
+        if api_request_id not in b["reservations"]:
+            raise BudgetSettleError(
+                f"settle: no reservation for api_request_id={api_request_id!r} · "
+                "double settle or missing reserve"
+            )
+        b["reservations"].pop(api_request_id)
         b["used"] = b["used"] + actual_tokens
 
 
-def release(tenant_id: str, api_request_id: str) -> None:
-    """异常 / cancel / timeout 路径 · 释放 reservation · 不计 used。"""
+def release(tenant_id: str, api_request_id: str) -> bool:
+    """异常 / cancel / timeout 路径 · 释放 reservation · 不计 used。
+
+    Codex 第三轮 §IV(**幂等**):
+    - 若 reservation 存在 · 移除 · 返回 True
+    - 若 reservation 不存在 · **no-op** · 返回 False(便于 orchestrator 检测 double release)
+    - 任何情况下 · used 不变
+    """
     with _lock:
         b = _get_or_create_bucket(tenant_id)
-        b["reservations"].pop(api_request_id, None)
+        if api_request_id in b["reservations"]:
+            b["reservations"].pop(api_request_id)
+            return True
+        return False
 
 
 # ── 观察 helpers · 测试用 ─────────────────────────────────────────────

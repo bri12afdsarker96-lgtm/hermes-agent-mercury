@@ -37,7 +37,7 @@ def write_config(hermes_home: Path, enabled: List[str], **plugin_cfg: Any) -> No
     )
 
 
-def install_fresh_manager(monkeypatch, hermes_home: Path):
+def install_fresh_manager(monkeypatch, hermes_home: Path, request=None):
     """Replace the global PluginManager with a fresh instance for this test.
 
     Steps:
@@ -49,6 +49,10 @@ def install_fresh_manager(monkeypatch, hermes_home: Path):
 
     Fixture teardown (monkeypatch scope) restores env + module attr.
     Returns the fresh manager.
+
+    **Codex 第三轮 §VI**:测试可选调用 :func:`assert_no_plugin_module_leak` (见下)
+    在 teardown 阶段快照对比 `hermes_plugins.*`,证明 discover 引入的模块在
+    fixture 结束后全部清除,不污染后续测试。
     """
     from hermes_cli import plugins as plugins_mod
 
@@ -65,12 +69,50 @@ def install_fresh_manager(monkeypatch, hermes_home: Path):
     fresh = plugins_mod.PluginManager()
     monkeypatch.setattr(plugins_mod, "_plugin_manager", fresh)
 
+    # 快照:进入 fixture 前 sys.modules 里已经存在的 hermes_plugins.* 集合
+    pre_existing = {k for k in list(sys.modules) if k.startswith("hermes_plugins")}
     # 卸载 hermes_plugins.* 命名空间(避免上次 discover 的旧 module 状态污染)
-    for name in [k for k in list(sys.modules) if k.startswith("hermes_plugins")]:
+    for name in list(pre_existing):
         monkeypatch.delitem(sys.modules, name, raising=False)
 
     fresh.discover_and_load(force=True)
+
+    # Codex 第三轮 §VI:teardown 显式清除 discover 引入的 hermes_plugins.* 新键,
+    # 确保 fixture 结束后 sys.modules 恢复到"进入 fixture 前"的精确状态。
+    # 若 request 传入 · 用 pytest addfinalizer(monkeypatch 无此 API);否则记录
+    # 一个显式 helper 供测试手工清理与验证。
+    if request is not None:
+        def _cleanup_new_plugin_modules():
+            for name in list(sys.modules):
+                if name.startswith("hermes_plugins") and name not in pre_existing:
+                    sys.modules.pop(name, None)
+        request.addfinalizer(_cleanup_new_plugin_modules)
+
     return fresh
+
+
+def snapshot_plugin_modules() -> set:
+    """Snapshot of currently-loaded ``hermes_plugins.*`` module names.
+
+    Used by :func:`assert_no_plugin_module_leak` and the standalone test
+    ``test_pluginmgr_helper_cleanup_leaves_no_sys_modules_residue`` to prove
+    that `install_fresh_manager` + monkeypatch teardown removes every module it
+    caused to be inserted.
+    """
+    return {k for k in sys.modules if k.startswith("hermes_plugins")}
+
+
+def assert_no_plugin_module_leak(before: set) -> None:
+    """Assert no new ``hermes_plugins.*`` entries remain in sys.modules.
+
+    Call **after** monkeypatch fixture teardown to verify cleanup.
+    """
+    after = snapshot_plugin_modules()
+    leaked = after - before
+    assert not leaked, (
+        f"hermes_plugins.* module leak after fixture teardown: {sorted(leaked)} · "
+        "install_fresh_manager teardown did not clean up loaded plugin modules"
+    )
 
 
 def get_discovered_module(manager, plugin_key: str):
