@@ -65,6 +65,14 @@ from typing import Any, Callable, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
+class ConfigLoadError(RuntimeError):
+    """The runtime config could not be read safely."""
+
+
+class ConfigShapeError(RuntimeError):
+    """The runtime config has an invalid shape for this plugin."""
+
+
 def _budget_module():
     """Locate the budget sibling module regardless of parent package.
 
@@ -116,33 +124,56 @@ _cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 # ── Config loading(fork config.yaml · 不用 env) ─────────────────────
 
 def _load_config() -> Dict[str, Any]:
-    """Load fork config via `hermes_cli.config.load_config` · returns full config dict."""
+    """Load fork config via ``hermes_cli.config.load_config``.
+
+    Once the middleware has been registered, a config read failure is a
+    security failure, not evidence that the plugin is disabled.  Returning an
+    empty mapping here would make ``_is_enabled`` false and silently bypass
+    budget enforcement through ``next_call``.
+    """
     try:
         from hermes_cli.config import load_config
 
-        return load_config() or {}
+        cfg = load_config()
     except Exception as exc:   # noqa: BLE001
-        logger.warning("spike-cache: load_config failed · treated as empty: %s", exc)
+        raise ConfigLoadError("spike cache config could not be loaded") from exc
+    if cfg is None:
         return {}
+    if not isinstance(cfg, dict):
+        raise ConfigShapeError("root config must be a mapping")
+    return cfg
 
 
 def _get_plugin_config() -> Dict[str, Any]:
-    """Return `plugins.spike_p3_m0_cache` sub-config(dict · empty if未配置)."""
+    """Return the validated ``plugins.spike_p3_m0_cache`` mapping."""
     cfg = _load_config()
-    plugins_cfg = cfg.get("plugins") or {}
-    return plugins_cfg.get("spike_p3_m0_cache") or {}
+    plugins_cfg = cfg.get("plugins")
+    if plugins_cfg is None:
+        return {}
+    if not isinstance(plugins_cfg, dict):
+        raise ConfigShapeError("plugins config must be a mapping")
+    plugin_cfg = plugins_cfg.get("spike_p3_m0_cache")
+    if plugin_cfg is None:
+        return {}
+    if not isinstance(plugin_cfg, dict):
+        raise ConfigShapeError("spike_p3_m0_cache config must be a mapping")
+    return plugin_cfg
 
 
-def _is_enabled() -> bool:
+def _is_enabled(plugin_cfg: Optional[Dict[str, Any]] = None) -> bool:
     """`plugins.spike_p3_m0_cache.enabled` **严格 bool** · 只接受 literal `True`。
 
     Codex §III 硬约束:拒 `bool("false") == True`(str 转 bool 陷阱)· 拒 int/list/dict。
     True → 启用;其他(False / None / "true" / 1 / [] / {} / ...)→ 视 as 禁用。
     """
-    return _get_plugin_config().get("enabled") is True
+    if plugin_cfg is None:
+        plugin_cfg = _get_plugin_config()
+    return plugin_cfg.get("enabled") is True
 
 
-def _get_tenant_context() -> Optional[Dict[str, str]]:
+def _get_tenant_context(
+    plugin_cfg: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, str]]:
     """严格 fail-closed tenant context · 从 config `plugins.spike_p3_m0_cache.tenant` 读。
 
     所有 4 字段(tenant_id/principal_id/permission_scope_version/profile_version)必需·
@@ -153,7 +184,9 @@ def _get_tenant_context() -> Optional[Dict[str, str]]:
     T2 首选:由 provisioning 写入该 tenant 独立 HERMES_HOME 的 config.yaml · fork
     进程仅信 config · 不信 prompt/tool_args。
     """
-    tenant_block = _get_plugin_config().get("tenant") or {}
+    if plugin_cfg is None:
+        plugin_cfg = _get_plugin_config()
+    tenant_block = plugin_cfg.get("tenant") or {}
     if not isinstance(tenant_block, dict):
         logger.info("spike-cache: tenant context invalid · not a mapping")
         return None
@@ -397,11 +430,32 @@ def cache_and_budget_middleware(
     provider = str(ctx.get("provider") or "")
     model = str(ctx.get("model") or "")
 
-    # 1. Plugin disabled → next_call 直通(Codex §II step 1)
-    if not _is_enabled():
+    # 1. Resolve config exactly once.  A registered middleware whose config
+    # cannot be read/validated must not be mistaken for a disabled plugin:
+    # the outer execution chain is intentionally fail-open for ordinary
+    # plugins, so leaking an exception here would call the provider directly.
+    try:
+        plugin_cfg = _get_plugin_config()
+    except ConfigLoadError:
+        logger.error("spike-cache: config load failed · fail-CLOSED")
+        return _fail_closed_response(model, reason_code="config_load_failed")
+    except ConfigShapeError:
+        logger.error("spike-cache: config shape invalid · fail-CLOSED")
+        return _fail_closed_response(model, reason_code="config_shape_invalid")
+    except Exception as exc:   # noqa: BLE001
+        logger.error(
+            "spike-cache: unexpected config resolution failure · type=%s · fail-CLOSED",
+            type(exc).__name__,
+        )
+        return _fail_closed_response(model, reason_code="config_internal_error")
+
+    # 2. Only an explicitly disabled plugin may pass through.  Missing/false
+    # ``enabled`` is a deliberate off switch; read/shape failures above are
+    # never converted into this branch.
+    if not _is_enabled(plugin_cfg):
         return next_call(request)
 
-    # 2. Budget module 硬依赖门(Codex §III:cache 单独启用不得因 budget 缺失 fail-open)
+    # 3. Budget module 硬依赖门(Codex §III:cache 单独启用不得因 budget 缺失 fail-open)
     try:
         budget_mod = _budget_module()
     except ImportError as exc:
@@ -410,8 +464,14 @@ def cache_and_budget_middleware(
             exc,
         )
         return _fail_closed_response(model, reason_code="budget_module_missing")
+    except Exception as exc:   # noqa: BLE001
+        logger.error(
+            "spike-cache: budget module resolution failed · type=%s · fail-CLOSED",
+            type(exc).__name__,
+        )
+        return _fail_closed_response(model, reason_code="budget_module_error")
 
-    # 3. api_mode 支持范围收紧(Codex §II:非 chat_completions fail-CLOSED · 不静默 pass-through)
+    # 4. api_mode 支持范围收紧(Codex §II:非 chat_completions fail-CLOSED · 不静默 pass-through)
     if not _api_mode_supported(api_mode):
         logger.warning(
             "spike-cache: unsupported api_mode=%s · M0 only supports chat_completions · fail-CLOSED",
@@ -419,47 +479,85 @@ def cache_and_budget_middleware(
         )
         return _fail_closed_response(model, reason_code="unsupported_api_mode", api_mode=api_mode)
 
-    # 4. request 类型门(non-dict 无法 estimate token · fail-CLOSED)
+    # 5. request 类型门(non-dict 无法 estimate token · fail-CLOSED)
     if not isinstance(request, dict):
         logger.warning("spike-cache: request not a dict · fail-CLOSED · type=%s", type(request).__name__)
         return _fail_closed_response(model, reason_code="non_dict_request")
 
-    # 5. tenant context 严格 fail-CLOSED(Codex §III:enforcement 开启时 next_call == 0)
-    tenant_ctx = _get_tenant_context()
+    # 6. tenant context 严格 fail-CLOSED(Codex §III:enforcement 开启时 next_call == 0)
+    try:
+        tenant_ctx = _get_tenant_context(plugin_cfg)
+    except Exception as exc:   # noqa: BLE001
+        logger.error(
+            "spike-cache: tenant context resolution failed · type=%s · fail-CLOSED",
+            type(exc).__name__,
+        )
+        return _fail_closed_response(model, reason_code="tenant_context_error")
     if tenant_ctx is None:
         return _fail_closed_response(model, reason_code="tenant_context_invalid")
     tenant_id = tenant_ctx["tenant_id"]
 
-    # 6. Budget config 校验 · BudgetConfigError 硬 fail-CLOSED(Codex §III:不转 None 静默继续)
-    raw_budget = (_get_plugin_config().get("tenant") or {}).get("daily_budget_tokens")
+    # 7. Budget config 校验 · BudgetConfigError 硬 fail-CLOSED(Codex §III:不转 None 静默继续)
+    tenant_cfg = plugin_cfg.get("tenant")
+    # A valid tenant context guarantees this is a mapping.
+    raw_budget = tenant_cfg.get("daily_budget_tokens")
     try:
         budget_value = budget_mod.validate_daily_budget(raw_budget)
     except budget_mod.BudgetConfigError as exc:
         logger.error("spike-cache: daily_budget_tokens config invalid · fail-CLOSED: %s", exc)
         return _fail_closed_response(model, reason_code="budget_config_invalid")
+    except Exception as exc:   # noqa: BLE001
+        logger.error(
+            "spike-cache: budget config validation failed · type=%s · fail-CLOSED",
+            type(exc).__name__,
+        )
+        return _fail_closed_response(model, reason_code="budget_config_error")
 
-    # 7. api_request_id 门(reserve 需唯一 id · 空则无法 settle)
+    # 8. api_request_id 门(reserve 需唯一 id · 空则无法 settle)
     if not api_request_id:
         logger.warning("spike-cache: empty api_request_id · fail-CLOSED · cannot track reservation")
         return _fail_closed_response(model, reason_code="missing_api_request_id")
 
-    # 8. Cache eligibility 判定(与 budget 决策解耦 · Codex §II step 4)
-    cacheable_req = is_cacheable_request(request, api_mode=api_mode)
+    # 9. Cache eligibility 判定(与 budget 决策解耦 · Codex §II step 4)
+    try:
+        cacheable_req = is_cacheable_request(request, api_mode=api_mode)
+    except Exception as exc:   # noqa: BLE001
+        logger.error(
+            "spike-cache: request classification failed · type=%s · fail-CLOSED",
+            type(exc).__name__,
+        )
+        return _fail_closed_response(model, reason_code="request_classification_error")
 
-    # 9. 若可缓存 → lookup · HIT 直接返回(不 reserve)
+    # 10. 若可缓存 → lookup · HIT 直接返回(不 reserve).  Any internal
+    # pre-provider failure is converted locally to fail-CLOSED so it cannot
+    # escape into the outer middleware chain's fail-open policy.
     cache_key: Optional[str] = None
     if cacheable_req:
-        cache_key = build_cache_key(request, tenant_ctx, model=model, provider=provider)
-        with _lock:
-            hit = _cache.get(cache_key)
-            if hit is not None:
-                _cache.move_to_end(cache_key)
+        try:
+            cache_key = build_cache_key(request, tenant_ctx, model=model, provider=provider)
+            with _lock:
+                hit = _cache.get(cache_key)
+                if hit is not None:
+                    _cache.move_to_end(cache_key)
+        except Exception as exc:   # noqa: BLE001
+            logger.error(
+                "spike-cache: cache lookup/key failure · type=%s · fail-CLOSED",
+                type(exc).__name__,
+            )
+            return _fail_closed_response(model, reason_code="cache_lookup_error")
         if hit is not None:
             # cache hit · 不 reserve · 顶层 usage=0 · shallow copy 防调用方 mutate
             return dict(hit)
 
-    # 10. MISS 或非 cacheable · 都必须 reserve(Codex §II step 6)
-    tokens_needed = _estimate_needed_tokens(request, ctx)
+    # 11. MISS 或非 cacheable · 都必须 reserve(Codex §II step 6)
+    try:
+        tokens_needed = _estimate_needed_tokens(request, ctx)
+    except Exception as exc:   # noqa: BLE001
+        logger.error(
+            "spike-cache: token estimation failed · type=%s · fail-CLOSED",
+            type(exc).__name__,
+        )
+        return _fail_closed_response(model, reason_code="token_estimation_error")
     try:
         budget_mod.reserve(tenant_id, api_request_id, tokens_needed, budget=budget_value)
     except budget_mod.BudgetExceeded:
@@ -474,33 +572,59 @@ def cache_and_budget_middleware(
             tokens_needed=tokens_needed,
             budget=budget_value,
         )
+    except Exception as exc:   # noqa: BLE001
+        # Defensive cleanup in case a future reserve implementation mutates
+        # state before raising.  Never expose exception text to the user.
+        try:
+            budget_mod.release(tenant_id, api_request_id)
+        except Exception:   # noqa: BLE001
+            pass
+        logger.error(
+            "spike-cache: budget reserve internal failure · type=%s · fail-CLOSED",
+            type(exc).__name__,
+        )
+        return _fail_closed_response(model, reason_code="budget_reserve_error")
 
-    # 11. next_call · success settle actual / exception release
+    # 12. next_call · success settle actual / exception release.  This narrow
+    # try block deliberately preserves downstream exception identity.
     try:
         response = next_call(request)
     except Exception:
         budget_mod.release(tenant_id, api_request_id)
         raise
 
-    # 12. Settle 实际用量(所有非异常路径都 settle · cacheable/非 cacheable 无关)
+    # 13. Settle 实际用量(所有非异常路径都 settle · cacheable/非 cacheable 无关)
     actual = _extract_actual_usage(response)
     try:
         budget_mod.settle(tenant_id, api_request_id, actual)
-    except budget_mod.BudgetSettleError as exc:
-        # 理论不该发生(reserve 刚成功)· 记 audit · 不阻断 response
+    except Exception as exc:   # noqa: BLE001
+        # Provider cost has already been incurred.  Do not throw into the
+        # outer fail-open chain after next_call; clean pending state best
+        # effort, record only the exception type, and preserve the response.
+        try:
+            budget_mod.release(tenant_id, api_request_id)
+        except Exception:   # noqa: BLE001
+            pass
         logger.error(
-            "spike-cache: settle raised BudgetSettleError post-reserve · api_request_id=%s: %s",
-            api_request_id, exc,
+            "spike-cache: budget settle internal failure · api_request_id=%s type=%s",
+            api_request_id, type(exc).__name__,
         )
 
-    # 13. 只有 req + resp 皆 cacheable 才 insert
+    # 14. 只有 req + resp 皆 cacheable 才 insert.  Cache bookkeeping is
+    # best-effort after a paid provider response and must never replace it.
     if cacheable_req and cache_key is not None and is_cacheable_response(response):
-        cached = _extract_cacheable_response(response)
-        with _lock:
-            _cache[cache_key] = cached
-            _cache.move_to_end(cache_key)
-            while len(_cache) > CACHE_MAX_SIZE:
-                _cache.popitem(last=False)
+        try:
+            cached = _extract_cacheable_response(response)
+            with _lock:
+                _cache[cache_key] = cached
+                _cache.move_to_end(cache_key)
+                while len(_cache) > CACHE_MAX_SIZE:
+                    _cache.popitem(last=False)
+        except Exception as exc:   # noqa: BLE001
+            logger.error(
+                "spike-cache: cache insert failed after provider response · type=%s",
+                type(exc).__name__,
+            )
 
     return response
 
@@ -533,3 +657,4 @@ def cache_size() -> int:
 def register(ctx: Any) -> None:
     """PluginContext register · 挂 llm_execution middleware(orchestrator)."""
     ctx.register_middleware("llm_execution", cache_and_budget_middleware)
+
