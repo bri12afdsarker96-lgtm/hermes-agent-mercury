@@ -602,3 +602,157 @@ def test_input_tokens_estimated_from_messages_when_no_ctx(tmp_path, monkeypatch)
     assert counters["next"] == 0
     assert resp["cache_meta"]["budget_exceeded"] is True
     assert resp["cache_meta"]["tokens_needed"] >= 1000
+
+
+# ── Registered middleware must not inherit the core fail-open policy ──
+
+
+def _run_with_counter():
+    counters = {"next": 0}
+
+    def next_call(_req):
+        counters["next"] += 1
+        return {
+            "choices": [{"message": {"content": "provider output"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        }
+
+    run = make_run_llm_execution(
+        api_request_id="r_fail_closed",
+        provider="p",
+        model="m",
+        api_mode="chat_completions",
+        approx_input_tokens=10,
+    )
+    return counters, next_call, run
+
+
+def _assert_internal_failure_is_safe(resp, counters, reason_code):
+    assert counters["next"] == 0
+    assert resp["cache_meta"]["reason_code"] == reason_code
+    assert resp["choices"][0]["message"]["content"]
+    rendered = repr(resp)
+    assert "private user input" not in rendered
+    assert "TOP_SECRET_INTERNAL_EXCEPTION" not in rendered
+
+
+def test_registered_plugin_config_load_error_fail_closed(tmp_path, monkeypatch):
+    _, cache_mod, _ = _enable_cache(tmp_path, monkeypatch, daily_budget=1000)
+    from hermes_cli import config as config_mod
+
+    def boom():
+        raise RuntimeError("TOP_SECRET_INTERNAL_EXCEPTION")
+
+    monkeypatch.setattr(config_mod, "load_config", boom)
+    counters, next_call, run = _run_with_counter()
+    resp = run(
+        {"messages": [{"role": "user", "content": "private user input"}]},
+        next_call,
+    )
+    _assert_internal_failure_is_safe(resp, counters, "config_load_failed")
+
+
+@pytest.mark.parametrize(
+    "bad_config",
+    [
+        {"plugins": []},
+        {"plugins": {"spike_p3_m0_cache": []}},
+    ],
+    ids=["plugins-not-mapping", "plugin-config-not-mapping"],
+)
+def test_registered_plugin_malformed_config_shape_fail_closed(
+    tmp_path, monkeypatch, bad_config,
+):
+    _, cache_mod, _ = _enable_cache(tmp_path, monkeypatch, daily_budget=1000)
+    monkeypatch.setattr(cache_mod, "_load_config", lambda: bad_config)
+    counters, next_call, run = _run_with_counter()
+    resp = run(
+        {"messages": [{"role": "user", "content": "private user input"}]},
+        next_call,
+    )
+    _assert_internal_failure_is_safe(resp, counters, "config_shape_invalid")
+
+
+def test_tenant_context_internal_error_fail_closed(tmp_path, monkeypatch):
+    _, cache_mod, _ = _enable_cache(tmp_path, monkeypatch, daily_budget=1000)
+
+    def boom(_plugin_cfg):
+        raise RuntimeError("TOP_SECRET_INTERNAL_EXCEPTION")
+
+    monkeypatch.setattr(cache_mod, "_get_tenant_context", boom)
+    counters, next_call, run = _run_with_counter()
+    resp = run(
+        {"messages": [{"role": "user", "content": "private user input"}]},
+        next_call,
+    )
+    _assert_internal_failure_is_safe(resp, counters, "tenant_context_error")
+
+
+def test_cache_key_internal_error_fail_closed(tmp_path, monkeypatch):
+    _, cache_mod, _ = _enable_cache(tmp_path, monkeypatch, daily_budget=1000)
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("TOP_SECRET_INTERNAL_EXCEPTION")
+
+    monkeypatch.setattr(cache_mod, "build_cache_key", boom)
+    counters, next_call, run = _run_with_counter()
+    resp = run(
+        {"messages": [{"role": "user", "content": "private user input"}]},
+        next_call,
+    )
+    _assert_internal_failure_is_safe(resp, counters, "cache_lookup_error")
+
+
+def test_budget_reserve_internal_error_fail_closed(tmp_path, monkeypatch):
+    _, _, budget_mod = _enable_cache(tmp_path, monkeypatch, daily_budget=1000)
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("TOP_SECRET_INTERNAL_EXCEPTION")
+
+    monkeypatch.setattr(budget_mod, "reserve", boom)
+    counters, next_call, run = _run_with_counter()
+    resp = run(
+        {"messages": [{"role": "user", "content": "private user input"}]},
+        next_call,
+    )
+    _assert_internal_failure_is_safe(resp, counters, "budget_reserve_error")
+
+
+@pytest.mark.parametrize(
+    ("target", "reason_code"),
+    [
+        ("is_cacheable_request", "request_classification_error"),
+        ("_estimate_needed_tokens", "token_estimation_error"),
+    ],
+)
+def test_other_pre_provider_internal_errors_fail_closed(
+    tmp_path, monkeypatch, target, reason_code,
+):
+    _, cache_mod, _ = _enable_cache(tmp_path, monkeypatch, daily_budget=1000)
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("TOP_SECRET_INTERNAL_EXCEPTION")
+
+    monkeypatch.setattr(cache_mod, target, boom)
+    counters, next_call, run = _run_with_counter()
+    resp = run(
+        {"messages": [{"role": "user", "content": "private user input"}]},
+        next_call,
+    )
+    _assert_internal_failure_is_safe(resp, counters, reason_code)
+
+
+def test_budget_validation_internal_error_fail_closed(tmp_path, monkeypatch):
+    _, _, budget_mod = _enable_cache(tmp_path, monkeypatch, daily_budget=1000)
+
+    def boom(_value):
+        raise RuntimeError("TOP_SECRET_INTERNAL_EXCEPTION")
+
+    monkeypatch.setattr(budget_mod, "validate_daily_budget", boom)
+    counters, next_call, run = _run_with_counter()
+    resp = run(
+        {"messages": [{"role": "user", "content": "private user input"}]},
+        next_call,
+    )
+    _assert_internal_failure_is_safe(resp, counters, "budget_config_error")
+
