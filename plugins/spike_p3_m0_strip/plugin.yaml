@@ -1,0 +1,6 @@
+name: spike-p3-m0-strip
+version: "0.0.1"
+description: "P3-M0 Spike · strip-sources prototype · transform_llm_output hook · covers exit ① (normal final response) only. Streaming ② / interim ③ / tool ⑤ / history-replay ④ are fixture-frozen only, not implemented. WIP · do not enable in production."
+author: "Hermes_AI × NousResearch/hermes-agent Spike"
+hooks:
+  - transform_llm_output

@@ -1,0 +1,7 @@
+name: spike-p3-m0-budget
+version: "0.0.1"
+description: "P3-M0 Spike · tenant budget prototype · pre_api_request reserve + post_api_request settle · T2 tenant-per-process/profile · host-owned session context · fail-open without tenant context · MUST NOT use HERMES_DAILY_TOKEN_BUDGET to impersonate per-tenant budget. WIP · off by default."
+author: "Hermes_AI × NousResearch/hermes-agent Spike"
+hooks:
+  - pre_api_request
+  - post_api_request

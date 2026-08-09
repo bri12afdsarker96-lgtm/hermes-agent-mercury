@@ -1,0 +1,4 @@
+name: spike-p3-m0-cache
+version: "0.0.1"
+description: "P3-M0 Spike · tenant-safe cache prototype · run_llm_execution_middleware seam · memory-only LRU · fail-closed without tenant context. non-streaming + tool-free + successful terminal responses only. usage split into origin/billable/saved. WIP · off by default."
+author: "Hermes_AI × NousResearch/hermes-agent Spike"
