@@ -52,6 +52,7 @@
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import importlib
 import json
@@ -308,7 +309,7 @@ def _extract_cacheable_response(response: Any) -> Dict[str, Any]:
             "prompt_tokens": getattr(origin_usage_obj, "prompt_tokens", 0) or 0,
             "completion_tokens": getattr(origin_usage_obj, "completion_tokens", 0) or 0,
         }
-    choices = _get(response, "choices")
+    choices = copy.deepcopy(_get(response, "choices"))
     return {
         "model": _get(response, "model"),
         "choices": choices,
@@ -317,9 +318,9 @@ def _extract_cacheable_response(response: Any) -> Dict[str, Any]:
         "cache_meta": {
             "hit": True,
             "cache_contract_version": CACHE_CONTRACT_VERSION,
-            "origin_usage": origin_usage_obj,
+            "origin_usage": copy.deepcopy(origin_usage_obj),
             "billable_usage": {"prompt_tokens": 0, "completion_tokens": 0},
-            "saved_usage": origin_usage_obj,
+            "saved_usage": copy.deepcopy(origin_usage_obj),
             "cache_lookup_cost": None,   # in-memory · 通常 0
         },
     }
@@ -375,13 +376,18 @@ def _estimate_needed_tokens(request: Any, ctx: Dict[str, Any]) -> int:
         max_tokens_raw = request.get("max_tokens")
     if max_tokens_raw is None:
         max_tokens_raw = ctx.get("max_tokens")
+    if isinstance(max_tokens_raw, bool):
+        raise ValueError("max_tokens must not be bool")
     try:
         max_tokens = int(max_tokens_raw or 0)
-    except (TypeError, ValueError):
-        max_tokens = 0
+    except (TypeError, ValueError) as exc:
+        raise ValueError("max_tokens must be an integer") from exc
     if max_tokens < 0:
-        max_tokens = 0
-    return approx_input + max_tokens
+        raise ValueError("max_tokens must be >= 0")
+    estimated = approx_input + max_tokens
+    if estimated <= 0:
+        raise ValueError("token estimate unavailable")
+    return estimated
 
 
 # ── Structured error responses(Codex §V:非空、安全、可展示) ─────
@@ -452,16 +458,23 @@ def cache_and_budget_middleware(
     # 2. Only an explicitly disabled plugin may pass through.  Missing/false
     # ``enabled`` is a deliberate off switch; read/shape failures above are
     # never converted into this branch.
-    if not _is_enabled(plugin_cfg):
+    try:
+        enabled = _is_enabled(plugin_cfg)
+    except Exception as exc:   # noqa: BLE001
+        logger.error(
+            "spike-cache: enabled-state resolution failed · type=%s · fail-CLOSED",
+            type(exc).__name__,
+        )
+        return _fail_closed_response(model, reason_code="config_enabled_error")
+    if not enabled:
         return next_call(request)
 
     # 3. Budget module 硬依赖门(Codex §III:cache 单独启用不得因 budget 缺失 fail-open)
     try:
         budget_mod = _budget_module()
-    except ImportError as exc:
+    except ImportError:
         logger.error(
-            "spike-cache: budget module missing · enable spike-p3-m0-budget in plugins.enabled · fail-CLOSED: %s",
-            exc,
+            "spike-cache: budget module missing · enable spike-p3-m0-budget in plugins.enabled · fail-CLOSED",
         )
         return _fail_closed_response(model, reason_code="budget_module_missing")
     except Exception as exc:   # noqa: BLE001
@@ -472,7 +485,15 @@ def cache_and_budget_middleware(
         return _fail_closed_response(model, reason_code="budget_module_error")
 
     # 4. api_mode 支持范围收紧(Codex §II:非 chat_completions fail-CLOSED · 不静默 pass-through)
-    if not _api_mode_supported(api_mode):
+    try:
+        api_mode_supported = _api_mode_supported(api_mode)
+    except Exception as exc:   # noqa: BLE001
+        logger.error(
+            "spike-cache: api-mode classification failed · type=%s · fail-CLOSED",
+            type(exc).__name__,
+        )
+        return _fail_closed_response(model, reason_code="api_mode_error")
+    if not api_mode_supported:
         logger.warning(
             "spike-cache: unsupported api_mode=%s · M0 only supports chat_completions · fail-CLOSED",
             api_mode,
@@ -487,6 +508,7 @@ def cache_and_budget_middleware(
     # 6. tenant context 严格 fail-CLOSED(Codex §III:enforcement 开启时 next_call == 0)
     try:
         tenant_ctx = _get_tenant_context(plugin_cfg)
+        tenant_id = tenant_ctx["tenant_id"] if tenant_ctx is not None else None
     except Exception as exc:   # noqa: BLE001
         logger.error(
             "spike-cache: tenant context resolution failed · type=%s · fail-CLOSED",
@@ -495,7 +517,7 @@ def cache_and_budget_middleware(
         return _fail_closed_response(model, reason_code="tenant_context_error")
     if tenant_ctx is None:
         return _fail_closed_response(model, reason_code="tenant_context_invalid")
-    tenant_id = tenant_ctx["tenant_id"]
+    assert tenant_id is not None
 
     # 7. Budget config 校验 · BudgetConfigError 硬 fail-CLOSED(Codex §III:不转 None 静默继续)
     tenant_cfg = plugin_cfg.get("tenant")
@@ -503,8 +525,8 @@ def cache_and_budget_middleware(
     raw_budget = tenant_cfg.get("daily_budget_tokens")
     try:
         budget_value = budget_mod.validate_daily_budget(raw_budget)
-    except budget_mod.BudgetConfigError as exc:
-        logger.error("spike-cache: daily_budget_tokens config invalid · fail-CLOSED: %s", exc)
+    except budget_mod.BudgetConfigError:
+        logger.error("spike-cache: daily_budget_tokens config invalid · fail-CLOSED")
         return _fail_closed_response(model, reason_code="budget_config_invalid")
     except Exception as exc:   # noqa: BLE001
         logger.error(
@@ -547,7 +569,7 @@ def cache_and_budget_middleware(
             return _fail_closed_response(model, reason_code="cache_lookup_error")
         if hit is not None:
             # cache hit · 不 reserve · 顶层 usage=0 · shallow copy 防调用方 mutate
-            return dict(hit)
+            return copy.deepcopy(hit)
 
     # 11. MISS 或非 cacheable · 都必须 reserve(Codex §II step 6)
     try:
@@ -558,8 +580,10 @@ def cache_and_budget_middleware(
             type(exc).__name__,
         )
         return _fail_closed_response(model, reason_code="token_estimation_error")
+    reservation_active = budget_value is not None
     try:
-        budget_mod.reserve(tenant_id, api_request_id, tokens_needed, budget=budget_value)
+        if reservation_active:
+            budget_mod.reserve(tenant_id, api_request_id, tokens_needed, budget=budget_value)
     except budget_mod.BudgetExceeded:
         logger.warning(
             "spike-cache: budget exceeded · tenant=%s api_request_id=%s tokens_needed=%s budget=%s",
@@ -568,17 +592,15 @@ def cache_and_budget_middleware(
         return _fail_closed_response(
             model,
             reason_code="budget_exceeded",
-            tenant_id=tenant_id,
-            tokens_needed=tokens_needed,
-            budget=budget_value,
         )
     except Exception as exc:   # noqa: BLE001
         # Defensive cleanup in case a future reserve implementation mutates
         # state before raising.  Never expose exception text to the user.
-        try:
-            budget_mod.release(tenant_id, api_request_id)
-        except Exception:   # noqa: BLE001
-            pass
+        if reservation_active:
+            try:
+                budget_mod.release(tenant_id, api_request_id)
+            except Exception:   # noqa: BLE001
+                pass
         logger.error(
             "spike-cache: budget reserve internal failure · type=%s · fail-CLOSED",
             type(exc).__name__,
@@ -590,29 +612,51 @@ def cache_and_budget_middleware(
     try:
         response = next_call(request)
     except Exception:
-        budget_mod.release(tenant_id, api_request_id)
+        if reservation_active:
+            try:
+                budget_mod.release(tenant_id, api_request_id)
+            except Exception as cleanup_exc:   # noqa: BLE001
+                logger.error(
+                    "spike-cache: reservation release failed after provider error · type=%s",
+                    type(cleanup_exc).__name__,
+                )
         raise
 
     # 13. Settle 实际用量(所有非异常路径都 settle · cacheable/非 cacheable 无关)
-    actual = _extract_actual_usage(response)
-    try:
-        budget_mod.settle(tenant_id, api_request_id, actual)
-    except Exception as exc:   # noqa: BLE001
-        # Provider cost has already been incurred.  Do not throw into the
-        # outer fail-open chain after next_call; clean pending state best
-        # effort, record only the exception type, and preserve the response.
+    if reservation_active:
+        actual = _extract_actual_usage(response)
+        if actual is None:
+            actual = tokens_needed
         try:
-            budget_mod.release(tenant_id, api_request_id)
-        except Exception:   # noqa: BLE001
-            pass
-        logger.error(
-            "spike-cache: budget settle internal failure · api_request_id=%s type=%s",
-            api_request_id, type(exc).__name__,
-        )
+            budget_mod.settle(tenant_id, api_request_id, actual)
+        except Exception as exc:   # noqa: BLE001
+            # Provider cost has already been incurred.  Do not throw into the
+            # outer fail-open chain after next_call; clean pending state best
+            # effort, record only the exception type, and preserve the response.
+            try:
+                budget_mod.release(tenant_id, api_request_id)
+            except Exception:   # noqa: BLE001
+                pass
+            logger.error(
+                "spike-cache: budget settle internal failure · type=%s",
+                type(exc).__name__,
+            )
 
     # 14. 只有 req + resp 皆 cacheable 才 insert.  Cache bookkeeping is
     # best-effort after a paid provider response and must never replace it.
-    if cacheable_req and cache_key is not None and is_cacheable_response(response):
+    try:
+        cacheable_resp = (
+            cacheable_req
+            and cache_key is not None
+            and is_cacheable_response(response)
+        )
+    except Exception as exc:   # noqa: BLE001
+        logger.error(
+            "spike-cache: response classification failed after provider response · type=%s",
+            type(exc).__name__,
+        )
+        cacheable_resp = False
+    if cacheable_resp:
         try:
             cached = _extract_cacheable_response(response)
             with _lock:
@@ -629,18 +673,31 @@ def cache_and_budget_middleware(
     return response
 
 
-def _extract_actual_usage(response: Any) -> int:
-    """从 response.usage 抽 prompt+completion tokens."""
+def _extract_actual_usage(response: Any) -> Optional[int]:
+    """从 response.usage 抽 token 数；缺失/非法返回 None 触发 reservation fallback。"""
     try:
         if isinstance(response, dict):
-            usage = response.get("usage") or {}
+            usage = response.get("usage")
         else:
-            usage = getattr(response, "usage", None) or {}
+            usage = getattr(response, "usage", None)
+        if usage is None:
+            return None
         if isinstance(usage, dict):
-            return int(usage.get("prompt_tokens", 0) or 0) + int(usage.get("completion_tokens", 0) or 0)
-        return int(getattr(usage, "prompt_tokens", 0) or 0) + int(getattr(usage, "completion_tokens", 0) or 0)
+            if "prompt_tokens" not in usage and "completion_tokens" not in usage:
+                return None
+            prompt = usage.get("prompt_tokens", 0)
+            completion = usage.get("completion_tokens", 0)
+        else:
+            if not hasattr(usage, "prompt_tokens") and not hasattr(usage, "completion_tokens"):
+                return None
+            prompt = getattr(usage, "prompt_tokens", 0)
+            completion = getattr(usage, "completion_tokens", 0)
+        if isinstance(prompt, bool) or isinstance(completion, bool):
+            return None
+        total = int(prompt or 0) + int(completion or 0)
+        return total if total >= 0 else None
     except Exception:   # noqa: BLE001
-        return 0
+        return None
 
 
 def clear_cache() -> None:
@@ -657,4 +714,4 @@ def cache_size() -> int:
 def register(ctx: Any) -> None:
     """PluginContext register · 挂 llm_execution middleware(orchestrator)."""
     ctx.register_middleware("llm_execution", cache_and_budget_middleware)
-
+
