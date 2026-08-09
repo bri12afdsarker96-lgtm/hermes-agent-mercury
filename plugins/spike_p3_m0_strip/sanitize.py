@@ -1,4 +1,4 @@
-"""Presentation-boundary sanitizer(spike · mode="final" 实装 · 其他 skeleton).
+r"""Presentation-boundary sanitizer(spike · mode="final" 实装 · 其他 skeleton).
 
 **向后兼容基线(有明确增强 · 见"差异说明")**:
 - Hermes_AI `hermes_devices/ops/audit.py::strip_sources`(charter C4 · fixture SHA-256 双仓锁死)
@@ -10,19 +10,24 @@
 - 未闭合标记不吞下一行
 - **fail-closed** on sanitizer exception:返回安全占位 · **不**返回原文
 
-**与 Hermes_AI baseline 的差异(Codex 第三轮 §VI · 明文锁定)**:
+**与 Hermes_AI baseline 的差异(Codex 第三轮 §VI · §7 明文锁定)**:
 
 fork sanitizer 相对 baseline 做了两处**用户体验增强**,由 differential test 锁死:
 
 | 差异 | Hermes_AI baseline | fork sanitizer | 用户可见效果 |
 |---|---|---|---|
-| `_INLINE_SOURCE_RE` 前导 | `[\[【（(]...`(不吃前导空白) | `\s?[\[【（(]...`(吃 1 个前导空白) | `"Answer [source:x]." → baseline: "Answer ." · fork: "Answer."` |
+| `_INLINE_SOURCE_RE` 前导 | `[\[【（(]...`(不吃前导空白) | `[ \t]?[\[【（(]...`(吃 1 个前导**水平**空白) | `"Answer [source:x]." → baseline: "Answer ." · fork: "Answer."` |
 | 结果末尾清理 | `.strip()`(掐首尾空白) | `.rstrip()`(仅掐尾) | 保留首行 indentation(如 `"  Answer"`)· 只去尾空 |
+
+**关键约束(Codex 第三轮 §7 补证)**:
+- 前导消耗**只**取 `[ \t]`(空格 / tab)· **不**用 `\s?`(否则会吞 `\n` 拼接下一行)
+- 若 `Line A\n[source: k]Next` · 期望 `Line A\nNext`(fork 与 baseline 均保留换行 · 无行拼接)
+- 空白差异**不扩大** source 删除范围:非 source 括号 `[normal]` 一律保留
 
 **契约锁定**:
 - baseline strip 的每个 source marker · fork 也必须 strip(**覆盖包含关系**)
 - baseline 不 strip 的(negative case)· fork 也不 strip(**负例一致**)
-- 差异**仅**在于两点 UX 增强(前导空白、尾空白)· 由
+- 差异**仅**在于两点 UX 增强(前导**水平**空白、首行 indent 保留 vs 全 strip)· 由
   `tests/test_strip_differential_vs_hermes_ai.py` 一一断言
 
 **冻结 · pending 出口**:
@@ -35,10 +40,11 @@ from __future__ import annotations
 
 import re
 
-# ── 与 Hermes_AI ops/audit.py::_INLINE_RE 差 1 个前导 `\s?` ─────────────
+# ── 与 Hermes_AI ops/audit.py::_INLINE_RE 差 1 个前导 `[ \t]?` ──────────
+# 前导用 `[ \t]?` 而非 `\s?` · 避免吞掉 `\n` 拼接下一行(Codex §7 反例证明)。
 # body class 完全一致 · 允许一层嵌套中文/半角括号(如 [来源: FAQ(2026版)]).
 _INLINE_SOURCE_RE = re.compile(
-    r"\s?[\[【（(]\s*(?:source|来源)\s*[:：]"
+    r"[ \t]?[\[【（(]\s*(?:source|来源)\s*[:：]"
     r"(?:[^\[\]【】（）()\n]|[（(][^（）()\n]*[）)]|[\[【][^\[\]【】\n]*[\]】])*"
     r"[\]】）)]",
     re.IGNORECASE,

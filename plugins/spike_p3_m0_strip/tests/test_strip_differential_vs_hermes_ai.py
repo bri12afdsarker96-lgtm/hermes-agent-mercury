@@ -1,4 +1,4 @@
-"""P3-M0 · fork sanitizer vs Hermes_AI baseline · differential contract lock.
+r"""P3-M0 · fork sanitizer vs Hermes_AI baseline · differential contract lock.
 
 **Codex 第三轮 §VI 强制**:
 - fork sanitizer 与 Hermes_AI `ops/audit.py::strip_sources` 差异**必须**明文锁定
@@ -45,12 +45,17 @@ def test_baseline_regex_verbatim():
     )
 
 
-# ── 2. Fork inline pattern = baseline + `\s?` 前导 ────────────
+# ── 2. Fork inline pattern = baseline + `[ \t]?` 前导(**只水平空白**) ─
 
 
-def test_fork_inline_pattern_is_baseline_plus_leading_space():
-    """fork `_INLINE_SOURCE_RE` = `\\s?` + baseline INLINE pattern(严格锁定)。"""
-    assert _INLINE_SOURCE_RE.pattern == r"\s?" + hermes_ai_baseline.BASELINE_INLINE_PATTERN
+def test_fork_inline_pattern_is_baseline_plus_leading_horizontal_space():
+    """fork `_INLINE_SOURCE_RE` = `[ \\t]?` + baseline INLINE pattern(严格锁定)。
+
+    Codex §7 反例证明:前导消耗必须是 `[ \\t]?`(空格 / tab)· **不**能是 `\\s?`
+    (`\\s` 包含 `\\n` · 会把行末换行吞掉,拼接下一行 · 见
+    `test_leading_space_does_not_eat_newline_before_marker`)。
+    """
+    assert _INLINE_SOURCE_RE.pattern == r"[ \t]?" + hermes_ai_baseline.BASELINE_INLINE_PATTERN
 
 
 def test_fork_line_pattern_equals_baseline():
@@ -151,3 +156,118 @@ def test_ux_diff_preserves_leading_indent():
     raw = "  Answer with [source: x]"
     assert hermes_ai_baseline.strip_sources(raw) == "Answer with"   # baseline .strip()
     assert sanitize_presentation(raw, mode="final") == "  Answer with"   # fork .rstrip()
+
+
+# ── 6. Codex §7 反例证明:前导差异不吞换行、不扩大删除范围 ─────
+
+
+def test_leading_space_does_not_eat_newline_before_marker():
+    """前一行的 `\\n` **不得**被前导消耗吞掉 · 否则会拼接下一行(§7 反例)。
+
+    这是当前实施 `[ \\t]?` 而非 `\\s?` 的核心理由。曾用的 `\\s?` 匹配 `\\n` ·
+    `"Line A\\n[source: kb]Next"` → `"Line ANext"`(BUG)· 现改为 `[ \\t]?` ·
+    结果应保持换行结构:`"Line A\\nNext"`。
+    """
+    raw = "Line A\n[source: kb]Next word"
+    fork_out = sanitize_presentation(raw, mode="final")
+    # baseline 不吃前导 · 直接删 marker · 结果保持换行 · 后接 Next word
+    baseline_out = hermes_ai_baseline.strip_sources(raw)
+    # 关键断言:换行未被吞 · 无行拼接
+    assert "\n" in fork_out, (
+        f"fork 前导消耗吞掉了 `\\n` · 拼接了下一行 · got={fork_out!r} · "
+        "前导 regex 必须是 `[ \\t]?` 不是 `\\s?`"
+    )
+    assert fork_out == "Line A\nNext word", (
+        f"fork 处理跨行 marker 错 · raw={raw!r} got={fork_out!r} expected='Line A\\nNext word'"
+    )
+    # 同时 · fork 与 baseline 保持一致(此 case 前导不消耗 · 空白差异不体现)
+    assert fork_out == baseline_out
+
+
+def test_leading_space_does_not_eat_double_newline_before_marker():
+    """双换行边界同理 · 前导消耗**不吃** `\\n` · 段落分隔保留。"""
+    raw = "Paragraph A ends here.\n\n[source: kb]Paragraph B starts."
+    fork_out = sanitize_presentation(raw, mode="final")
+    # 双 \n 应保留(不吞任何 \n · 段落分隔完整)
+    assert "\n\n" in fork_out, (
+        f"fork 吞掉了段落分隔 · got={fork_out!r}"
+    )
+    assert fork_out == "Paragraph A ends here.\n\nParagraph B starts."
+
+
+def test_leading_space_only_absorbs_single_space_or_tab():
+    """前导 `[ \\t]?` 只吸收 1 个空格 / tab · 不吸收其他 whitespace。"""
+    # 空格 · 吸收
+    assert sanitize_presentation("X [source: k]Y", mode="final") == "XY"
+    # tab · 吸收
+    assert sanitize_presentation("X\t[source: k]Y", mode="final") == "XY"
+    # 换行 · 不吸收(§7 硬约束)
+    assert sanitize_presentation("X\n[source: k]Y", mode="final") == "X\nY"
+    # 回车 · 不吸收(避免 Windows 场景意外拼接)
+    assert sanitize_presentation("X\r[source: k]Y", mode="final") == "X\rY"
+
+
+def test_whitespace_diff_does_not_widen_source_deletion_range():
+    """空白差异**不**扩大 source 删除范围:非 source 括号一律保留。
+
+    Codex §7:确保 `\\s?` → `[ \\t]?` 与 `.rstrip()` 的两处 UX 增强·
+    不会让 fork 意外删掉 baseline 保留的内容。
+    """
+    # 非 source 括号(`[normal]`)紧跟 source marker · 只 source 被删
+    raw = "Result: [normal] [source: kb] end."
+    fork_out = sanitize_presentation(raw, mode="final")
+    baseline_out = hermes_ai_baseline.strip_sources(raw)
+    assert "[normal]" in fork_out, f"fork 误删了 [normal] · got={fork_out!r}"
+    assert "[normal]" in baseline_out
+    # source marker 已删
+    assert "[source" not in fork_out.lower()
+    # 两侧内容(去空白)一致
+    import re as _re
+    assert _re.sub(r"\s+", "", fork_out) == _re.sub(r"\s+", "", baseline_out)
+
+
+def test_trailing_whitespace_rstrip_scope_matches_baseline_content():
+    """`.rstrip()` 只掐尾空白 · 不改变文本主体 · 与 baseline `.strip()` 内容一致(仅首空白 diff)。"""
+    raw = "Answer here [source: k]\n\n   "
+    fork_out = sanitize_presentation(raw, mode="final")
+    baseline_out = hermes_ai_baseline.strip_sources(raw)
+    # 两侧 trailing 皆掐 · 主体一致
+    assert fork_out == "Answer here"
+    assert baseline_out == "Answer here"
+
+
+def test_leading_whitespace_only_diff_between_baseline_and_fork():
+    """首行 indentation 场景 · fork 保留 · baseline 掐 · 主体 byte-identical。"""
+    raw = "   Answer [source: k]"
+    fork_out = sanitize_presentation(raw, mode="final")
+    baseline_out = hermes_ai_baseline.strip_sources(raw)
+    # fork 保留首 3 空格 · baseline 全 strip
+    assert fork_out == "   Answer"
+    assert baseline_out == "Answer"
+    # 去空白后主体 byte-identical
+    import re as _re
+    assert _re.sub(r"\s+", "", fork_out) == _re.sub(r"\s+", "", baseline_out) == "Answer"
+
+
+def test_middle_line_source_marker_preserves_surrounding_newlines():
+    """中间行的 inline source marker · 两侧换行完整保留 · 无行拼接。"""
+    raw = "Line 1\nLine 2 [source: k]\nLine 3"
+    fork_out = sanitize_presentation(raw, mode="final")
+    assert fork_out == "Line 1\nLine 2\nLine 3"
+
+
+def test_marker_at_start_of_line_preserves_prev_line_terminator():
+    """行首 marker 场景 · 前一行的 `\\n` 保留 · 只删 marker + 前导水平空白(若有)。"""
+    raw_no_lead = "Line 1\n[source: k]Line 2 content"
+    raw_with_lead = "Line 1\n \t[source: k]Line 2 content"
+
+    out_no_lead = sanitize_presentation(raw_no_lead, mode="final")
+    out_with_lead = sanitize_presentation(raw_with_lead, mode="final")
+
+    # 无 leading horizontal ws · 结果 "Line 1\nLine 2 content"
+    assert out_no_lead == "Line 1\nLine 2 content"
+    # 有 leading horizontal ws · marker 前导吸收 1 个 · 剩下 " \t"?
+    # 实际:`[ \t]?[source: k]` 匹配 `\t[source: k]` · 前面的 " " 保留 · 结果 "Line 1\n Line 2 content"
+    # 关键点:换行未被吞 · 有 \n
+    assert "\n" in out_with_lead
+    assert out_with_lead == "Line 1\n Line 2 content"
