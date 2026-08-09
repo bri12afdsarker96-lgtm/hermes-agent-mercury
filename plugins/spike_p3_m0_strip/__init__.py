@@ -1,26 +1,30 @@
 """P3-M0 Spike · strip-sources prototype(exit ① 普通最终响应).
 
-**范围严守**(见 `../spike-p3-m0-fixtures/README.md` 与 Hermes_AI 侧
-`docs/fork/strip-contract.md`):
+**Codex §VI fail-closed 契约**:
+- sanitizer 异常 → 返回**安全占位** · 记录 audit · **不**返回 None(否则原文透出)
+- 无改动 · 返回 None(标准 hook "first non-None str wins" 契约)
 
-- 仅覆盖出口 ① `transform_llm_output` @ `agent/turn_finalizer.py:561`
-- streaming/interim/interrupt/history-replay/tool-result 各出口 fixture 冻结
-  · **本 spike 不实装**
-- `_sanitize_surrogates`(fresh baseline 已在 turn_finalizer 内)独立于本 hook
-  · 顺序上 sanitize 后于 transform_llm_output · 二者协同不干扰
-- raw canonical transcript 完全不改(finalizer 已在 :317/:333 写入原文)
-- 无第三方 plugin 冲突:hook 返回 non-None str 首个胜出 · 本 plugin 无 None 短路
+**范围**:
+- 仅出口 ① `transform_llm_output` @ `agent/turn_finalizer.py:561`
+- streaming/interim/interrupt/history-replay/tool-result 五出口 fixture 冻结
+  · **本 spike 不实装**(fixture present · implementation pending)
+- `_sanitize_surrogates`(fresh baseline turn_finalizer 已加)独立 · 不冲突
 
-**不是** C4 单点方案(只覆盖 5 出口之 1)。M0 首轮证据 + 契约冻结 · 不称 C4 兑现。
+**插件启用**:通过 fork `config.yaml` 的 `plugins.enabled` 列表 · **不**用 env。
 """
 from __future__ import annotations
 
 import logging
 from typing import Any, Optional
 
-from . import sanitize as _sanitize_mod   # module reference · 供 monkeypatch fail-open 测试
+from . import sanitize as _sanitize_mod   # module reference · 供 monkeypatch fail-closed 测试
 
 logger = logging.getLogger(__name__)
+
+# fail-closed 占位 · 出现 sanitizer 崩时返回 · 提示用户重试
+FAIL_CLOSED_PLACEHOLDER = (
+    "[response filtered · sanitizer error · please retry]"
+)
 
 
 def on_transform_llm_output(
@@ -31,21 +35,47 @@ def on_transform_llm_output(
     platform: str = "",
     **_kwargs: Any,
 ) -> Optional[str]:
-    """Return stripped text · None if unchanged.
+    """`transform_llm_output` hook · fail-closed on sanitizer exception.
 
-    Hook contract(`hermes_cli/plugins.py::VALID_HOOKS`):
-      - First non-empty str return wins across all plugins consuming this hook.
-      - None / empty str leaves `final_response` unchanged.
-      - Fired at `agent/turn_finalizer.py:561`.
+    Contract(`hermes_cli/plugins.py::VALID_HOOKS`):
+      - 返回 non-empty str → 覆盖 `final_response`(first-wins 跨 plugins)
+      - 返回 None / "" → 保留 `final_response` 不变
+
+    Codex §VI · fail-closed 补丁:
+      - 无异常 · 无改动 → 返回 None
+      - 无异常 · 有改动 → 返回 stripped str
+      - 异常 → 返回 `FAIL_CLOSED_PLACEHOLDER`(**不返回原文**)· 记录 audit
     """
+    text = response_text or ""
     try:
-        stripped = _sanitize_mod.sanitize_presentation(response_text or "", mode="final")
-    except Exception as exc:  # noqa: BLE001 — fail-open · never break chat
-        logger.warning("spike-p3-m0-strip on_transform_llm_output failed: %s", exc)
-        return None
-    if stripped == (response_text or ""):
-        return None  # 无改动 · 保留
+        stripped = _sanitize_mod.sanitize_presentation(text, mode="final")
+    except Exception as exc:  # noqa: BLE001 — fail-closed · 拒原文泄漏
+        logger.error(
+            "spike-p3-m0-strip: sanitizer FAILED · fail-closed (session_id=%s model=%s platform=%s): %s",
+            session_id, model, platform, exc,
+        )
+        # audit event · 便于监控告警
+        _emit_audit(
+            event="strip.sanitizer_failed",
+            session_id=session_id,
+            model=model,
+            platform=platform,
+            error_class=type(exc).__name__,
+        )
+        return FAIL_CLOSED_PLACEHOLDER
+    if stripped == text:
+        return None   # 无改动
     return stripped
+
+
+def _emit_audit(**payload: Any) -> None:
+    """轻量 audit hook · 通过 lifecycle invoke_hook 触发观察者(如 langfuse/nemo_relay)。"""
+    try:
+        from hermes_cli.lifecycle import invoke_hook
+
+        invoke_hook("api_request_error", **payload)   # 复用现有 API error 通道
+    except Exception:   # noqa: BLE001 — audit never breaks hook
+        pass
 
 
 def register(ctx: Any) -> None:
