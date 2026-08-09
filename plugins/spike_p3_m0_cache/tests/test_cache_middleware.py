@@ -254,7 +254,10 @@ def test_budget_exceeded_blocks_next_call_returns_safe_response(tmp_path, monkey
     # 非空结构化 error response · 抑制 retry · Codex §V
     assert resp["cache_meta"]["budget_exceeded"] is True
     assert resp["cache_meta"]["reason_code"] == "budget_exceeded"
-    assert resp["cache_meta"]["tenant_id"] == _VALID_TENANT["tenant_id"]
+    # 用户可见响应不得暴露租户标识、预算值或内部估算。
+    assert "tenant_id" not in resp["cache_meta"]
+    assert "budget" not in resp["cache_meta"]
+    assert "tokens_needed" not in resp["cache_meta"]
     # 非空 assistant message(可展示给用户)
     assert resp["choices"][0]["message"]["role"] == "assistant"
     assert resp["choices"][0]["message"]["content"]   # 非空字符串
@@ -367,6 +370,120 @@ def test_provider_exception_releases_reservation(tmp_path, monkeypatch):
     assert budget_mod.get_pending_total(_VALID_TENANT["tenant_id"]) == 0
     assert budget_mod.get_used(_VALID_TENANT["tenant_id"]) == 0
     assert budget_mod.get_reservation(_VALID_TENANT["tenant_id"], "req_boom") is None
+
+
+def test_provider_exception_identity_survives_release_failure(tmp_path, monkeypatch):
+    """清理失败不得遮蔽 provider 原异常。"""
+    _, _, budget_mod = _enable_cache(tmp_path, monkeypatch, daily_budget=10_000)
+
+    class ProviderBoom(RuntimeError):
+        pass
+
+    def next_call(_req):
+        raise ProviderBoom("provider-original")
+
+    def release_boom(*_args, **_kwargs):
+        raise RuntimeError("cleanup-failed")
+
+    monkeypatch.setattr(budget_mod, "release", release_boom)
+    run = make_run_llm_execution(
+        api_request_id="req_release_boom",
+        provider="openai",
+        model="m",
+        api_mode="chat_completions",
+        approx_input_tokens=100,
+    )
+    with pytest.raises(ProviderBoom, match="provider-original"):
+        run({"messages": [{"role": "user", "content": "x"}], "max_tokens": 100}, next_call)
+
+
+def test_null_budget_skips_reservation_and_settle(tmp_path, monkeypatch):
+    """null 是合法无限态：允许 provider，且不制造 unknown-settle 错误。"""
+    _, _, budget_mod = _enable_cache(tmp_path, monkeypatch, daily_budget=None)
+    calls = {"reserve": 0, "settle": 0, "next": 0}
+
+    monkeypatch.setattr(
+        budget_mod,
+        "reserve",
+        lambda *_args, **_kwargs: calls.__setitem__("reserve", calls["reserve"] + 1),
+    )
+    monkeypatch.setattr(
+        budget_mod,
+        "settle",
+        lambda *_args, **_kwargs: calls.__setitem__("settle", calls["settle"] + 1),
+    )
+
+    def next_call(_req):
+        calls["next"] += 1
+        return {
+            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 4, "completion_tokens": 2},
+        }
+
+    run = make_run_llm_execution(
+        api_request_id="req_null_budget",
+        provider="openai",
+        model="m",
+        api_mode="chat_completions",
+        approx_input_tokens=10,
+    )
+    resp = run({"messages": [{"role": "user", "content": "x"}]}, next_call)
+    assert resp["choices"][0]["message"]["content"] == "ok"
+    assert calls == {"reserve": 0, "settle": 0, "next": 1}
+
+
+def test_missing_usage_settles_reserved_estimate(tmp_path, monkeypatch):
+    """provider 未回 usage 时按预留值结算，禁止按 0 洗预算。"""
+    _, _, budget_mod = _enable_cache(tmp_path, monkeypatch, daily_budget=10_000)
+
+    def next_call(_req):
+        return {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+
+    run = make_run_llm_execution(
+        api_request_id="req_missing_usage",
+        provider="openai",
+        model="m",
+        api_mode="chat_completions",
+        approx_input_tokens=123,
+        max_tokens=77,
+    )
+    run({"messages": [{"role": "user", "content": "x"}], "max_tokens": 77}, next_call)
+    assert budget_mod.get_used(_VALID_TENANT["tenant_id"]) == 200
+    assert budget_mod.get_pending_total(_VALID_TENANT["tenant_id"]) == 0
+
+
+def test_cache_hit_returns_deep_copy(tmp_path, monkeypatch):
+    """调用方修改一次 hit 结果不得污染后续缓存。"""
+    _, _, _ = _enable_cache(tmp_path, monkeypatch, daily_budget=10_000)
+    calls = {"next": 0}
+
+    def next_call(_req):
+        calls["next"] += 1
+        return {
+            "model": "gpt-4o",
+            "choices": [{"message": {"content": "stable"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 5},
+        }
+
+    req = {"messages": [{"role": "user", "content": "same"}]}
+    make_run_llm_execution(
+        api_request_id="copy_miss", provider="openai", model="gpt-4o",
+        api_mode="chat_completions", approx_input_tokens=10,
+    )(req, next_call)
+    first_hit = make_run_llm_execution(
+        api_request_id="copy_hit_1", provider="openai", model="gpt-4o",
+        api_mode="chat_completions", approx_input_tokens=10,
+    )(req, next_call)
+    first_hit["choices"][0]["message"]["content"] = "poisoned"
+    first_hit["cache_meta"]["origin_usage"]["prompt_tokens"] = 999
+
+    second_hit = make_run_llm_execution(
+        api_request_id="copy_hit_2", provider="openai", model="gpt-4o",
+        api_mode="chat_completions", approx_input_tokens=10,
+    )(req, next_call)
+    assert calls["next"] == 1
+    assert second_hit["choices"][0]["message"]["content"] == "stable"
+    assert second_hit["cache_meta"]["origin_usage"]["prompt_tokens"] == 5
 
 
 # ── Tenant context / api_mode / non-dict / budget config fail-CLOSED ─
@@ -601,7 +718,28 @@ def test_input_tokens_estimated_from_messages_when_no_ctx(tmp_path, monkeypatch)
     # 估算 = 4000/4 + 100 = 1100 · budget=1000 · 超支
     assert counters["next"] == 0
     assert resp["cache_meta"]["budget_exceeded"] is True
-    assert resp["cache_meta"]["tokens_needed"] >= 1000
+    assert "tokens_needed" not in resp["cache_meta"]
+
+
+@pytest.mark.parametrize("bad_max_tokens", [True, -1, "not-an-int"])
+def test_invalid_or_unknown_token_estimate_fails_closed(
+    tmp_path, monkeypatch, bad_max_tokens,
+):
+    _, _, _ = _enable_cache(tmp_path, monkeypatch, daily_budget=1000)
+    counters = {"next": 0}
+
+    def next_call(_req):
+        counters["next"] += 1
+
+    run = make_run_llm_execution(
+        api_request_id="bad_estimate",
+        provider="p",
+        model="m",
+        api_mode="chat_completions",
+    )
+    resp = run({"messages": [], "max_tokens": bad_max_tokens}, next_call)
+    assert counters["next"] == 0
+    assert resp["cache_meta"]["reason_code"] == "token_estimation_error"
 
 
 # ── Registered middleware must not inherit the core fail-open policy ──
@@ -721,6 +859,8 @@ def test_budget_reserve_internal_error_fail_closed(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("target", "reason_code"),
     [
+        ("_is_enabled", "config_enabled_error"),
+        ("_api_mode_supported", "api_mode_error"),
         ("is_cacheable_request", "request_classification_error"),
         ("_estimate_needed_tokens", "token_estimation_error"),
     ],
@@ -755,4 +895,26 @@ def test_budget_validation_internal_error_fail_closed(tmp_path, monkeypatch):
         next_call,
     )
     _assert_internal_failure_is_safe(resp, counters, "budget_config_error")
-
+
+
+def test_response_classification_error_preserves_provider_response(tmp_path, monkeypatch):
+    """provider 已成功后，缓存分类错误只能降级为不缓存。"""
+    _, cache_mod, _ = _enable_cache(tmp_path, monkeypatch, daily_budget=1000)
+
+    def boom(_response):
+        raise RuntimeError("TOP_SECRET_INTERNAL_EXCEPTION")
+
+    monkeypatch.setattr(cache_mod, "is_cacheable_response", boom)
+    expected = {
+        "choices": [{"message": {"content": "provider-success"}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 2, "completion_tokens": 3},
+    }
+    run = make_run_llm_execution(
+        api_request_id="response_classification",
+        provider="p",
+        model="m",
+        api_mode="chat_completions",
+        approx_input_tokens=10,
+    )
+    assert run({"messages": [{"role": "user", "content": "x"}]}, lambda _req: expected) is expected
+
