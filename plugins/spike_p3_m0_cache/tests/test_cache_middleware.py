@@ -524,7 +524,54 @@ def test_cache_hit_returns_deep_copy(tmp_path, monkeypatch):
     _, _, _ = _enable_cache(tmp_path, monkeypatch, daily_budget=10_000)
     calls = {"next": 0}
 
-    def next_call(_req…475 tokens truncated…mode="chat_completions",
+    def next_call(_req):
+        calls["next"] += 1
+        return {
+            "model": "gpt-4o",
+            "choices": [{"message": {"content": "stable"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 5},
+        }
+
+    req = {"messages": [{"role": "user", "content": "same"}]}
+    make_run_llm_execution(
+        api_request_id="copy_miss", provider="openai", model="gpt-4o",
+        api_mode="chat_completions", approx_input_tokens=10,
+    )(req, next_call)
+    first_hit = make_run_llm_execution(
+        api_request_id="copy_hit_1", provider="openai", model="gpt-4o",
+        api_mode="chat_completions", approx_input_tokens=10,
+    )(req, next_call)
+    first_hit["choices"][0]["message"]["content"] = "poisoned"
+    first_hit["cache_meta"]["origin_usage"]["prompt_tokens"] = 999
+
+    second_hit = make_run_llm_execution(
+        api_request_id="copy_hit_2", provider="openai", model="gpt-4o",
+        api_mode="chat_completions", approx_input_tokens=10,
+    )(req, next_call)
+    assert calls["next"] == 1
+    assert second_hit["choices"][0]["message"]["content"] == "stable"
+    assert second_hit["cache_meta"]["origin_usage"]["prompt_tokens"] == 5
+
+
+def test_cache_hit_does_not_require_budget_request_id(tmp_path, monkeypatch):
+    """命中不调用 provider/预算，因此不应要求 api_request_id。"""
+    _, _, _ = _enable_cache(tmp_path, monkeypatch, daily_budget=10_000)
+    calls = {"next": 0}
+    request = {"messages": [{"role": "user", "content": "same"}]}
+
+    def next_call(_req):
+        calls["next"] += 1
+        return {
+            "model": "gpt-4o",
+            "choices": [{"message": {"content": "cached"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 5},
+        }
+
+    make_run_llm_execution(
+        api_request_id="cache_seed",
+        provider="openai",
+        model="gpt-4o",
+        api_mode="chat_completions",
         approx_input_tokens=10,
     )(request, next_call)
     hit = make_run_llm_execution(
