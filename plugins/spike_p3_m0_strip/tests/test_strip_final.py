@@ -217,7 +217,7 @@ def test_hook_empty_input_returns_none(tmp_path, monkeypatch):
 # ── fail-CLOSED on sanitizer exception(§VI 硬约束) ─────────────
 
 
-def test_hook_fail_closed_on_sanitizer_exception(tmp_path, monkeypatch):
+def test_hook_fail_closed_on_sanitizer_exception(tmp_path, monkeypatch, caplog):
     """sanitizer 崩 · hook 返回 FAIL_CLOSED_PLACEHOLDER · **不**返回原文。
 
     Codex §VI:sanitizer 失败必须拒原文透出 · 返回安全占位符 · 记录 audit。
@@ -229,8 +229,10 @@ def test_hook_fail_closed_on_sanitizer_exception(tmp_path, monkeypatch):
     # 从 discover 后的 module 修改 sanitize 依赖(fresh manager 下的 module)
     sanitize_dep = strip_mod._sanitize_mod
 
+    internal_secret = "TOP_SECRET_SANITIZER_PAYLOAD"
+
     def boom(*_args, **_kwargs):
-        raise RuntimeError("simulated sanitizer crash")
+        raise RuntimeError(internal_secret)
 
     monkeypatch.setattr(sanitize_dep, "sanitize_presentation", boom)
 
@@ -246,6 +248,7 @@ def test_hook_fail_closed_on_sanitizer_exception(tmp_path, monkeypatch):
     assert len(results) == 1
     assert results[0] == strip_mod.FAIL_CLOSED_PLACEHOLDER
     assert dangerous_text not in results[0], "fail-closed 泄漏原文 · 违 §VI 硬约束"
+    assert internal_secret not in caplog.text
 
 
 # ── 其他 mode 契约冻结(skeleton pass-through · M1+ 实装) ──────
