@@ -52,6 +52,10 @@ class BudgetSettleError(RuntimeError):
 _lock = threading.RLock()   # reentrant · reserve/settle 内部可能连续调用
 # 天粒度桶 · key = (tenant_id, "YYYY-MM-DD" UTC) · value = { "used": int, "reservations": {req_id: tokens} }
 _bucket: Dict[str, Dict[str, Any]] = {}
+# Active reservations must remember the UTC bucket in which they were created.
+# A provider call can cross midnight; settle/release must then touch the original
+# bucket instead of leaking the reservation in yesterday's ledger.
+_reservation_bucket: Dict[tuple[str, str], str] = {}
 
 
 def _today_utc() -> str:
@@ -63,13 +67,16 @@ def _bucket_key(tenant_id: str, utc_date: Optional[str] = None) -> str:
     return f"{tenant_id}::{utc_date or _today_utc()}"
 
 
-def _get_or_create_bucket(tenant_id: str) -> Dict[str, Any]:
-    key = _bucket_key(tenant_id)
+def _get_or_create_bucket_by_key(key: str) -> Dict[str, Any]:
     b = _bucket.get(key)
     if b is None:
         b = {"used": 0, "reservations": {}}
         _bucket[key] = b
     return b
+
+
+def _get_or_create_bucket(tenant_id: str) -> Dict[str, Any]:
+    return _get_or_create_bucket_by_key(_bucket_key(tenant_id))
 
 
 # ── 4 态 budget validation ───────────────────────────────────────────
@@ -109,12 +116,14 @@ def reserve(tenant_id: str, api_request_id: str, tokens_needed: int, *, budget: 
     if budget is None:
         return   # 未启用
     with _lock:
-        b = _get_or_create_bucket(tenant_id)
-        # api_request_id 唯一 · 重复 reserve 视 as 错误
-        if api_request_id in b["reservations"]:
+        reservation_key = (tenant_id, api_request_id)
+        # api_request_id 在该 tenant 的所有活跃 UTC bucket 中唯一。
+        if reservation_key in _reservation_bucket:
             raise BudgetExceeded(
                 f"reserve: api_request_id={api_request_id!r} already reserved · duplicate"
             )
+        bucket_key = _bucket_key(tenant_id)
+        b = _get_or_create_bucket_by_key(bucket_key)
         pending_total = sum(b["reservations"].values())
         # budget=0 无限 · used + pending + new 不做上限比较
         if budget > 0:
@@ -125,6 +134,7 @@ def reserve(tenant_id: str, api_request_id: str, tokens_needed: int, *, budget: 
                     f"(used={b['used']}, pending={pending_total}, need={tokens_needed}, budget={budget})"
                 )
         b["reservations"][api_request_id] = tokens_needed
+        _reservation_bucket[reservation_key] = bucket_key
 
 
 def settle(tenant_id: str, api_request_id: str, actual_tokens: int) -> None:
@@ -138,13 +148,22 @@ def settle(tenant_id: str, api_request_id: str, actual_tokens: int) -> None:
     if actual_tokens < 0:
         actual_tokens = 0
     with _lock:
-        b = _get_or_create_bucket(tenant_id)
-        if api_request_id not in b["reservations"]:
+        reservation_key = (tenant_id, api_request_id)
+        bucket_key = _reservation_bucket.get(reservation_key)
+        if bucket_key is None:
             raise BudgetSettleError(
                 f"settle: no reservation for api_request_id={api_request_id!r} · "
                 "double settle or missing reserve"
             )
+        b = _get_or_create_bucket_by_key(bucket_key)
+        if api_request_id not in b["reservations"]:
+            # The index and bucket must move atomically under the same lock.
+            _reservation_bucket.pop(reservation_key, None)
+            raise BudgetSettleError(
+                f"settle: reservation index corrupt for api_request_id={api_request_id!r}"
+            )
         b["reservations"].pop(api_request_id)
+        _reservation_bucket.pop(reservation_key, None)
         b["used"] = b["used"] + actual_tokens
 
 
@@ -157,11 +176,12 @@ def release(tenant_id: str, api_request_id: str) -> bool:
     - 任何情况下 · used 不变
     """
     with _lock:
-        b = _get_or_create_bucket(tenant_id)
-        if api_request_id in b["reservations"]:
-            b["reservations"].pop(api_request_id)
-            return True
-        return False
+        reservation_key = (tenant_id, api_request_id)
+        bucket_key = _reservation_bucket.pop(reservation_key, None)
+        if bucket_key is None:
+            return False
+        b = _get_or_create_bucket_by_key(bucket_key)
+        return b["reservations"].pop(api_request_id, None) is not None
 
 
 # ── 观察 helpers · 测试用 ─────────────────────────────────────────────
@@ -178,13 +198,17 @@ def get_pending_total(tenant_id: str) -> int:
 
 def get_reservation(tenant_id: str, api_request_id: str) -> Optional[int]:
     with _lock:
-        return _get_or_create_bucket(tenant_id)["reservations"].get(api_request_id)
+        bucket_key = _reservation_bucket.get((tenant_id, api_request_id))
+        if bucket_key is None:
+            return None
+        return _get_or_create_bucket_by_key(bucket_key)["reservations"].get(api_request_id)
 
 
 def reset_state() -> None:
     """测试用 · 清空全部 bucket。"""
     with _lock:
         _bucket.clear()
+        _reservation_bucket.clear()
 
 
 # ── register: 只挂 observer hooks · 无 enforcement · 无 middleware ────
@@ -206,4 +230,3 @@ def register(ctx: Any) -> None:
     """
     ctx.register_hook("pre_api_request", _on_pre_api_request_observer)
     ctx.register_hook("post_api_request", _on_post_api_request_observer)
-
