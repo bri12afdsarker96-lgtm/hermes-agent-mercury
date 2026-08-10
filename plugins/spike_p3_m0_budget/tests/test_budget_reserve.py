@@ -306,6 +306,38 @@ def test_utc_day_rollover_isolates_bucket(tmp_path, monkeypatch):
     assert mod.get_used("t_roll") == 80
 
 
+def test_settle_after_utc_rollover_charges_original_bucket(tmp_path, monkeypatch):
+    """跨零点 provider 调用必须结算创建 reservation 的原 UTC 日。"""
+    _, mod = _enable_budget(tmp_path, monkeypatch)
+    current_day = {"value": "2026-08-09"}
+    monkeypatch.setattr(mod, "_today_utc", lambda: current_day["value"])
+
+    mod.reserve("t_cross", "req_cross", 80, budget=100)
+    current_day["value"] = "2026-08-10"
+    mod.settle("t_cross", "req_cross", 60)
+
+    assert mod.get_used("t_cross") == 0
+    assert mod.get_reservation("t_cross", "req_cross") is None
+    current_day["value"] = "2026-08-09"
+    assert mod.get_used("t_cross") == 60
+    assert mod.get_pending_total("t_cross") == 0
+
+
+def test_release_after_utc_rollover_clears_original_bucket(tmp_path, monkeypatch):
+    """跨零点异常清理不得把昨日 pending reservation 永久遗留。"""
+    _, mod = _enable_budget(tmp_path, monkeypatch)
+    current_day = {"value": "2026-08-09"}
+    monkeypatch.setattr(mod, "_today_utc", lambda: current_day["value"])
+
+    mod.reserve("t_cross", "req_release_cross", 80, budget=100)
+    current_day["value"] = "2026-08-10"
+    assert mod.release("t_cross", "req_release_cross") is True
+    assert mod.get_reservation("t_cross", "req_release_cross") is None
+    current_day["value"] = "2026-08-09"
+    assert mod.get_pending_total("t_cross") == 0
+    assert mod.get_used("t_cross") == 0
+
+
 # ── observer hooks 不 enforce(§I 契约) ─────────────────────────
 
 
