@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="hermes_Agent">
+  <title>hermes_Agent</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F45B3B"/>
+      <stop offset="100%" stop-color="#C4361F"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 圆角方 · 品牌桔红渐变(承接 webconsole --accent 色) -->
+  <rect x="0" y="0" width="128" height="128" rx="26" ry="26" fill="url(#bg)"/>
+  <!-- 顶部微光 · 立体感 -->
+  <rect x="0" y="0" width="128" height="64" rx="26" ry="26" fill="url(#glow)"/>
+
+  <!-- Hermes 神使双翼 · 抽象几何(信使/传递意象) -->
+  <g fill="#FFFFFF" fill-opacity="0.92">
+    <!-- 左翼 -->
+    <path d="M 26 34 Q 32 30 42 34 Q 36 38 32 40 Q 30 41 26 42 Z"/>
+    <path d="M 30 42 Q 36 39 44 42 Q 38 45 34 46 Q 32 47 30 47 Z"/>
+    <!-- 右翼 -->
+    <path d="M 102 34 Q 96 30 86 34 Q 92 38 96 40 Q 98 41 102 42 Z"/>
+    <path d="M 98 42 Q 92 39 84 42 Q 90 45 94 46 Q 96 47 98 47 Z"/>
+  </g>
+
+  <!-- H 主体 · 白色粗笔 · 融合信使柱 -->
+  <g fill="#FFFFFF">
+    <!-- 左柱 -->
+    <rect x="38" y="42" width="12" height="54" rx="2"/>
+    <!-- 右柱 -->
+    <rect x="78" y="42" width="12" height="54" rx="2"/>
+    <!-- 横杠 -->
+    <rect x="38" y="64" width="52" height="10" rx="2"/>
+  </g>
+
+  <!-- 底部小圆点 · Mercury/水星象征 · 承接项目 hermes_AI 命名 -->
+  <circle cx="64" cy="106" r="4" fill="#FFFFFF" fill-opacity="0.85"/>
+</svg>
