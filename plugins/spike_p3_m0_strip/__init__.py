@@ -51,8 +51,9 @@ def on_transform_llm_output(
         stripped = _sanitize_mod.sanitize_presentation(text, mode="final")
     except Exception as exc:  # noqa: BLE001 — fail-closed · 拒原文泄漏
         logger.error(
-            "spike-p3-m0-strip: sanitizer FAILED · fail-closed (session_id=%s model=%s platform=%s): %s",
-            session_id, model, platform, exc,
+            "spike-p3-m0-strip: sanitizer FAILED · fail-closed "
+            "(session_id=%s model=%s platform=%s error_class=%s)",
+            session_id, model, platform, type(exc).__name__,
         )
         # audit event · 便于监控告警
         _emit_audit(
