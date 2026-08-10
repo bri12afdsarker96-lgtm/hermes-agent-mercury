@@ -21,10 +21,10 @@
        ├─ cacheable_request → cache lookup
        │   └─ HIT → 返回 cached + 顶层 usage=0(**不 reserve**)
        │
-       ├─ (MISS 或 非 cacheable_request)→ budget.reserve
+       ├─ (MISS 或非 cacheable_request)→ budget 非 null 时 reserve
        │   ├─ raise BudgetExceeded → 结构化非空 error response(**不 next_call**)
        │   └─ 成功 → next_call
-       │            ├─ 成功 → budget.settle(actual) + cache insert(若 req+resp 皆 cacheable)
+       │            ├─ 成功 → usage 缺失时按 reservation 结算 + cache insert(若 req+resp 皆 cacheable)
        │            └─ 异常 → budget.release + re-raise
 
 3. 严格 tenant fail-CLOSED:tenant_id / principal_id / permission_scope_version /
@@ -35,7 +35,7 @@
    bedrock_converse / codex_responses)fail-CLOSED · **不 next_call**(见 §II 明令)·
    M0 缩小支持范围到 chat_completions · 其他 mode 需 M1+ 补 token 估算
 
-5. 顶层 `usage` = billable_usage(全 0)· 原始生成 usage 只在 `cache_meta.origin_usage`
+5. 顶层 `usage` = billable_usage(全 0)· 原始生成 usage 只在 `cache_meta.origin_usage` · cache insert/hit 均深复制防调用方污染
 
 6. 并发:threading.RLock 保护 LRU + insert 序
 
