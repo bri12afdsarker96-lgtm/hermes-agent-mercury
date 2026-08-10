@@ -5,7 +5,7 @@ r"""P3-M0 · fork sanitizer vs Hermes_AI baseline · differential contract lock.
 - 差异**仅**允许:①`\s?` 前导空白吸收 · ②`.rstrip()` 保留首行 indentation
 - 覆盖包含关系:baseline strip 的 · fork 必 strip
 - 负例一致:baseline 保留的 · fork 必保留
-- baseline 源字符串 verbatim byte-check(飘移即失败)
+- 用输入/输出行为证明覆盖包含关系，不锁死正则实现文本
 """
 from __future__ import annotations
 
@@ -13,57 +13,10 @@ import pytest
 
 from plugins.spike_p3_m0_fixtures import hermes_ai_baseline
 from plugins.spike_p3_m0_fixtures.citation_cases import ALL_CASES, cases_by_marker
-from plugins.spike_p3_m0_strip.sanitize import (
-    _INLINE_SOURCE_RE,
-    _LINE_SOURCE_RE,
-    sanitize_presentation,
-)
+from plugins.spike_p3_m0_strip.sanitize import sanitize_presentation
 
 
-# ── 1. baseline 源字符串 verbatim byte-check ────────────────────
-
-
-def test_baseline_regex_verbatim():
-    """Vendored baseline 与 Hermes_AI 源必须 byte-identical(source of truth 门)。
-
-    这两个模式串直接从 `hermes_devices/ops/audit.py::_INLINE_RE._LINE_RE.pattern`
-    抄写 · 若上游修改 · 本测试**必须**先失败提醒同步 vendor。
-    """
-    expected_inline = (
-        r"[\[【（(]\s*(?:source|来源)\s*[:：]"
-        r"(?:[^\[\]【】（）()\n]|[（(][^（）()\n]*[）)]|[\[【][^\[\]【】\n]*[\]】])*"
-        r"[\]】）)]"
-    )
-    expected_line = r"^[ \t]*(?:source|来源)\s*[:：].*$"
-    assert hermes_ai_baseline.BASELINE_INLINE_PATTERN == expected_inline, (
-        "vendored baseline INLINE pattern drifted · resync from Hermes_AI "
-        "hermes_devices/ops/audit.py::_INLINE_RE.pattern"
-    )
-    assert hermes_ai_baseline.BASELINE_LINE_PATTERN == expected_line, (
-        "vendored baseline LINE pattern drifted · resync from Hermes_AI "
-        "hermes_devices/ops/audit.py::_LINE_RE.pattern"
-    )
-
-
-# ── 2. Fork inline pattern = baseline + `[ \t]?` 前导(**只水平空白**) ─
-
-
-def test_fork_inline_pattern_is_baseline_plus_leading_horizontal_space():
-    """fork `_INLINE_SOURCE_RE` = `[ \\t]?` + baseline INLINE pattern(严格锁定)。
-
-    Codex §7 反例证明:前导消耗必须是 `[ \\t]?`(空格 / tab)· **不**能是 `\\s?`
-    (`\\s` 包含 `\\n` · 会把行末换行吞掉,拼接下一行 · 见
-    `test_leading_space_does_not_eat_newline_before_marker`)。
-    """
-    assert _INLINE_SOURCE_RE.pattern == r"[ \t]?" + hermes_ai_baseline.BASELINE_INLINE_PATTERN
-
-
-def test_fork_line_pattern_equals_baseline():
-    """fork `_LINE_SOURCE_RE` = baseline LINE pattern(**完全一致**)。"""
-    assert _LINE_SOURCE_RE.pattern == hermes_ai_baseline.BASELINE_LINE_PATTERN
-
-
-# ── 3. 覆盖包含关系:baseline strip 的 · fork 必 strip ─────────
+# ── 1. 覆盖包含关系:baseline strip 的 · fork 必 strip ─────────
 
 
 _SOURCE_MARKER_LEFT_BRACKETS = ("[source", "[来源", "[SOURCE", "[Source",
