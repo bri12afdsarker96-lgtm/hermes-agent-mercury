@@ -21,10 +21,10 @@
        ├─ cacheable_request → cache lookup
        │   └─ HIT → 返回 cached + 顶层 usage=0(**不 reserve**)
        │
-       ├─ (MISS 或非 cacheable_request)→ budget 非 null 时 reserve
+       ├─ (MISS 或 非 cacheable_request)→ budget.reserve
        │   ├─ raise BudgetExceeded → 结构化非空 error response(**不 next_call**)
        │   └─ 成功 → next_call
-       │            ├─ 成功 → usage 缺失时按 reservation 结算 + cache insert(若 req+resp 皆 cacheable)
+       │            ├─ 成功 → budget.settle(actual) + cache insert(若 req+resp 皆 cacheable)
        │            └─ 异常 → budget.release + re-raise
 
 3. 严格 tenant fail-CLOSED:tenant_id / principal_id / permission_scope_version /
@@ -35,7 +35,7 @@
    bedrock_converse / codex_responses)fail-CLOSED · **不 next_call**(见 §II 明令)·
    M0 缩小支持范围到 chat_completions · 其他 mode 需 M1+ 补 token 估算
 
-5. 顶层 `usage` = billable_usage(全 0)· 原始生成 usage 只在 `cache_meta.origin_usage` · cache insert/hit 均深复制防调用方污染
+5. 顶层 `usage` = billable_usage(全 0)· 原始生成 usage 只在 `cache_meta.origin_usage`
 
 6. 并发:threading.RLock 保护 LRU + insert 序
 
@@ -98,7 +98,7 @@ def _budget_module():
     )
 
 
-CACHE_CONTRACT_VERSION = "v1"
+CACHE_CONTRACT_VERSION = "v2"
 CODEC_VERSION = "codec_v1"
 CACHE_MAX_SIZE = 256   # LRU cap · 简单进程内 · M0 不 persistent
 
@@ -268,11 +268,29 @@ def build_cache_key(
     *,
     model: str,
     provider: str,
+    api_mode: str = "chat_completions",
 ) -> str:
-    """SHA-256 of deterministic key components(12 字段 schema v1)."""
+    """SHA-256 of deterministic semantic request components(schema v2).
+
+    Besides identity, messages, and tool schema, every public request option
+    that can affect generation is hashed.  This intentionally prefers a cache
+    miss over reusing a response produced with different sampling, output,
+    reasoning, or provider-specific options.
+    """
     messages = request.get("messages") or []
     messages_bytes = json.dumps(messages, sort_keys=True, ensure_ascii=False).encode("utf-8")
     tools_bytes = json.dumps(request.get("tools") or [], sort_keys=True, ensure_ascii=False).encode("utf-8")
+    generation_options = {
+        key: value
+        for key, value in request.items()
+        if key not in {"messages", "tools", "stream", "_kb_collection", "_kb_version"}
+        and not key.startswith("_")
+    }
+    generation_options_bytes = json.dumps(
+        generation_options,
+        sort_keys=True,
+        ensure_ascii=False,
+    ).encode("utf-8")
     # system prompt hash · 从 messages 首 system 消息内容
     sys_msg_content = ""
     for m in messages:
@@ -285,8 +303,10 @@ def build_cache_key(
         "permission_scope_version": tenant_ctx["permission_scope_version"],
         "provider": provider or "",
         "model": model or "",
+        "api_mode": api_mode,
         "system_prompt_version": hashlib.sha256(sys_msg_content.encode("utf-8")).hexdigest()[:16],
         "tool_schema_version": hashlib.sha256(tools_bytes).hexdigest()[:16],
+        "generation_options_version": hashlib.sha256(generation_options_bytes).hexdigest(),
         "profile_version": tenant_ctx["profile_version"],
         "knowledge_collection": str(request.get("_kb_collection") or ""),
         "knowledge_collection_version": str(request.get("_kb_version") or ""),
@@ -431,10 +451,17 @@ def cache_and_budget_middleware(
 
     见模块 docstring §2 完整控制流。
     """
-    api_request_id = str(ctx.get("api_request_id") or "")
-    api_mode = str(ctx.get("api_mode") or "chat_completions")
-    provider = str(ctx.get("provider") or "")
-    model = str(ctx.get("model") or "")
+    raw_api_request_id = ctx.get("api_request_id")
+    raw_api_mode = ctx.get("api_mode")
+    raw_provider = ctx.get("provider")
+    raw_model = ctx.get("model")
+    context_values = (raw_api_request_id, raw_api_mode, raw_provider, raw_model)
+    if any(value is not None and not isinstance(value, str) for value in context_values):
+        return _fail_closed_response("", reason_code="invalid_execution_context")
+    api_request_id = raw_api_request_id or ""
+    api_mode = raw_api_mode or "chat_completions"
+    provider = raw_provider or ""
+    model = raw_model or ""
 
     # 1. Resolve config exactly once.  A registered middleware whose config
     # cannot be read/validated must not be mistaken for a disabled plugin:
@@ -505,6 +532,12 @@ def cache_and_budget_middleware(
         logger.warning("spike-cache: request not a dict · fail-CLOSED · type=%s", type(request).__name__)
         return _fail_closed_response(model, reason_code="non_dict_request")
 
+    # Provider and model are mandatory cache identity fields.  Empty values
+    # would collapse unrelated upstream attempts into the same key.
+    if not provider or not model:
+        logger.warning("spike-cache: provider/model context missing · fail-CLOSED")
+        return _fail_closed_response(model, reason_code="missing_provider_or_model")
+
     # 6. tenant context 严格 fail-CLOSED(Codex §III:enforcement 开启时 next_call == 0)
     try:
         tenant_ctx = _get_tenant_context(plugin_cfg)
@@ -535,12 +568,7 @@ def cache_and_budget_middleware(
         )
         return _fail_closed_response(model, reason_code="budget_config_error")
 
-    # 8. api_request_id 门(reserve 需唯一 id · 空则无法 settle)
-    if not api_request_id:
-        logger.warning("spike-cache: empty api_request_id · fail-CLOSED · cannot track reservation")
-        return _fail_closed_response(model, reason_code="missing_api_request_id")
-
-    # 9. Cache eligibility 判定(与 budget 决策解耦 · Codex §II step 4)
+    # 8. Cache eligibility 判定(与 budget 决策解耦 · Codex §II step 4)
     try:
         cacheable_req = is_cacheable_request(request, api_mode=api_mode)
     except Exception as exc:   # noqa: BLE001
@@ -550,13 +578,19 @@ def cache_and_budget_middleware(
         )
         return _fail_closed_response(model, reason_code="request_classification_error")
 
-    # 10. 若可缓存 → lookup · HIT 直接返回(不 reserve).  Any internal
+    # 9. 若可缓存 → lookup · HIT 直接返回(不 reserve).  Any internal
     # pre-provider failure is converted locally to fail-CLOSED so it cannot
     # escape into the outer middleware chain's fail-open policy.
     cache_key: Optional[str] = None
     if cacheable_req:
         try:
-            cache_key = build_cache_key(request, tenant_ctx, model=model, provider=provider)
+            cache_key = build_cache_key(
+                request,
+                tenant_ctx,
+                model=model,
+                provider=provider,
+                api_mode=api_mode,
+            )
             with _lock:
                 hit = _cache.get(cache_key)
                 if hit is not None:
@@ -571,18 +605,25 @@ def cache_and_budget_middleware(
             # cache hit · 不 reserve · 顶层 usage=0 · shallow copy 防调用方 mutate
             return copy.deepcopy(hit)
 
-    # 11. MISS 或非 cacheable · 都必须 reserve(Codex §II step 6)
-    try:
-        tokens_needed = _estimate_needed_tokens(request, ctx)
-    except Exception as exc:   # noqa: BLE001
-        logger.error(
-            "spike-cache: token estimation failed · type=%s · fail-CLOSED",
-            type(exc).__name__,
-        )
-        return _fail_closed_response(model, reason_code="token_estimation_error")
+    # 10. MISS 或非 cacheable · budget=None 明确表示不启用护栏，因此既不
+    # 需要 api_request_id，也不做 token estimation/reserve/settle。
     reservation_active = budget_value is not None
+    tokens_needed: Optional[int] = None
+    if reservation_active:
+        if not api_request_id:
+            logger.warning("spike-cache: empty api_request_id · fail-CLOSED · cannot track reservation")
+            return _fail_closed_response(model, reason_code="missing_api_request_id")
+        try:
+            tokens_needed = _estimate_needed_tokens(request, ctx)
+        except Exception as exc:   # noqa: BLE001
+            logger.error(
+                "spike-cache: token estimation failed · type=%s · fail-CLOSED",
+                type(exc).__name__,
+            )
+            return _fail_closed_response(model, reason_code="token_estimation_error")
     try:
         if reservation_active:
+            assert tokens_needed is not None
             budget_mod.reserve(tenant_id, api_request_id, tokens_needed, budget=budget_value)
     except budget_mod.BudgetExceeded:
         logger.warning(
@@ -624,6 +665,7 @@ def cache_and_budget_middleware(
 
     # 13. Settle 实际用量(所有非异常路径都 settle · cacheable/非 cacheable 无关)
     if reservation_active:
+        assert tokens_needed is not None
         actual = _extract_actual_usage(response)
         if actual is None:
             actual = tokens_needed
@@ -692,10 +734,16 @@ def _extract_actual_usage(response: Any) -> Optional[int]:
                 return None
             prompt = getattr(usage, "prompt_tokens", 0)
             completion = getattr(usage, "completion_tokens", 0)
-        if isinstance(prompt, bool) or isinstance(completion, bool):
+        if (
+            isinstance(prompt, bool)
+            or isinstance(completion, bool)
+            or not isinstance(prompt, int)
+            or not isinstance(completion, int)
+            or prompt < 0
+            or completion < 0
+        ):
             return None
-        total = int(prompt or 0) + int(completion or 0)
-        return total if total >= 0 else None
+        return prompt + completion
     except Exception:   # noqa: BLE001
         return None
 
@@ -714,4 +762,3 @@ def cache_size() -> int:
 def register(ctx: Any) -> None:
     """PluginContext register · 挂 llm_execution middleware(orchestrator)."""
     ctx.register_middleware("llm_execution", cache_and_budget_middleware)
-
