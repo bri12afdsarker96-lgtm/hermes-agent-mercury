@@ -8,3 +8,7 @@ web/package-lock.json linguist-generated=true
 Dockerfile  text eol=lf
 *.dockerfile text eol=lf
 docker/entrypoint.sh text eol=lf
+
+# P3-M0 shared strip fixture — SHA-256 is a cross-repo lock; must stay LF-normalized
+# on every checkout so the double-repo fixture SHA gate matches on Windows too.
+plugins/spike_p3_m0_fixtures/citation_cases.py text eol=lf

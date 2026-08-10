@@ -1,0 +1,6 @@
+name: spike-p3-m0-strip
+version: "0.0.1"
+description: "P3-M0 Spike · strip-sources prototype · transform_llm_output hook · fail-closed on sanitizer exception (returns safe placeholder, NOT original text). Covers exit ① normal final response only. Streaming ② / interim ③ / history-replay ④ / tool-result ⑤ exits are fixture-frozen (pending). Configured via plugins.enabled in config.yaml (no env vars). WIP · do not enable in production."
+author: "Hermes_AI × NousResearch/hermes-agent Spike"
+provides_hooks:
+  - transform_llm_output

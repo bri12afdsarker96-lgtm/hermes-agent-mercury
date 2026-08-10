@@ -1,0 +1,7 @@
+name: spike-p3-m0-budget
+version: "0.0.1"
+description: "P3-M0 Spike · tenant budget service (UTC daily bucket, 4-state validation, thread-safe reserve/settle/release) called from spike-p3-m0-cache orchestrator middleware. Registers observer-only pre_api_request / post_api_request hooks (NO enforcement — production call sites swallow hook exceptions). MUST NOT use HERMES_DAILY_TOKEN_BUDGET to impersonate per-tenant budget. Off by default (opt-in via plugins.enabled)."
+author: "Hermes_AI × NousResearch/hermes-agent Spike"
+provides_hooks:
+  - pre_api_request
+  - post_api_request
