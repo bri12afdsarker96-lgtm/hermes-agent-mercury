@@ -432,6 +432,42 @@ def test_null_budget_skips_reservation_and_settle(tmp_path, monkeypatch):
     assert calls == {"reserve": 0, "settle": 0, "next": 1}
 
 
+def test_null_budget_requires_neither_request_id_nor_token_estimate(tmp_path, monkeypatch):
+    """null 明确关闭预算护栏；miss 不应被预算专用字段阻断。"""
+    _, _, budget_mod = _enable_cache(tmp_path, monkeypatch, daily_budget=None)
+    calls = {"reserve": 0, "settle": 0, "next": 0}
+    monkeypatch.setattr(
+        budget_mod,
+        "reserve",
+        lambda *_args, **_kwargs: calls.__setitem__("reserve", calls["reserve"] + 1),
+    )
+    monkeypatch.setattr(
+        budget_mod,
+        "settle",
+        lambda *_args, **_kwargs: calls.__setitem__("settle", calls["settle"] + 1),
+    )
+
+    def next_call(_req):
+        calls["next"] += 1
+        return {
+            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 4, "completion_tokens": 2},
+        }
+
+    run = make_run_llm_execution(
+        api_request_id="",
+        provider="openai",
+        model="m",
+        api_mode="chat_completions",
+    )
+    response = run(
+        {"messages": [], "max_tokens": "not-needed-with-null-budget"},
+        next_call,
+    )
+    assert response["choices"][0]["message"]["content"] == "ok"
+    assert calls == {"reserve": 0, "settle": 0, "next": 1}
+
+
 def test_missing_usage_settles_reserved_estimate(tmp_path, monkeypatch):
     """provider 未回 usage 时按预留值结算，禁止按 0 洗预算。"""
     _, _, budget_mod = _enable_cache(tmp_path, monkeypatch, daily_budget=10_000)
@@ -452,38 +488,53 @@ def test_missing_usage_settles_reserved_estimate(tmp_path, monkeypatch):
     assert budget_mod.get_pending_total(_VALID_TENANT["tenant_id"]) == 0
 
 
+@pytest.mark.parametrize(
+    "usage",
+    [
+        {"prompt_tokens": "5", "completion_tokens": 2},
+        {"prompt_tokens": 1.5, "completion_tokens": 2},
+        {"prompt_tokens": -1, "completion_tokens": 2},
+        {"prompt_tokens": True, "completion_tokens": 2},
+    ],
+)
+def test_invalid_usage_types_settle_reserved_estimate(tmp_path, monkeypatch, usage):
+    """非严格非负整数 usage 不可信，必须按 reservation 保守结算。"""
+    _, _, budget_mod = _enable_cache(tmp_path, monkeypatch, daily_budget=10_000)
+
+    run = make_run_llm_execution(
+        api_request_id="req_invalid_usage",
+        provider="openai",
+        model="m",
+        api_mode="chat_completions",
+        approx_input_tokens=123,
+        max_tokens=77,
+    )
+    run(
+        {"messages": [{"role": "user", "content": "x"}], "max_tokens": 77},
+        lambda _req: {
+            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            "usage": usage,
+        },
+    )
+    assert budget_mod.get_used(_VALID_TENANT["tenant_id"]) == 200
+
+
 def test_cache_hit_returns_deep_copy(tmp_path, monkeypatch):
     """调用方修改一次 hit 结果不得污染后续缓存。"""
     _, _, _ = _enable_cache(tmp_path, monkeypatch, daily_budget=10_000)
     calls = {"next": 0}
 
-    def next_call(_req):
-        calls["next"] += 1
-        return {
-            "model": "gpt-4o",
-            "choices": [{"message": {"content": "stable"}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": 5, "completion_tokens": 5},
-        }
-
-    req = {"messages": [{"role": "user", "content": "same"}]}
-    make_run_llm_execution(
-        api_request_id="copy_miss", provider="openai", model="gpt-4o",
-        api_mode="chat_completions", approx_input_tokens=10,
-    )(req, next_call)
-    first_hit = make_run_llm_execution(
-        api_request_id="copy_hit_1", provider="openai", model="gpt-4o",
-        api_mode="chat_completions", approx_input_tokens=10,
-    )(req, next_call)
-    first_hit["choices"][0]["message"]["content"] = "poisoned"
-    first_hit["cache_meta"]["origin_usage"]["prompt_tokens"] = 999
-
-    second_hit = make_run_llm_execution(
-        api_request_id="copy_hit_2", provider="openai", model="gpt-4o",
-        api_mode="chat_completions", approx_input_tokens=10,
-    )(req, next_call)
+    def next_call(_req…475 tokens truncated…mode="chat_completions",
+        approx_input_tokens=10,
+    )(request, next_call)
+    hit = make_run_llm_execution(
+        api_request_id="",
+        provider="openai",
+        model="gpt-4o",
+        api_mode="chat_completions",
+    )(request, next_call)
     assert calls["next"] == 1
-    assert second_hit["choices"][0]["message"]["content"] == "stable"
-    assert second_hit["cache_meta"]["origin_usage"]["prompt_tokens"] == 5
+    assert hit["cache_meta"]["hit"] is True
 
 
 # ── Tenant context / api_mode / non-dict / budget config fail-CLOSED ─
@@ -617,6 +668,47 @@ def test_missing_api_request_id_fail_closed(tmp_path, monkeypatch):
     assert resp["cache_meta"]["reason_code"] == "missing_api_request_id"
 
 
+@pytest.mark.parametrize(
+    ("provider", "model"),
+    [("", "m"), ("openai", "")],
+)
+def test_missing_provider_or_model_fail_closed(
+    tmp_path, monkeypatch, provider, model,
+):
+    """缓存身份字段缺失时不得生成可碰撞的空值 key。"""
+    _enable_cache(tmp_path, monkeypatch, daily_budget=10_000)
+    counters = {"next": 0}
+
+    def next_call(_req):
+        counters["next"] += 1
+
+    response = make_run_llm_execution(
+        api_request_id="req_identity",
+        provider=provider,
+        model=model,
+        api_mode="chat_completions",
+    )({"messages": [{"role": "user", "content": "x"}]}, next_call)
+    assert counters["next"] == 0
+    assert response["cache_meta"]["reason_code"] == "missing_provider_or_model"
+
+
+def test_non_string_execution_context_fail_closed(tmp_path, monkeypatch):
+    _enable_cache(tmp_path, monkeypatch, daily_budget=10_000)
+    counters = {"next": 0}
+
+    response = make_run_llm_execution(
+        api_request_id="req_identity",
+        provider={"unexpected": "mapping"},
+        model="m",
+        api_mode="chat_completions",
+    )(
+        {"messages": [{"role": "user", "content": "x"}]},
+        lambda _req: counters.__setitem__("next", counters["next"] + 1),
+    )
+    assert counters["next"] == 0
+    assert response["cache_meta"]["reason_code"] == "invalid_execution_context"
+
+
 # ── Cache alone(budget disabled)· 硬依赖门 fail-CLOSED ─────────────
 
 
@@ -661,6 +753,31 @@ def test_cache_key_changes_on_provider(tmp_path, monkeypatch):
     k1 = cache_mod.build_cache_key(req, ctx, model="m", provider="openai")
     k2 = cache_mod.build_cache_key(req, ctx, model="m", provider="anthropic")
     assert k1 != k2
+
+
+@pytest.mark.parametrize(
+    ("field", "first", "second"),
+    [
+        ("temperature", 0, 0.8),
+        ("top_p", 0.9, 1.0),
+        ("max_tokens", 64, 128),
+        ("response_format", {"type": "text"}, {"type": "json_object"}),
+        ("seed", 1, 2),
+        ("extra_body", {"reasoning": {"effort": "low"}}, {"reasoning": {"effort": "high"}}),
+    ],
+)
+def test_cache_key_changes_on_generation_options(
+    tmp_path, monkeypatch, field, first, second,
+):
+    """相同 messages 但生成语义不同，必须产生不同 cache key。"""
+    _, cache_mod, _ = _enable_cache(tmp_path, monkeypatch, daily_budget=10_000)
+    ctx = dict(_VALID_TENANT)
+    base = {"messages": [{"role": "user", "content": "same"}]}
+    req_a = dict(base, **{field: first})
+    req_b = dict(base, **{field: second})
+    key_a = cache_mod.build_cache_key(req_a, ctx, model="m", provider="openai")
+    key_b = cache_mod.build_cache_key(req_b, ctx, model="m", provider="openai")
+    assert key_a != key_b
 
 
 def test_cache_key_changes_on_tenant(tmp_path, monkeypatch):
@@ -917,4 +1034,3 @@ def test_response_classification_error_preserves_provider_response(tmp_path, mon
         approx_input_tokens=10,
     )
     assert run({"messages": [{"role": "user", "content": "x"}]}, lambda _req: expected) is expected
-
