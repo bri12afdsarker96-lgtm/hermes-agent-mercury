@@ -1,0 +1,14 @@
+# P3-M1 primary/fallback provider contract.
+#
+# Copy these non-secret settings into ~/.hermes/config.yaml. Store the two
+# credentials only in ~/.hermes/.env (or through `hermes model` / Desktop
+# Settings); never add API-key values to this file.
+model:
+  default: MiniMax-M3
+  provider: minimax
+  base_url: https://api.minimax.io/v1
+  api_mode: chat_completions
+
+fallback_providers:
+  - provider: deepseek
+    model: deepseek-v4-flash
