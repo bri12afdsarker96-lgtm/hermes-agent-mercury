@@ -1,0 +1,182 @@
+name: p3-m1-mcp-seven-step
+
+# fork PR #4 · P3-M1 MCP 七步验收（fork 原生 discover + registry + dispatch）
+#
+# 与 Hermes_AI PR #30 的六宫格互补：
+# - PR #30 侧证明 raw mcp.ClientSession + stdio_client 底层能真实驱动两 stdio server
+# - 本 workflow 证明 fork 生产 discover_mcp_tools + tools.registry.registry.dispatch()
+#   走 fork 自己的 registered handler 链完成七步
+#
+# Codex 硬约束：
+# - permissions: contents: read（最小权限，无写权限）
+# - 不使用 pull_request_target（Secret 走同仓 PR 分支路径）
+# - 不注入任何 Provider key
+# - 固定 Hermes_AI 完整 SHA（本 workflow env 硬写）
+# - 装 fork 的 CI-faithful profile via `uv sync --locked`（不改 uv.lock）
+# - 装 Hermes_AI @ pinned SHA：私仓 actions/checkout + fine-grained PAT
+#   （HERMES_AI_TOKEN，仅 HA `Contents: Read-only`），persist-credentials: false
+# - 依赖全部来自 fork locked sync：mcp==1.28.1 / httpx==0.28.1 / websockets==15.0.1
+#   （fork uv.lock @ 89f81710 权威 pin），只断言不重装；缺包/版本不符 CI 立即失败
+# - Hermes_AI 仅 `pip install --no-deps ./_hermes_ai` 写 .venv/site-packages（不侵 pyproject.toml/uv.lock）
+# - junit + 严格 no-skip（tests>0 · skipped==0 · failures==0 · errors==0，全部条件同时满足）
+# - artifact 上传只能 continue-on-error 副作用；pytest/checkout/SHA-verify/no-skip 步骤**不得** continue-on-error
+# - 不设 PYTHONUTF8=1；PYTHONIOENCODING=utf-8 传子进程
+# - Secret 不得进 env / 命令参数 / 日志 / 文件 / PR 正文；不开 git/curl debug
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches:
+      - feature/p3-m1-mcp-seven-step
+  pull_request:
+    branches:
+      - feature/p3-m1-provider   # base
+      - main
+    paths:
+      - 'tests/native_mcp/**'
+      - '.github/workflows/p3-m1-mcp-seven-step.yml'
+      - 'tools/mcp_tool.py'
+      - 'tools/registry.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+
+env:
+  # Hermes_AI PR #30 收口 GREEN HEAD（同 commit 更新，绝不浮动）
+  HERMES_AI_PIN_SHA: a3ef38298e6a42a88ec93d75af88b4027f7febbe
+  HERMES_AI_REPO: bri12afdsarker96-lgtm/Hermes_AI
+
+jobs:
+  seven-step:
+    runs-on: ubuntu-latest
+    # 与 fork tests.yml house 惯例一致：Linux-only；Windows 覆盖已由
+    # Hermes_AI PR #30 的六宫格承担
+    timeout-minutes: 15
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+
+      - name: Checkout Hermes_AI at pinned SHA
+        # 私仓；fine-grained PAT 仅 HA `Contents: Read-only`。
+        # persist-credentials: false —— 使用后立即从 .git/config 清理 token。
+        # fetch-depth: 1 —— 单 commit 足够，无浪费。
+        # 若 Secret 缺失/权限不足，该步会直接 403/404 失败；禁 fallback。
+        uses: actions/checkout@v4
+        with:
+          repository: bri12afdsarker96-lgtm/Hermes_AI
+          ref: a3ef38298e6a42a88ec93d75af88b4027f7febbe
+          token: ${{ secrets.HERMES_AI_TOKEN }}
+          path: _hermes_ai
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify Hermes_AI pinned commit
+        # 硬断言 checkout HEAD == HERMES_AI_PIN_SHA；不输出任何认证配置。
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git -C _hermes_ai rev-parse HEAD)"
+          expected="${HERMES_AI_PIN_SHA}"
+          echo "Hermes_AI checked-out SHA: ${actual}"
+          test "${actual}" = "${expected}"
+
+      - name: Install uv
+        # 与 fork tests.yml 一致的 uv 版本
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.9.28"
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: uv sync (locked · dev + mcp extras only · 不改 uv.lock)
+        # `--locked` 保证 uv.lock 不被改写；uv-lockfile-check.yml 另 gate 会
+        # 独立复核；此处只装 MCP 测试所需最小子集
+        run: uv sync --locked --python 3.11 --extra dev --extra mcp
+
+      - name: Assert locked-sync versions (mcp / httpx / websockets · Codex path-2 BLOCKER 3)
+        # 只断言，不重装、不浮动补装。这三条都由 fork uv.lock @ 89f81710 权威
+        # 固定（mcp==1.28.1 / httpx==0.28.1 / websockets==15.0.1，均为 mcp 的
+        # transitive dep 且 --extra dev/mcp 会拉取）。缺包或版本不符 CI 必须
+        # 立即失败；不得 force-reinstall 或 uv pip install "pkg>=X" 浮动补装
+        # 掩盖 lock 漂移，也不得改 uv.lock / pyproject.toml。
+        run: |
+          source .venv/bin/activate
+          python - <<'PY'
+          import importlib.metadata as m
+          for pkg, want in (("mcp", "1.28.1"), ("httpx", "0.28.1"), ("websockets", "15.0.1")):
+              got = m.version(pkg)
+              print(f"{pkg}=={got}")
+              assert got == want, f"{pkg}: expected {want}, got {got} (uv.lock drift?)"
+          PY
+
+      - name: Install Hermes_AI @ pinned SHA (test-only, --no-deps)
+        # Codex F · Agent B §3：pip install 只写 .venv/site-packages；不
+        # 触 uv.lock 或 pyproject.toml。--no-deps 阻断 HA 传递依赖进 fork 图。
+        # HA 的 runtime dep（httpx / websockets）已由 fork locked sync 权威装配
+        # （见上一步断言），此步不再补装。
+        run: |
+          source .venv/bin/activate
+          uv pip install --no-deps ./_hermes_ai
+
+      - name: Sanity — HA metadata & console scripts on PATH (Agent C §7)
+        # SHA 已由 Verify Hermes_AI pinned commit 步骤硬闸；此步只补装/PATH 检查。
+        run: |
+          source .venv/bin/activate
+          python -m pip show hermes-devices | tee /tmp/ha_pip_show.txt
+          which hermes-devices-mcp
+          which hermes-data-ops-mcp
+
+      - name: Run fork PR #4 · seven-step via registry.dispatch
+        # 无 skip 允许；PYTHONIOENCODING=utf-8 传给 stdio 子进程；不设 PYTHONUTF8=1
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          source .venv/bin/activate
+          python -m pytest -v -p no:cacheprovider \
+            --strict-markers \
+            --junitxml=fork-mcp-seven-step-junit.xml \
+            -o junit_family=xunit2 \
+            tests/native_mcp/test_seven_step_via_registry.py
+
+      - name: Enforce strict no-skip gate (Codex path-2 §3.2)
+        # 严格四闸：tests>0 · skipped==0 · failures==0 · errors==0。
+        # 任何 skip 直接 fail。此步 **NOT** continue-on-error。
+        shell: bash
+        run: |
+          if [ ! -f fork-mcp-seven-step-junit.xml ]; then
+            echo "::error::junit report 缺失"; exit 1
+          fi
+          python - <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          r = ET.parse("fork-mcp-seven-step-junit.xml").getroot()
+          suites = r.findall("testsuite") or [r]
+          def _i(node, k):
+              try: return int(node.attrib.get(k, "0") or 0)
+              except ValueError: return 0
+          tests = sum(_i(s, "tests") for s in suites)
+          failures = sum(_i(s, "failures") for s in suites)
+          errors = sum(_i(s, "errors") for s in suites)
+          skipped = sum(_i(s, "skipped") for s in suites)
+          passed = tests - skipped - failures - errors
+          print(f"passed={passed} failed={failures} errors={errors} skipped={skipped} total={tests}")
+          if tests == 0:
+              sys.exit("::error::FAIL: 0 tests collected — invocation broken")
+          if skipped > 0:
+              sys.exit(f"::error::FAIL: {skipped} tests skipped (skipped==0 required)")
+          if failures or errors:
+              sys.exit(f"::error::FAIL: {failures} failed, {errors} errors")
+          print("OK: strict no-skip gate passed")
+          PY
+
+      - name: Upload junit report (best-effort · artifact 配额与本 gate 不耦合)
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-mcp-seven-step-junit
+          path: fork-mcp-seven-step-junit.xml
+          if-no-files-found: warn
