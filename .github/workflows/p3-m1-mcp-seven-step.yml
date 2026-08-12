@@ -52,6 +52,18 @@ jobs:
       - name: Checkout fork
         uses: actions/checkout@v4
 
+      # Cross-repo checkout for HA @ pinned SHA. HA is public; actions/checkout
+      # uses GITHUB_TOKEN which reads any public repo, sidestepping the
+      # extraheader/uv-git-cache friction that made `pip install git+...`
+      # fail with "terminal prompts disabled" on the runner.
+      - name: Checkout Hermes_AI @ pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.HERMES_AI_REPO }}
+          ref: ${{ env.HERMES_AI_PIN_SHA }}
+          path: _hermes_ai
+          persist-credentials: false
+
       - name: Install uv
         # 与 fork tests.yml 一致的 uv 版本
         uses: astral-sh/setup-uv@v3
@@ -79,20 +91,22 @@ jobs:
         # Codex F · Agent B §3：pip install 只写 .venv/site-packages；不
         # 触 uv.lock 或 pyproject.toml。--no-deps 阻断 HA 传递依赖进 fork 图。
         # HA 需要 websockets + httpx（其 pyproject deps），单独补装。
+        # 源码由上一步 actions/checkout 落到 ./_hermes_ai（含 pinned SHA），
+        # 避免 uv git 缓存被 runner 全局 extraheader 干扰。
         run: |
           source .venv/bin/activate
-          uv pip install --no-deps \
-            "hermes-devices @ git+https://github.com/${HERMES_AI_REPO}.git@${HERMES_AI_PIN_SHA}"
-          # HA 的两个必需 runtime dep（未通过 uv sync 已装）
+          uv pip install --no-deps ./_hermes_ai
           uv pip install "websockets>=12.0" "httpx>=0.24"
 
       - name: Sanity — HA @ pinned SHA & console scripts on PATH (Agent C §7)
-        # 阻断 HA 漂移：`pip show` 的 Home-page 会带 git+ URL，grep 精确 SHA
+        # 阻断 HA 漂移：本地 checkout 的 HEAD 必须命中 pinned SHA
         run: |
           source .venv/bin/activate
+          HA_HEAD=$(git -C _hermes_ai rev-parse HEAD)
+          echo "HA checkout HEAD=${HA_HEAD}"
+          [ "${HA_HEAD}" = "${HERMES_AI_PIN_SHA}" ] \
+            || { echo "::error::HA drift: expected SHA ${HERMES_AI_PIN_SHA}, got ${HA_HEAD}"; exit 1; }
           python -m pip show hermes-devices | tee /tmp/ha_pip_show.txt
-          grep -q "${HERMES_AI_PIN_SHA}" /tmp/ha_pip_show.txt \
-            || { echo "::error::HA drift: expected SHA ${HERMES_AI_PIN_SHA} not in pip show output"; exit 1; }
           which hermes-devices-mcp
           which hermes-data-ops-mcp
 

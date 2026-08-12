@@ -65,9 +65,12 @@ raw `stdio_client` / `ClientSession` / `StdioServerParameters` —— 那是 PR 
 
 - `permissions: contents: read` · 无 `pull_request_target` · 无 Provider key
 - `uv sync --locked --extra dev --extra mcp` 不动 `uv.lock`
-- `pip install --no-deps hermes-devices @ git+...@<sha>` + 单独装 HA 的两条运行时依赖
-  （`websockets>=12.0` + `httpx>=0.24`）—— 不进 uv.lock
-- Sanity `grep <sha>` 阻断漂移
+- `actions/checkout@v4` pin HA @ `<sha>` 到 `_hermes_ai/`（HA 是 public 仓，
+  fork runner 的 extraheader 会干扰 uv git 缓存的匿名 clone，改用
+  `actions/checkout` 走同一份 `GITHUB_TOKEN` 直连）
+- `pip install --no-deps ./_hermes_ai` 只写 `.venv/site-packages`；补装
+  `websockets>=12.0` + `httpx>=0.24`（HA 的两条 runtime dep）—— 不进 uv.lock
+- Sanity `git rev-parse HEAD == HERMES_AI_PIN_SHA` 阻断漂移
 - pytest `--junitxml` + no-skip / no-empty-run 双闸；pytest / no-skip enforce
   **不 continue-on-error**（Codex F）
 - artifact upload 允许 `continue-on-error` 副作用（配额与 gate 不耦合）
