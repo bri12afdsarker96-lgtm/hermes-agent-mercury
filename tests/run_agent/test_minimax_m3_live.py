@@ -11,6 +11,7 @@ credential environment variables before each test body.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +20,7 @@ LIVE = os.environ.get("HERMES_LIVE_TESTS") == "1"
 MINIMAX_KEY = os.environ.get("MINIMAX_API_KEY", "")
 MODEL = "MiniMax-M3"
 BASE_URL = "https://api.minimax.io/v1"
+CONTRACT_PATH = Path(__file__).resolve().parents[2] / "docs" / "p3-m1-provider-config.yaml"
 
 pytestmark = [
     pytest.mark.skipif(not LIVE, reason="live-only: set HERMES_LIVE_TESTS=1"),
@@ -26,7 +28,25 @@ pytestmark = [
 ]
 
 
-def test_minimax_m3_first_conversation_through_hermes_transport() -> None:
+def test_minimax_m3_first_conversation_through_hermes_transport(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The root test fixture deliberately isolates HERMES_HOME.  Recreate the
+    # checked-in non-secret route inside that isolated home so the live gate
+    # exercises the same runtime contract as a real configured profile rather
+    # than silently falling back to MiniMax's bundled Anthropic endpoint.
+    (tmp_path / "config.yaml").write_text(
+        CONTRACT_PATH.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+
+    from hermes_cli import config as config_module
+
+    config_module._LOAD_CONFIG_CACHE.clear()
+    config_module._RAW_CONFIG_CACHE.clear()
+
     import model_tools  # noqa: F401 -- triggers bundled provider discovery
     import providers
     from openai import OpenAI
