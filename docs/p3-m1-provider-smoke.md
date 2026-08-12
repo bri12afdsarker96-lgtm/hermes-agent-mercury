@@ -1,4 +1,4 @@
-# P3-M1 Provider smoke: MiniMax M3 primary, DeepSeek fallback
+# P3-M1 Provider smoke: MiniMax China M3 primary, DeepSeek fallback
 
 This is the deployment and acceptance contract for the first P3-M1 model
 conversation. It uses Hermes' bundled provider profiles; it does not add a
@@ -7,20 +7,21 @@ parallel provider implementation or modify the prompt.
 ## Configuration
 
 Merge [`p3-m1-provider-config.yaml`](p3-m1-provider-config.yaml) into the active
-profile's `$HERMES_HOME/config.yaml`. The primary route is deliberately the
-MiniMax OpenAI-compatible endpoint because MiniMax-M3's `reasoning_split` and
-`thinking` controls are implemented on that wire shape.
+profile's `$HERMES_HOME/config.yaml`. The primary route uses MiniMax's mainland
+China Anthropic-compatible endpoint because the deployment account is a China
+Token Plan subscription and its credentials are region-scoped.
 
 Credentials belong only in `$HERMES_HOME/.env` or the Desktop credential UI:
 
 ```dotenv
-MINIMAX_API_KEY=<subscription-or-pay-as-you-go-key>
+MINIMAX_CN_API_KEY=<china-token-plan-key>
 DEEPSEEK_API_KEY=<api-key>
 ```
 
 Do not paste either key into `config.yaml`, test output, issue text, or a pull
-request. MiniMax Subscription Keys and pay-as-you-go keys are both credentials;
-the account-side billing behavior differs, but the Hermes secret name does not.
+request. MiniMax international and China credentials are not interchangeable;
+Hermes deliberately uses the separate `MINIMAX_CN_API_KEY` secret name for the
+mainland China route.
 
 ## Offline contract gate
 
@@ -32,9 +33,9 @@ scripts/run_tests.sh tests/hermes_cli/test_p3_m1_provider_contract.py \
 
 This proves the checked-in config resolves to:
 
-- primary: `minimax / MiniMax-M3 / https://api.minimax.io/v1 / chat_completions`;
+- primary: `minimax-cn / MiniMax-M3 / https://api.minimaxi.com/anthropic / anthropic_messages`;
 - fallback: `deepseek / deepseek-v4-flash`;
-- M3 requests carry `reasoning_split=true` and the requested thinking mode;
+- the primary request is built by Hermes' Anthropic Messages transport;
 - no API-key value is persisted in the YAML contract.
 
 ## Opt-in live gate
@@ -43,13 +44,13 @@ The live smoke is skipped unless explicitly enabled and a key is present:
 
 ```bash
 HERMES_LIVE_TESTS=1 \
-MINIMAX_API_KEY='<redacted>' \
-scripts/run_tests.sh tests/run_agent/test_minimax_m3_live.py -q
+MINIMAX_CN_API_KEY='<redacted>' \
+scripts/run_tests.sh tests/run_agent/test_minimax_cn_m3_live.py -q
 ```
 
-Pass criteria are a successful Hermes-resolved OpenAI-compatible request,
+Pass criteria are a successful Hermes-resolved Anthropic-compatible request,
 response model `MiniMax-M3`, non-empty assistant text, and non-negative token
-usage. The test never prints the credential.
+usage. The test never prints the credential or response text.
 
 DeepSeek already has an opt-in live tool-call replay test:
 
@@ -60,16 +61,27 @@ scripts/run_tests.sh tests/run_agent/test_deepseek_v4_thinking_live.py -q
 ```
 
 Do not simulate fallback by committing an invalid primary key. After both live
-tests pass independently, exercise fallback in a disposable profile by making
-the primary endpoint unreachable and confirming the runtime logs a provider
-switch to `deepseek-v4-flash`; restore the primary configuration immediately.
+tests pass independently, run the disposable forced-fallback gate:
+
+```bash
+HERMES_LIVE_TESTS=1 \
+MINIMAX_CN_API_KEY='<redacted>' \
+DEEPSEEK_API_KEY='<redacted>' \
+scripts/run_tests.sh tests/run_agent/test_p3_m1_provider_fallback_live.py -q
+```
+
+The test sends the primary to a loopback port with no listener, then drives the
+real `AIAgent.run_conversation()` retry/fallback loop. It passes only when the
+final runtime is `deepseek / deepseek-v4-flash`, the reply is non-empty, and a
+provider-switch lifecycle notice was emitted. It does not modify the active
+profile.
 
 ## Sources checked for this contract
 
-- MiniMax's current Hermes Agent guide selects the global endpoint and
-  `MiniMax-M3`.
-- MiniMax's current OpenAI SDK guide specifies `https://api.minimax.io/v1`,
-  `MiniMax-M3`, `reasoning_split`, and `thinking.type=adaptive|disabled`.
+- The deployment's China Token Plan exposes `MiniMax-M3`; this contract keeps
+  the mainland China route while selecting that newer model.
+- MiniMax's Anthropic-compatible API guide specifies
+  `https://api.minimaxi.com/anthropic` for mainland China accounts.
 - DeepSeek's current API catalog exposes `deepseek-v4-flash` and
   `deepseek-v4-pro` at `https://api.deepseek.com`.
 

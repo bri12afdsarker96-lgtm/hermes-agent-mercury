@@ -41,7 +41,7 @@ def configured_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         encoding="utf-8",
     )
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax-key")
+    monkeypatch.setenv("MINIMAX_CN_API_KEY", "test-minimax-cn-key")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-deepseek-key")
 
     from hermes_cli import config as config_module
@@ -58,9 +58,9 @@ def test_contract_contains_routes_but_no_secret_fields() -> None:
 
     assert config["model"] == {
         "default": "MiniMax-M3",
-        "provider": "minimax",
-        "base_url": "https://api.minimax.io/v1",
-        "api_mode": "chat_completions",
+        "provider": "minimax-cn",
+        "base_url": "https://api.minimaxi.com/anthropic",
+        "api_mode": "anthropic_messages",
     }
     assert config["fallback_providers"] == [
         {"provider": "deepseek", "model": "deepseek-v4-flash"}
@@ -69,22 +69,24 @@ def test_contract_contains_routes_but_no_secret_fields() -> None:
     forbidden = {"api_key", "token", "secret", "password"}
     assert forbidden.isdisjoint(_walk_keys(config))
     serialized = CONTRACT_PATH.read_text(encoding="utf-8")
-    assert "test-minimax-key" not in serialized
+    assert "test-minimax-cn-key" not in serialized
     assert "test-deepseek-key" not in serialized
 
 
-def test_primary_runtime_uses_minimax_m3_openai_route(configured_home: Path) -> None:
+def test_primary_runtime_uses_minimax_cn_m3_anthropic_route(
+    configured_home: Path,
+) -> None:
     from hermes_cli.runtime_provider import resolve_runtime_provider
 
     runtime = resolve_runtime_provider(
-        requested="minimax",
+        requested="minimax-cn",
         target_model="MiniMax-M3",
     )
 
-    assert runtime["provider"] == "minimax"
-    assert runtime["base_url"] == "https://api.minimax.io/v1"
-    assert runtime["api_mode"] == "chat_completions"
-    assert runtime["api_key"] == "test-minimax-key"
+    assert runtime["provider"] == "minimax-cn"
+    assert runtime["base_url"] == "https://api.minimaxi.com/anthropic"
+    assert runtime["api_mode"] == "anthropic_messages"
+    assert runtime["api_key"] == "test-minimax-cn-key"
 
 
 def test_fallback_chain_resolves_deepseek_v4_flash(configured_home: Path) -> None:
@@ -105,24 +107,26 @@ def test_fallback_chain_resolves_deepseek_v4_flash(configured_home: Path) -> Non
     assert runtime["api_key"] == "test-deepseek-key"
 
 
-def test_minimax_transport_adds_m3_reasoning_contract(configured_home: Path) -> None:
+def test_minimax_cn_contract_uses_anthropic_transport(configured_home: Path) -> None:
     import model_tools  # noqa: F401 -- triggers bundled provider discovery
     import providers
-    from agent.transports.chat_completions import ChatCompletionsTransport
+    from agent.transports.anthropic import AnthropicTransport
 
-    profile = providers.get_provider_profile("minimax")
+    profile = providers.get_provider_profile("minimax-cn")
     assert profile is not None
+    assert profile.api_mode == "anthropic_messages"
+    assert profile.base_url == "https://api.minimaxi.com/anthropic"
+    assert profile.env_vars == ("MINIMAX_CN_API_KEY",)
 
-    kwargs = ChatCompletionsTransport().build_kwargs(
+    kwargs = AnthropicTransport().build_kwargs(
         model="MiniMax-M3",
         messages=[{"role": "user", "content": "Reply with: provider-ready"}],
         tools=None,
-        provider_profile=profile,
-        provider_name="minimax",
-        base_url="https://api.minimax.io/v1",
-        reasoning_config={"enabled": True, "effort": "medium"},
+        base_url="https://api.minimaxi.com/anthropic",
+        max_tokens=128,
     )
-    assert kwargs["extra_body"] == {
-        "reasoning_split": True,
-        "thinking": {"type": "adaptive"},
-    }
+    assert kwargs["model"] == "MiniMax-M3"
+    assert kwargs["messages"] == [
+        {"role": "user", "content": "Reply with: provider-ready"}
+    ]
+    assert kwargs["max_tokens"] == 128
