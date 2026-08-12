@@ -9,14 +9,17 @@ name: p3-m1-mcp-seven-step
 #
 # Codex 硬约束：
 # - permissions: contents: read（最小权限，无写权限）
-# - 不使用 pull_request_target
+# - 不使用 pull_request_target（Secret 走同仓 PR 分支路径）
 # - 不注入任何 Provider key
 # - 固定 Hermes_AI 完整 SHA（本 workflow env 硬写）
 # - 装 fork 的 CI-faithful profile via `uv sync --locked`（不改 uv.lock）
-# - 装 Hermes_AI @ pinned SHA 只用 pip install --no-deps 到 .venv（不侵 pyproject.toml/uv.lock）
-# - junit + 双闸 no-skip（tests==0 fail + executed==0 fail）
-# - artifact 上传只能 continue-on-error 副作用；pytest/no-skip/cleanup 步骤**不得** continue-on-error
+# - 装 Hermes_AI @ pinned SHA：私仓 actions/checkout + fine-grained PAT
+#   （HERMES_AI_TOKEN，仅 HA `Contents: Read-only`），persist-credentials: false
+# - 装完 pip install --no-deps ./_hermes_ai 只写 .venv/site-packages（不侵 pyproject.toml/uv.lock）
+# - junit + 严格 no-skip（tests>0 · skipped==0 · failures==0 · errors==0，全部条件同时满足）
+# - artifact 上传只能 continue-on-error 副作用；pytest/checkout/SHA-verify/no-skip 步骤**不得** continue-on-error
 # - 不设 PYTHONUTF8=1；PYTHONIOENCODING=utf-8 传子进程
+# - Secret 不得进 env / 命令参数 / 日志 / 文件 / PR 正文；不开 git/curl debug
 
 permissions:
   contents: read
@@ -52,6 +55,30 @@ jobs:
       - name: Checkout fork
         uses: actions/checkout@v4
 
+      - name: Checkout Hermes_AI at pinned SHA
+        # 私仓；fine-grained PAT 仅 HA `Contents: Read-only`。
+        # persist-credentials: false —— 使用后立即从 .git/config 清理 token。
+        # fetch-depth: 1 —— 单 commit 足够，无浪费。
+        # 若 Secret 缺失/权限不足，该步会直接 403/404 失败；禁 fallback。
+        uses: actions/checkout@v4
+        with:
+          repository: bri12afdsarker96-lgtm/Hermes_AI
+          ref: ad44bd11b4962932fdca4eab427c25f158688a98
+          token: ${{ secrets.HERMES_AI_TOKEN }}
+          path: _hermes_ai
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify Hermes_AI pinned commit
+        # 硬断言 checkout HEAD == HERMES_AI_PIN_SHA；不输出任何认证配置。
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git -C _hermes_ai rev-parse HEAD)"
+          expected="${HERMES_AI_PIN_SHA}"
+          echo "Hermes_AI checked-out SHA: ${actual}"
+          test "${actual}" = "${expected}"
+
       - name: Install uv
         # 与 fork tests.yml 一致的 uv 版本
         uses: astral-sh/setup-uv@v3
@@ -68,29 +95,12 @@ jobs:
         # 独立复核；此处只装 MCP 测试所需最小子集
         run: uv sync --locked --python 3.11 --extra dev --extra mcp
 
-      - name: Pin mcp==1.28.1（对齐 uv.lock 权威）
-        # uv 有时把 mcp 解析成 2.0.0（PyPI 最新），本 gate 强制回到 lock 版本
+      - name: Assert mcp==1.28.1 (no force-reinstall — lock authority only)
+        # 只断言，不重装。若 --locked 解析出的 mcp 非 1.28.1，说明 lock 漂移，
+        # 应直接失败并升级 uv.lock，不得强制重装掩盖问题。
         run: |
           source .venv/bin/activate
-          uv pip install --force-reinstall "mcp==1.28.1"
           python -c "import importlib.metadata as m; v=m.version('mcp'); print('mcp version=', v); assert v == '1.28.1', v"
-
-      - name: Fetch Hermes_AI @ pinned SHA (anonymous tarball)
-        # HA 是 public 仓；fork PR runner 的 GITHUB_TOKEN 对非当前仓返回
-        # "Repository not found"，`uv pip install git+...` 又受 runner
-        # extraheader 干扰。改用 GitHub 匿名 tarball（content-addressed by SHA，
-        # 无需任何认证），完全绕开 git 配置层。
-        # curl -f 保证 HTTP≠200 直接失败；SHA 不存在时 GitHub 返 404 → curl fail。
-        run: |
-          set -euo pipefail
-          curl -fLsS \
-            -o /tmp/ha.tar.gz \
-            "https://github.com/${HERMES_AI_REPO}/archive/${HERMES_AI_PIN_SHA}.tar.gz"
-          mkdir -p _hermes_ai
-          tar -xzf /tmp/ha.tar.gz --strip-components=1 -C _hermes_ai
-          test -f _hermes_ai/pyproject.toml
-          # 记录 tarball SHA256 作为 provenance
-          sha256sum /tmp/ha.tar.gz | tee _hermes_ai/.tarball.sha256
 
       - name: Install Hermes_AI @ pinned SHA (test-only, --no-deps)
         # Codex F · Agent B §3：pip install 只写 .venv/site-packages；不
@@ -101,17 +111,13 @@ jobs:
           uv pip install --no-deps ./_hermes_ai
           uv pip install "websockets>=12.0" "httpx>=0.24"
 
-      - name: Sanity — HA @ pinned SHA & console scripts on PATH (Agent C §7)
-        # 阻断 HA 漂移：tarball URL 已 content-address by SHA（curl -f 已闸
-        # 上一步）；此步再确认 hermes-devices 包元数据可见 + 两个 console
-        # scripts 落到 .venv 的 PATH 上。
+      - name: Sanity — HA metadata & console scripts on PATH (Agent C §7)
+        # SHA 已由 Verify Hermes_AI pinned commit 步骤硬闸；此步只补装/PATH 检查。
         run: |
           source .venv/bin/activate
           python -m pip show hermes-devices | tee /tmp/ha_pip_show.txt
           which hermes-devices-mcp
           which hermes-data-ops-mcp
-          echo "HA tarball provenance:"
-          cat _hermes_ai/.tarball.sha256
 
       - name: Run fork PR #4 · seven-step via registry.dispatch
         # 无 skip 允许；PYTHONIOENCODING=utf-8 传给 stdio 子进程；不设 PYTHONUTF8=1
@@ -125,9 +131,9 @@ jobs:
             -o junit_family=xunit2 \
             tests/native_mcp/test_seven_step_via_registry.py
 
-      - name: Enforce no-skip / no-empty-run gate (Codex F · Agent B §6)
-        # 双闸：tests==0 → fail；executed==0（所有 skipped）→ fail
-        # 此步 **NOT** continue-on-error（Codex F）
+      - name: Enforce strict no-skip gate (Codex path-2 §3.2)
+        # 严格四闸：tests>0 · skipped==0 · failures==0 · errors==0。
+        # 任何 skip 直接 fail。此步 **NOT** continue-on-error。
         shell: bash
         run: |
           if [ ! -f fork-mcp-seven-step-junit.xml ]; then
@@ -144,15 +150,15 @@ jobs:
           failures = sum(_i(s, "failures") for s in suites)
           errors = sum(_i(s, "errors") for s in suites)
           skipped = sum(_i(s, "skipped") for s in suites)
-          executed = tests - skipped
-          print(f"passed={executed - failures - errors} failed={failures} errors={errors} skipped={skipped} total={tests}")
+          passed = tests - skipped - failures - errors
+          print(f"passed={passed} failed={failures} errors={errors} skipped={skipped} total={tests}")
           if tests == 0:
               sys.exit("::error::FAIL: 0 tests collected — invocation broken")
-          if executed == 0:
-              sys.exit(f"::error::FAIL: all {skipped} tests skipped — no MCP coverage")
+          if skipped > 0:
+              sys.exit(f"::error::FAIL: {skipped} tests skipped (skipped==0 required)")
           if failures or errors:
               sys.exit(f"::error::FAIL: {failures} failed, {errors} errors")
-          print("OK: gate passed")
+          print("OK: strict no-skip gate passed")
           PY
 
       - name: Upload junit report (best-effort · artifact 配额与本 gate 不耦合)

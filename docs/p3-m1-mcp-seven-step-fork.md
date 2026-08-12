@@ -65,18 +65,21 @@ raw `stdio_client` / `ClientSession` / `StdioServerParameters` —— 那是 PR 
 
 - `permissions: contents: read` · 无 `pull_request_target` · 无 Provider key
 - `uv sync --locked --extra dev --extra mcp` 不动 `uv.lock`
-- **匿名 tarball** pin HA @ `<sha>`：`curl -fLsS
-  https://github.com/${HERMES_AI_REPO}/archive/${HERMES_AI_PIN_SHA}.tar.gz`
-  → `tar -xz --strip-components=1 -C _hermes_ai/`。GitHub archive URL
-  content-address by SHA，curl -f 保证 SHA 不存在直接失败；完全不走 git
-  auth，绕开 fork PR runner 的 GITHUB_TOKEN 对非本仓 "Repository not found"
-  与 uv git 缓存 extraheader 干扰。
+- **私仓 checkout** pin HA @ `<sha>`：`actions/checkout@v4` +
+  `secrets.HERMES_AI_TOKEN`（fine-grained PAT，仅 HA `Contents: Read-only`）
+  + `persist-credentials: false` + `fetch-depth: 1`。HA 是私仓，fork runner
+  的默认 GITHUB_TOKEN 无跨仓权限，PAT 独立注入且 checkout 后立即从
+  `.git/config` 清理；Secret 绝不出 env / 参数 / 日志 / 文件 / PR 正文。
+- Verify HA pinned commit：`git -C _hermes_ai rev-parse HEAD == HERMES_AI_PIN_SHA`
+  硬断言；不输出任何认证配置
+- Assert mcp==1.28.1（只断言 `--locked` 解析结果，**不**再 `uv pip install
+  --force-reinstall`；lock 漂移直接失败）
 - `pip install --no-deps ./_hermes_ai` 只写 `.venv/site-packages`；补装
   `websockets>=12.0` + `httpx>=0.24`（HA 的两条 runtime dep）—— 不进 uv.lock
-- Sanity：curl -f 已闸 SHA；再 `pip show hermes-devices` + `which
-  hermes-devices-mcp/hermes-data-ops-mcp`；`.tarball.sha256` 作为 provenance
-- pytest `--junitxml` + no-skip / no-empty-run 双闸；pytest / no-skip enforce
-  **不 continue-on-error**（Codex F）
+- Sanity：`pip show hermes-devices` + `which hermes-devices-mcp/hermes-data-ops-mcp`
+- pytest `--junitxml` + **严格 no-skip 四闸**：`tests>0` · `skipped==0` ·
+  `failures==0` · `errors==0`，任一违反即 fail；pytest / no-skip / checkout /
+  SHA-verify enforce **不 continue-on-error**（Codex path-2 §3.2）
 - artifact upload 允许 `continue-on-error` 副作用（配额与 gate 不耦合）
 - 不设 `PYTHONUTF8=1`；`PYTHONIOENCODING=utf-8` 传子进程
 - Linux-only（fork tests.yml house 惯例；Windows 由 HA PR #30 六宫格覆盖）
