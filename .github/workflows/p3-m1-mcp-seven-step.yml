@@ -44,7 +44,7 @@ on:
 
 env:
   # Hermes_AI PR #30 收口 GREEN HEAD（同 commit 更新，绝不浮动）
-  HERMES_AI_PIN_SHA: ad44bd11b4962932fdca4eab427c25f158688a98
+  HERMES_AI_PIN_SHA: a3ef38298e6a42a88ec93d75af88b4027f7febbe
   HERMES_AI_REPO: bri12afdsarker96-lgtm/Hermes_AI
 
 jobs:
@@ -65,7 +65,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: bri12afdsarker96-lgtm/Hermes_AI
-          ref: ad44bd11b4962932fdca4eab427c25f158688a98
+          ref: a3ef38298e6a42a88ec93d75af88b4027f7febbe
           token: ${{ secrets.HERMES_AI_TOKEN }}
           path: _hermes_ai
           persist-credentials: false

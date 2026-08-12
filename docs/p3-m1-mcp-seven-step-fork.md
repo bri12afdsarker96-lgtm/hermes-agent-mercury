@@ -2,10 +2,13 @@
 
 ## Scope 与 Hermes_AI PR #30 的边界
 
-**Hermes_AI PR #30**（`bri12afdsarker96-lgtm/Hermes_AI` @
-`ad44bd11b4962932fdca4eab427c25f158688a98`）已用 raw `mcp.ClientSession` +
-`mcp.client.stdio.stdio_client` 从 Hermes_AI 侧证明「原生 SDK 底层能真实
-驱动两个 stdio server 完成七步」，两组六宫格 CI 均 GREEN。
+**Hermes_AI PR #30** 已 merged 进 HA 默认分支
+`claude/hermes-desktop-multi-ai-phone-aiw5mr` @ merge commit
+`a3ef38298e6a42a88ec93d75af88b4027f7febbe`（原 PR HEAD `ad44bd11...`）。
+用 raw `mcp.ClientSession` + `mcp.client.stdio.stdio_client` 从 Hermes_AI
+侧证明「原生 SDK 底层能真实驱动两个 stdio server 完成七步」，两组六宫格
+CI（pytest + mcp-gate × ubuntu/windows × py3.10/3.11/3.12）均 GREEN。
+本 fork PR #4 CI 硬 pin 到这条 merge SHA。
 
 **本 fork PR #4 的唯一价值**：证明 fork 自己生产路径 ——
 `config.yaml → tools.mcp_tool.discover_mcp_tools() → 两 stdio server →
@@ -32,7 +35,7 @@ Hermes_AI 生产代码。
 
 | # | 断言 | 生产路径 |
 |---|---|---|
-| 1 | `hermes-devices` 装到 fork venv 且 SHA = `ad44bd11...`（CI 前置 `pip show grep` gate） | `pip install --no-deps git+...@<sha>` |
+| 1 | `hermes-devices` 装到 fork venv（`importlib.metadata` 断言，不依赖 pip binary/module）；SHA = HA merge commit `a3ef38298e6a42a88ec93d75af88b4027f7febbe` 由 CI 权威 gate `git -C _hermes_ai rev-parse HEAD == HERMES_AI_PIN_SHA` 硬闸 | `actions/checkout@v4` + PAT · `uv pip install --no-deps ./_hermes_ai` |
 | 2 | 两个 server 在同一 `get_mcp_status()` snapshot 里 `connected: True` + `tools == 14/6` | `tools.mcp_tool.get_mcp_status` |
 | 3 | `discover_mcp_tools()` 后 registry 恰好新增 20 个 `mcp__hermes_devices_mcp__*` + `mcp__hermes_data_ops_mcp__*` | `discover_mcp_tools()` + `registry.get_all_tool_names()` |
 | 4 | 完整工具名由 fork 命名函数生成（不复制另一套 sanitizer） | `mcp_prefixed_tool_name` + `sanitize_mcp_name_component` |
@@ -86,12 +89,14 @@ raw `stdio_client` / `ClientSession` / `StdioServerParameters` —— 那是 PR 
 - 不设 `PYTHONUTF8=1`；`PYTHONIOENCODING=utf-8` 传子进程
 - Linux-only（fork tests.yml house 惯例；Windows 由 HA PR #30 六宫格覆盖）
 
-## 关联 PR 堆叠
+## 关联 PR 堆叠（P3-M1 合入列车 · 阶段 4）
 
-- base: `feature/p3-m1-provider` @ `89f81710839e22f34df7b635cbbffb8e66bf5ce1`（fork PR #3 GREEN HEAD）
-- head: `feature/p3-m1-mcp-seven-step`（新分支，从 base 建）
-- 上游 PR #2 rebrand：`feature/p3-m1-baseline` @ `024a2aaf`（未动）
-- 关联 Hermes_AI PR #30：`claude/p3-m1-mcp-seven-step` @ `ad44bd11`（CI 权威 pin）
+- base: `main`（P3-M1 合入列车阶段 4 retarget；base HEAD 已含阶段 2 rebrand
+  merge `e3121a28...` + 阶段 3 provider merge `7f9d1c96...`）
+- head: `feature/p3-m1-mcp-seven-step`
+- 上游 fork PR #2 rebrand @ `024a2aaf`（已 merged @ `e3121a28e2d37f8142552af6111ba1b0a1486fdd`）
+- 上游 fork PR #3 provider @ `89f81710`（已 merged @ `7f9d1c96c7661ffab8fa4a9c82a4cbae1474d754`）
+- 关联 Hermes_AI PR #30 @ `ad44bd11`（已 merged @ `a3ef38298e6a42a88ec93d75af88b4027f7febbe` · CI 权威 pin）
 - 上游 NousResearch/hermes-agent main 参考 SHA：`ee472a7f`（不同步）
 
 ## 边界（明确不做）

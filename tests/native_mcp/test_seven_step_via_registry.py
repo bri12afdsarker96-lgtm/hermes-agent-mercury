@@ -16,7 +16,7 @@ fork ToolRegistry → registry.dispatch("mcp__<server>__<tool>", args)`。
 - fork 已经 `uv sync --locked --extra dev --extra mcp` 到 `.venv`；`mcp==1.28.1`
   由 `uv.lock` 权威 pin
 - `hermes-devices` 已 `pip install --no-deps` @ 固定 SHA
-  `ad44bd11b4962932fdca4eab427c25f158688a98` 到 fork 的 `.venv`（同一 venv，
+  `a3ef38298e6a42a88ec93d75af88b4027f7febbe` 到 fork 的 `.venv`（同一 venv，
   console script 会 shim 到 `.venv/bin/`）；未来 SHA 升级必须**同 commit** 更新
 
 ## 命名（Agent A 权威 · `sanitize_mcp_name_component` 把 `-` → `_`）
