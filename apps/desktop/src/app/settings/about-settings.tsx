@@ -102,6 +102,7 @@ export function AboutSettings() {
           <p className="mt-1 text-xs text-muted-foreground">
             {version?.appVersion ? a.version(version.appVersion) : a.versionUnavailable}
           </p>
+          <p className="mt-1 text-xs text-muted-foreground">{a.attribution}</p>
         </div>
       </div>
 

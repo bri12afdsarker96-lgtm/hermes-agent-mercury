@@ -141,11 +141,11 @@ function resolveDmgPath() {
 
   return candidates.length > 0
     ? path.join(RELEASE_ROOT, candidates[0])
-    : path.join(RELEASE_ROOT, `Hermes-${PACKAGE_JSON.version}-${ARCH}.dmg`)
+    : path.join(RELEASE_ROOT, `hermes_Agent-${PACKAGE_JSON.version}-${ARCH}.dmg`)
 }
 
 function resolveNsisPath() {
-  // electron-builder NSIS artifactName template is 'Hermes-${version}-${os}-${arch}.${ext}'
+  // electron-builder NSIS artifactName template is 'hermes_Agent-${version}-${os}-${arch}.${ext}'
   if (!exists(RELEASE_ROOT)) return null
   const candidates = fs
     .readdirSync(RELEASE_ROOT)

@@ -55,14 +55,14 @@ export const ar = defineLocale({
     pathCopied: 'تم نسخ المسار'
   },
   boot: {
-    ready: 'Hermes Desktop جاهز',
+    ready: 'hermes_Agent جاهز',
     desktopBootFailedWithMessage: message => `فشل تشغيل سطح المكتب: ${message}`,
     steps: {
       connectingGateway: 'جار الاتصال ببوابة سطح المكتب',
       loadingSettings: 'جار تحميل إعدادات Hermes',
       loadingSessions: 'جار تحميل الجلسات الأخيرة',
       startingDesktopConnection: 'جار بدء اتصال سطح المكتب',
-      startingHermesDesktop: 'جار تشغيل Hermes Desktop...'
+      startingHermesDesktop: 'جار تشغيل hermes_Agent...'
     },
     errors: {
       backgroundExited: 'خرجت عملية Hermes الخلفية.',
@@ -118,7 +118,7 @@ export const ar = defineLocale({
       elevenLabsNeedsKey: 'يتطلب ElevenLabs STT المفتاح ELEVENLABS_API_KEY.',
       elevenLabsRejectedKey: 'رفض ElevenLabs مفتاح API (401).',
       diskFull: 'القرص ممتلئ — حرّر مساحة ثم أعد المحاولة.',
-      methodNotAllowed: 'رفضت خلفية سطح المكتب هذا الطلب (405 Method Not Allowed). جرب إعادة تشغيل Hermes Desktop.',
+      methodNotAllowed: 'رفضت خلفية سطح المكتب هذا الطلب (405 Method Not Allowed). جرب إعادة تشغيل hermes_Agent.',
       microphonePermission: 'تم رفض إذن الميكروفون.',
       openaiRejectedApiKey: 'رفض OpenAI مفتاح API.',
       openaiRejectedApiKeyWithStatus: status => `رفض OpenAI مفتاح API (${status} invalid_api_key).`,
@@ -368,7 +368,7 @@ export const ar = defineLocale({
       advanced: 'متقدم'
     },
     searchPlaceholder: {
-      about: 'حول Hermes Desktop',
+      about: 'حول hermes_Agent',
       config: 'ابحث في الإعدادات...',
       gateway: 'اتصال البوابة...',
       keys: 'ابحث في مفاتيح API...',
@@ -391,7 +391,7 @@ export const ar = defineLocale({
     },
     appearance: {
       title: 'المظهر',
-      intro: 'خصص مظهر Hermes Desktop.',
+      intro: 'خصص مظهر hermes_Agent.',
       colorMode: 'نمط الألوان',
       colorModeDesc: 'اختر الوضع الفاتح أو الداكن أو اتبع النظام.',
       toolViewTitle: 'عرض الأدوات',
@@ -587,7 +587,8 @@ export const ar = defineLocale({
         'عندما يحدّث Hermes نفسه من التطبيق دون موجه طرفية، احتفظ بتعديلات المصدر المحلية أو تجاهلها.'
     },
     about: {
-      heading: 'حول Hermes',
+      heading: 'hermes_Agent',
+      attribution: 'مبني على Hermes Agent من Nous Research · MIT License',
       version: value => `الإصدار ${value}`,
       versionUnavailable: 'الإصدار غير متاح',
       updates: 'التحديثات',
@@ -664,7 +665,7 @@ export const ar = defineLocale({
       title: 'اتصال البوابة',
       envOverride: 'تجاوز من البيئة',
       intro:
-        'يشغّل Hermes Desktop بوابة محلية خاصة افتراضياً. استخدم بوابة بعيدة عندما تريد أن يتحكم هذا التطبيق بخلفية Hermes تعمل مسبقاً على جهاز آخر أو خلف وكيل موثوق.',
+        'يشغّل hermes_Agent بوابة محلية خاصة افتراضياً. استخدم بوابة بعيدة عندما تريد أن يتحكم هذا التطبيق بخلفية Hermes تعمل مسبقاً على جهاز آخر أو خلف وكيل موثوق.',
       appliesTo: 'ينطبق على',
       allProfiles: 'كل الملفات الشخصية',
       defaultConnection: 'الاتصال الافتراضي لكل ملف شخصي لا يملك تجاوزاً خاصاً.',
@@ -711,7 +712,7 @@ export const ar = defineLocale({
       enterUrlFirst: 'أدخل رابط البوابة البعيدة أولاً.',
       restartingTitle: 'جار إعادة تشغيل اتصال البوابة',
       savedTitle: 'تم حفظ إعدادات البوابة',
-      restartingMessage: 'سيعيد Hermes Desktop الاتصال باستخدام الإعدادات المحفوظة.',
+      restartingMessage: 'سيعيد hermes_Agent الاتصال باستخدام الإعدادات المحفوظة.',
       savedMessage: 'تم الحفظ للتشغيل القادم.',
       connectedTo: (baseUrl, version) => `متصل بـ ${baseUrl}${version ? ` · Hermes ${version}` : ''}`,
       reachableTitle: 'البوابة البعيدة قابلة للوصول',
@@ -1928,7 +1929,7 @@ export const ar = defineLocale({
     reloadRetry: 'إعادة التحميل وإعادة المحاولة'
   },
   onboarding: {
-    headerTitle: 'لنُعِدّ لك Hermes Agent',
+    headerTitle: 'لنُعِدّ لك hermes_Agent',
     headerDesc: 'اربط مزوّد نماذج لبدء المحادثة. معظم الخيارات تتطلب نقرة واحدة.',
     preparingInstall: 'يُكمل Hermes التثبيت. عادة ما يستغرق ذلك أقل من دقيقة في أول تشغيل.',
     starting: 'جار بدء Hermes...',

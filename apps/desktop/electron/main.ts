@@ -673,7 +673,7 @@ const BOOT_FAKE_STEP_MS = (() => {
   return Math.max(120, raw)
 })()
 
-const APP_NAME = process.env.HERMES_DESKTOP_APP_NAME || 'Hermes'
+const APP_NAME = process.env.HERMES_DESKTOP_APP_NAME || 'hermes_Agent'
 const TITLEBAR_HEIGHT = 34
 const MACOS_TRAFFIC_LIGHTS_HEIGHT = 14
 
@@ -991,7 +991,7 @@ if (IS_WINDOWS) {
 app.setAboutPanelOptions({
   applicationName: APP_NAME,
   applicationVersion: resolveHermesVersion(),
-  copyright: 'Copyright © 2026 Nous Research'
+  copyright: 'Copyright © 2026 Nous Research · Hermes Agent (MIT License)'
 })
 
 // Custom scheme for streaming local media (video/audio) into the renderer.
@@ -12015,7 +12015,7 @@ function showAboutPanelFresh() {
   app.setAboutPanelOptions({
     applicationName: APP_NAME,
     applicationVersion: resolveHermesVersion(),
-    copyright: 'Copyright © 2026 Nous Research'
+    copyright: 'Copyright © 2026 Nous Research · Hermes Agent (MIT License)'
   })
   app.showAboutPanel()
 }
