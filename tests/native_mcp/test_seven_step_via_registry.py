@@ -206,15 +206,15 @@ def test_fork_native_registry_drives_seven_step_via_two_stdio_servers(
     monkeypatch.setenv("HERMES_KB_DIR", str(sandbox / "kb"))
     monkeypatch.setenv("HERMES_DATA_DIR", str(sandbox / "data"))
 
-    # Codex E 项 1 · HA 精确 SHA 断言（本地 pip show 会显示 git+ URL 带 SHA）
-    import subprocess
-    show_out = subprocess.run(
-        ["pip", "show", "hermes-devices"], capture_output=True, text=True
-    )
-    # 说明：CI workflow 也会用 `pip show | grep <sha>` 做 gate 前置断言；
-    # 这里本地 fallback 只检查安装存在（pip show 在 uv 装完的 venv 里可能不显示
-    # git+ URL）。CI 是权威 pin 检查。
-    assert show_out.returncode == 0, f"hermes-devices 未安装：{show_out.stderr}"
+    # Codex E 项 1 · HA 精确 SHA 断言由 CI workflow 权威 gate（Verify Hermes_AI
+    # pinned commit 步骤 `git rev-parse HEAD == HERMES_AI_PIN_SHA`）。此处只做
+    # 「hermes-devices 已装到当前 site-packages」的最小前置断言：走 stdlib
+    # importlib.metadata，无 pip binary / 无 pip module 依赖（uv sync 出来的
+    # venv 无 pip）。找不到抛 PackageNotFoundError，直接 fail 测试；不 skip、
+    # 不 fallback、不吞异常。
+    import importlib.metadata as metadata
+    dist = metadata.distribution("hermes-devices")
+    assert dist.metadata["Name"].lower() == "hermes-devices"
 
     # 装 tenants + bind_device（服务端权威 tenant 源）
     _bootstrap_tenant(device_id, tenant_id)
