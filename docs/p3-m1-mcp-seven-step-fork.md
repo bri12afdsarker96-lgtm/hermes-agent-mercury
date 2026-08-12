@@ -72,10 +72,12 @@ raw `stdio_client` / `ClientSession` / `StdioServerParameters` —— 那是 PR 
   `.git/config` 清理；Secret 绝不出 env / 参数 / 日志 / 文件 / PR 正文。
 - Verify HA pinned commit：`git -C _hermes_ai rev-parse HEAD == HERMES_AI_PIN_SHA`
   硬断言；不输出任何认证配置
-- Assert mcp==1.28.1（只断言 `--locked` 解析结果，**不**再 `uv pip install
-  --force-reinstall`；lock 漂移直接失败）
-- `pip install --no-deps ./_hermes_ai` 只写 `.venv/site-packages`；补装
-  `websockets>=12.0` + `httpx>=0.24`（HA 的两条 runtime dep）—— 不进 uv.lock
+- Assert locked-sync 版本（Codex path-2 BLOCKER 3）：只断言
+  `mcp==1.28.1 / httpx==0.28.1 / websockets==15.0.1`（三者由 fork uv.lock @
+  89f81710 权威 pin，均由 `uv sync --locked --extra dev --extra mcp` 拉取），
+  **不 force-reinstall、不浮动补装**；缺包或版本不符直接 fail
+- `pip install --no-deps ./_hermes_ai` 只写 `.venv/site-packages`；HA 的
+  runtime dep（httpx / websockets）由上面 fork locked sync 权威装配，不再补装
 - Sanity：`pip show hermes-devices` + `which hermes-devices-mcp/hermes-data-ops-mcp`
 - pytest `--junitxml` + **严格 no-skip 四闸**：`tests>0` · `skipped==0` ·
   `failures==0` · `errors==0`，任一违反即 fail；pytest / no-skip / checkout /

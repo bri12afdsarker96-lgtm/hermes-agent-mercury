@@ -116,6 +116,65 @@ def _assert_no_fake_phone_thread() -> None:
     assert not active, f"残留 fake-phone 线程：{active}"
 
 
+def _assert_mcp_background_gone(fork_mcp) -> None:
+    """严格 cleanup 硬门：shutdown 后 fork mcp_tool 的后台 event-loop 线程
+    （`name="mcp-event-loop"`, 生产声明见 tools/mcp_tool.py:4730）必须已 join。
+    不能只靠 registry 归零推断 —— 后台 loop/thread 是独立生命周期。"""
+    mcp_thread = getattr(fork_mcp, "_mcp_thread", None)
+    if mcp_thread is not None:
+        assert not mcp_thread.is_alive(), (
+            f"shutdown 后 fork mcp _mcp_thread 仍存活：{mcp_thread.name!r}"
+        )
+    survivors = [t.name for t in threading.enumerate() if t.name == "mcp-event-loop"]
+    assert not survivors, (
+        f"shutdown 后仍有 mcp-event-loop 后台线程存活：{survivors}"
+    )
+
+
+def _send_forged_inbox_frame(
+    phone,
+    *,
+    msg_id: str,
+    channel: str,
+    sender: str,
+    text: str,
+    forged_tenant_id: str,
+    forged_internal_tenant: str,
+    forged_thread_id: str,
+    timeout: float = 5.0,
+) -> dict:
+    """通过 FakePhone 已建立的 websocket 直接发一帧带**攻击字段**的
+    ``inbox_msg`` —— 走**正式 Hub 协议路径**，不修改 FakePhone、不修改
+    Hermes_AI 生产代码、不新增 MCP 工具。用 ``run_coroutine_threadsafe(
+    ...).result(timeout=...)`` 有界等待，确认帧实际发送成功。
+
+    Codex path-2 BLOCKER 1：证明服务端权威源锁定 —— body 里的 ``tenant_id``
+    / ``_tenant_id`` / ``thread_id`` 一律被忽略，poll_inbox 返回和 audit
+    落地必须走：
+      - ``thread_id = f"{device}:{channel}:{sender}"``（inbox.py 服务端派生）
+      - ``tenant  = get_device_tenant(device_id)``（hub._on_hello 反查
+        device_tenant 表；InboxQueue.put 在 msg.pop 掉 body 的 ``_tenant_id``）
+    """
+    import asyncio
+    ws, loop = phone._ws, phone._loop
+    assert ws is not None and loop is not None, "FakePhone websocket 未建立"
+    frame = {
+        "t": "inbox_msg",
+        "msg_id": msg_id,
+        "channel": channel,
+        "sender": sender,
+        "text": text,
+        "ts": time.time(),
+        "tenant_id": forged_tenant_id,
+        "_tenant_id": forged_internal_tenant,
+        "thread_id": forged_thread_id,
+    }
+    asyncio.run_coroutine_threadsafe(
+        ws.send(json.dumps(frame, ensure_ascii=False)), loop
+    ).result(timeout=timeout)
+    return frame
+
+
 def _bootstrap_tenant(device_id: str, tenant_id: str) -> str:
     """在测试进程用正式 tenants API 装配：super_admin principal + tenant +
     device.bind_tenant。必须先设 HERMES_TENANTS_DB env（子进程也用同路径）。"""
@@ -310,12 +369,26 @@ def test_fork_native_registry_drives_seven_step_via_two_stdio_servers(
         )
 
         # ---- Codex E 项 7 · tenant 来自 device_tenant 表；msg body 伪造应被忽略 ----
-        # 端侧协议注入一条 msg body 带 bogus 'tenant_id' key（Agent C §1 攻击尝试）
+        # Codex path-2 BLOCKER 1 真实攻击帧：直接通过 FakePhone 已建立的 ws
+        # 走正式 Hub 协议，body 塞三条攻击字段（tenant_id / _tenant_id /
+        # thread_id），证明服务端权威源全部锁定，攻击字段一律不进 audit。
         channel = "app"
         sender = "客户E2E-fork"
         prompt = "你们的发票开票速度多快"
-        frame = phone.send_inbox_msg(prompt, channel=channel, sender=sender)
-        msg_id = frame["msg_id"]
+        forged_tenant_id = "t_attacker_forged"
+        forged_internal_tenant = "t_attacker_internal"
+        forged_thread_id = "attacker:forged:thread"
+        msg_id = phone.make_msg_id()
+        _send_forged_inbox_frame(
+            phone,
+            msg_id=msg_id,
+            channel=channel,
+            sender=sender,
+            text=prompt,
+            forged_tenant_id=forged_tenant_id,
+            forged_internal_tenant=forged_internal_tenant,
+            forged_thread_id=forged_thread_id,
+        )
         expected_thread = f"{device_id}:{channel}:{sender}"
 
         # ---- Codex E 项 6b · poll_inbox via registry.dispatch ----
@@ -395,6 +468,21 @@ def test_fork_native_registry_drives_seven_step_via_two_stdio_servers(
             f"tenant 权威源被绕过！audit tenant={nh.get('tenant')!r} "
             f"vs bind_device 值={tenant_id!r}"
         )
+        # **权威 thread_id 断言**：服务端派生（device:channel:sender），不采用攻击 thread_id
+        assert nh["thread_id"] == expected_thread and nh["thread_id"] != forged_thread_id, (
+            f"thread_id 权威源被绕过！audit thread_id={nh.get('thread_id')!r} "
+            f"expected={expected_thread!r} attacker={forged_thread_id!r}"
+        )
+        # 攻击字段绝不出现在 audit（整份 dump 全字符串扫）
+        audit_dump = audit_path.read_text(encoding="utf-8")
+        for forged_val in (forged_tenant_id, forged_internal_tenant, forged_thread_id):
+            assert forged_val not in audit_dump, (
+                f"攻击者伪造字段 {forged_val!r} 泄漏到 audit：{audit_dump[-800:]!r}"
+            )
+        # 双 tenant 攻击都不进 poll_inbox 返回的服务端 message 视图
+        assert msg.get("tenant_id") != forged_tenant_id and msg.get("tenant_id") != forged_internal_tenant, (
+            f"poll_inbox message.tenant_id 被攻击字段污染：{msg!r}"
+        )
 
         # ---- Codex E 项 5 · Repeat discover 无重复注册（Agent C §4） ----
         len_before_2nd = len(registry.get_all_tool_names())
@@ -440,20 +528,19 @@ def test_fork_native_registry_drives_seven_step_via_two_stdio_servers(
         phone_thread.join(timeout=5)
         assert not phone_thread.is_alive(), "FakePhone 线程未在 5s 内退出"
 
-        # ---- Codex E 项 9 · 显式 shutdown_mcp_servers 清理 ----
-        try:
-            fork_mcp.shutdown_mcp_servers()
-        except Exception as e:  # noqa: BLE001 — teardown best-effort
-            print(f"WARN[shutdown_mcp_servers]: {e!r}")
+        # ---- Codex E 项 9 · 严格 shutdown_mcp_servers 清理（Codex path-2 BLOCKER 2）----
+        # 严格 fail-close：不捕获、不吞异常。shutdown 失败 = 测试失败。
+        fork_mcp.shutdown_mcp_servers()
 
-        # registry 中 mcp__* 归零
-        left_over_mcp = [n for n in registry.get_all_tool_names()
-                         if n.startswith("mcp__hermes_devices_mcp__")
-                         or n.startswith("mcp__hermes_data_ops_mcp__")]
-        assert not left_over_mcp, (
-            f"shutdown 后 registry 仍残留 MCP 工具：{left_over_mcp}"
-        )
+        # registry 中 mcp__* 归零（两组 toolset）
+        left_over_devices = [n for n in registry.get_all_tool_names()
+                             if n.startswith("mcp__hermes_devices_mcp__")]
+        left_over_data_ops = [n for n in registry.get_all_tool_names()
+                              if n.startswith("mcp__hermes_data_ops_mcp__")]
+        assert not left_over_devices, f"shutdown 后 devices MCP 工具残留：{left_over_devices}"
+        assert not left_over_data_ops, f"shutdown 后 data-ops MCP 工具残留：{left_over_data_ops}"
 
-        # 端口释放 + fake-phone 线程清理
+        # 端口释放 + fake-phone 线程清理 + MCP 后台 event-loop 线程 join
         _assert_port_released(ws_port)
         _assert_no_fake_phone_thread()
+        _assert_mcp_background_gone(fork_mcp)

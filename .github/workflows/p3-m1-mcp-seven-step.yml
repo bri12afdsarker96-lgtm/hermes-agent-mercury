@@ -15,7 +15,9 @@ name: p3-m1-mcp-seven-step
 # - 装 fork 的 CI-faithful profile via `uv sync --locked`（不改 uv.lock）
 # - 装 Hermes_AI @ pinned SHA：私仓 actions/checkout + fine-grained PAT
 #   （HERMES_AI_TOKEN，仅 HA `Contents: Read-only`），persist-credentials: false
-# - 装完 pip install --no-deps ./_hermes_ai 只写 .venv/site-packages（不侵 pyproject.toml/uv.lock）
+# - 依赖全部来自 fork locked sync：mcp==1.28.1 / httpx==0.28.1 / websockets==15.0.1
+#   （fork uv.lock @ 89f81710 权威 pin），只断言不重装；缺包/版本不符 CI 立即失败
+# - Hermes_AI 仅 `pip install --no-deps ./_hermes_ai` 写 .venv/site-packages（不侵 pyproject.toml/uv.lock）
 # - junit + 严格 no-skip（tests>0 · skipped==0 · failures==0 · errors==0，全部条件同时满足）
 # - artifact 上传只能 continue-on-error 副作用；pytest/checkout/SHA-verify/no-skip 步骤**不得** continue-on-error
 # - 不设 PYTHONUTF8=1；PYTHONIOENCODING=utf-8 传子进程
@@ -95,21 +97,30 @@ jobs:
         # 独立复核；此处只装 MCP 测试所需最小子集
         run: uv sync --locked --python 3.11 --extra dev --extra mcp
 
-      - name: Assert mcp==1.28.1 (no force-reinstall — lock authority only)
-        # 只断言，不重装。若 --locked 解析出的 mcp 非 1.28.1，说明 lock 漂移，
-        # 应直接失败并升级 uv.lock，不得强制重装掩盖问题。
+      - name: Assert locked-sync versions (mcp / httpx / websockets · Codex path-2 BLOCKER 3)
+        # 只断言，不重装、不浮动补装。这三条都由 fork uv.lock @ 89f81710 权威
+        # 固定（mcp==1.28.1 / httpx==0.28.1 / websockets==15.0.1，均为 mcp 的
+        # transitive dep 且 --extra dev/mcp 会拉取）。缺包或版本不符 CI 必须
+        # 立即失败；不得 force-reinstall 或 uv pip install "pkg>=X" 浮动补装
+        # 掩盖 lock 漂移，也不得改 uv.lock / pyproject.toml。
         run: |
           source .venv/bin/activate
-          python -c "import importlib.metadata as m; v=m.version('mcp'); print('mcp version=', v); assert v == '1.28.1', v"
+          python - <<'PY'
+          import importlib.metadata as m
+          for pkg, want in (("mcp", "1.28.1"), ("httpx", "0.28.1"), ("websockets", "15.0.1")):
+              got = m.version(pkg)
+              print(f"{pkg}=={got}")
+              assert got == want, f"{pkg}: expected {want}, got {got} (uv.lock drift?)"
+          PY
 
       - name: Install Hermes_AI @ pinned SHA (test-only, --no-deps)
         # Codex F · Agent B §3：pip install 只写 .venv/site-packages；不
         # 触 uv.lock 或 pyproject.toml。--no-deps 阻断 HA 传递依赖进 fork 图。
-        # HA 需要 websockets + httpx（其 pyproject deps），单独补装。
+        # HA 的 runtime dep（httpx / websockets）已由 fork locked sync 权威装配
+        # （见上一步断言），此步不再补装。
         run: |
           source .venv/bin/activate
           uv pip install --no-deps ./_hermes_ai
-          uv pip install "websockets>=12.0" "httpx>=0.24"
 
       - name: Sanity — HA metadata & console scripts on PATH (Agent C §7)
         # SHA 已由 Verify Hermes_AI pinned commit 步骤硬闸；此步只补装/PATH 检查。
