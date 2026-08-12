@@ -52,18 +52,6 @@ jobs:
       - name: Checkout fork
         uses: actions/checkout@v4
 
-      # Cross-repo checkout for HA @ pinned SHA. HA is public; actions/checkout
-      # uses GITHUB_TOKEN which reads any public repo, sidestepping the
-      # extraheader/uv-git-cache friction that made `pip install git+...`
-      # fail with "terminal prompts disabled" on the runner.
-      - name: Checkout Hermes_AI @ pinned SHA
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.HERMES_AI_REPO }}
-          ref: ${{ env.HERMES_AI_PIN_SHA }}
-          path: _hermes_ai
-          persist-credentials: false
-
       - name: Install uv
         # 与 fork tests.yml 一致的 uv 版本
         uses: astral-sh/setup-uv@v3
@@ -87,28 +75,43 @@ jobs:
           uv pip install --force-reinstall "mcp==1.28.1"
           python -c "import importlib.metadata as m; v=m.version('mcp'); print('mcp version=', v); assert v == '1.28.1', v"
 
+      - name: Fetch Hermes_AI @ pinned SHA (anonymous tarball)
+        # HA 是 public 仓；fork PR runner 的 GITHUB_TOKEN 对非当前仓返回
+        # "Repository not found"，`uv pip install git+...` 又受 runner
+        # extraheader 干扰。改用 GitHub 匿名 tarball（content-addressed by SHA，
+        # 无需任何认证），完全绕开 git 配置层。
+        # curl -f 保证 HTTP≠200 直接失败；SHA 不存在时 GitHub 返 404 → curl fail。
+        run: |
+          set -euo pipefail
+          curl -fLsS \
+            -o /tmp/ha.tar.gz \
+            "https://github.com/${HERMES_AI_REPO}/archive/${HERMES_AI_PIN_SHA}.tar.gz"
+          mkdir -p _hermes_ai
+          tar -xzf /tmp/ha.tar.gz --strip-components=1 -C _hermes_ai
+          test -f _hermes_ai/pyproject.toml
+          # 记录 tarball SHA256 作为 provenance
+          sha256sum /tmp/ha.tar.gz | tee _hermes_ai/.tarball.sha256
+
       - name: Install Hermes_AI @ pinned SHA (test-only, --no-deps)
         # Codex F · Agent B §3：pip install 只写 .venv/site-packages；不
         # 触 uv.lock 或 pyproject.toml。--no-deps 阻断 HA 传递依赖进 fork 图。
         # HA 需要 websockets + httpx（其 pyproject deps），单独补装。
-        # 源码由上一步 actions/checkout 落到 ./_hermes_ai（含 pinned SHA），
-        # 避免 uv git 缓存被 runner 全局 extraheader 干扰。
         run: |
           source .venv/bin/activate
           uv pip install --no-deps ./_hermes_ai
           uv pip install "websockets>=12.0" "httpx>=0.24"
 
       - name: Sanity — HA @ pinned SHA & console scripts on PATH (Agent C §7)
-        # 阻断 HA 漂移：本地 checkout 的 HEAD 必须命中 pinned SHA
+        # 阻断 HA 漂移：tarball URL 已 content-address by SHA（curl -f 已闸
+        # 上一步）；此步再确认 hermes-devices 包元数据可见 + 两个 console
+        # scripts 落到 .venv 的 PATH 上。
         run: |
           source .venv/bin/activate
-          HA_HEAD=$(git -C _hermes_ai rev-parse HEAD)
-          echo "HA checkout HEAD=${HA_HEAD}"
-          [ "${HA_HEAD}" = "${HERMES_AI_PIN_SHA}" ] \
-            || { echo "::error::HA drift: expected SHA ${HERMES_AI_PIN_SHA}, got ${HA_HEAD}"; exit 1; }
           python -m pip show hermes-devices | tee /tmp/ha_pip_show.txt
           which hermes-devices-mcp
           which hermes-data-ops-mcp
+          echo "HA tarball provenance:"
+          cat _hermes_ai/.tarball.sha256
 
       - name: Run fork PR #4 · seven-step via registry.dispatch
         # 无 skip 允许；PYTHONIOENCODING=utf-8 传给 stdio 子进程；不设 PYTHONUTF8=1
