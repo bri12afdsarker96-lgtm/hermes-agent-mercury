@@ -7,7 +7,7 @@
 - **不用** `SPIKE_*` env(fork AGENTS.md red-line 3)· **不污染**全局 manager
 - **cache eligibility ≠ budget enforcement 严格解耦**:
   * streaming / tools 非 cacheable · **但仍 reserve/settle**
-  * 非 chat_completions api_mode → fail-CLOSED(next_call == 0)· M0 缩小支持范围
+  * `anthropic_messages` 是预算专用；未知 api_mode → fail-CLOSED(next_call == 0)
   * budget 模块缺失 / tenant context 缺失 / budget config 非法 → fail-CLOSED · next_call == 0
 - cache miss + cacheable req → reserve/settle 各 1 次
 - cache hit → 不 reserve · 顶层 usage=0
