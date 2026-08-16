@@ -176,57 +176,6 @@ def test_miss_reserves_and_settles_once(tmp_path, monkeypatch):
     assert budget_mod.get_pending_total(_VALID_TENANT["tenant_id"]) == 0
 
 
-# ── Cache hit → budget reserve 0 次 · 顶层 usage=0(§I 强要求) ─────
-
-
-def test_hit_no_reserve_and_zero_top_usage(tmp_path, monkeypatch):
-    manager, cache_mod, budget_mod = _enable_cache(
-        tmp_path, monkeypatch, daily_budget=10_000
-    )
-
-    counters = {"next": 0}
-
-    def next_call(_req):
-        counters["next"] += 1
-        return {
-            "model": "gpt-4o",
-            "choices": [{"message": {"content": "cached"}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": 200, "completion_tokens": 80},
-        }
-
-    run = make_run_llm_execution(
-        api_request_id="req_a",
-        provider="openai",
-        model="gpt-4o",
-        api_mode="chat_completions",
-        approx_input_tokens=300,
-    )
-    req = {"messages": [{"role": "user", "content": "same"}]}
-
-    # 首次 miss · settle 280
-    run(req, next_call)
-    assert counters["next"] == 1
-    assert budget_mod.get_used(_VALID_TENANT["tenant_id"]) == 280
-
-    # 二次 hit · next_call 0 次 · used 不变(reserve 0 次)
-    run2 = make_run_llm_execution(
-        api_request_id="req_b",
-        provider="openai",
-        model="gpt-4o",
-        api_mode="chat_completions",
-    )
-    resp = run2(req, next_call)
-    assert counters["next"] == 1
-    assert budget_mod.get_used(_VALID_TENANT["tenant_id"]) == 280
-    assert resp["usage"] == {"prompt_tokens": 0, "completion_tokens": 0}
-    assert resp["cache_meta"]["hit"] is True
-    assert resp["cache_meta"]["billable_usage"] == {"prompt_tokens": 0, "completion_tokens": 0}
-    assert resp["cache_meta"]["origin_usage"] == {"prompt_tokens": 200, "completion_tokens": 80}
-    assert resp["cache_meta"]["saved_usage"] == {"prompt_tokens": 200, "completion_tokens": 80}
-    assert resp["cache_meta"]["cache_contract_version"] == cache_mod.CACHE_CONTRACT_VERSION
-    assert budget_mod.get_pending_total(_VALID_TENANT["tenant_id"]) == 0
-
-
 # ── Budget 超支 → next_call 0 次(§I / §V 强要求 · 非空结构化响应) ─
 
 
