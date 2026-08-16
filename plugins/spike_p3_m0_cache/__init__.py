@@ -534,7 +534,10 @@ def cache_and_budget_middleware(
             "spike-cache: unsupported budget api_mode=%s · fail-CLOSED",
             api_mode,
         )
-        return _fail_closed_response(model, reason_code="unsupported_api_mode", api_mode=api_mode)
+        # The unknown API-mode value is useful only for server logs.  It is
+        # attacker-controlled context and must not be reflected in the wire
+        # response or cache metadata.
+        return _fail_closed_response(model, reason_code="unsupported_api_mode")
 
     # 5. request 类型门(non-dict 无法 estimate token · fail-CLOSED)
     if not isinstance(request, dict):

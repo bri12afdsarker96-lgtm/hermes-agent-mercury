@@ -643,8 +643,8 @@ def test_no_tenant_config_fail_closed(tmp_path, monkeypatch):
     assert resp["cache_meta"]["reason_code"] == "tenant_context_invalid"
 
 
-def test_non_chat_completions_mode_fail_closed(tmp_path, monkeypatch):
-    """Codex §II:非 chat_completions api_mode 明确 fail-CLOSED(不静默 pass-through)。"""
+def test_unsupported_api_mode_fail_closed(tmp_path, monkeypatch):
+    """未知 api_mode 明确 fail-CLOSED；具体值不属于用户可见 response。"""
     manager, cache_mod, budget_mod = _enable_cache(tmp_path, monkeypatch, daily_budget=10_000)
     counters = {"next": 0}
 
@@ -658,7 +658,7 @@ def test_non_chat_completions_mode_fail_closed(tmp_path, monkeypatch):
     resp = run({"messages": [{"role": "user", "content": "x"}]}, next_call)
     assert counters["next"] == 0
     assert resp["cache_meta"]["reason_code"] == "unsupported_api_mode"
-    assert resp["cache_meta"]["api_mode"] == "responses"
+    assert "api_mode" not in resp["cache_meta"]
 
 
 def test_non_dict_request_fail_closed(tmp_path, monkeypatch):
