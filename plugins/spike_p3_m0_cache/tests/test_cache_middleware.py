@@ -100,48 +100,6 @@ def test_disabled_plugin_not_loaded(tmp_path, monkeypatch):
     assert has_middleware("llm_execution") is False
 
 
-def test_enabled_bool_strict_true_only(tmp_path, monkeypatch):
-    """Codex §III:`enabled` 严格 bool True · 拒 str/int/其他(bool('false')==True 陷阱)。"""
-    # enabled = "false"(str)· 应视 as 禁用 · 直通 next_call
-    manager, cache_mod, budget_mod = _enable_cache(
-        tmp_path, monkeypatch, daily_budget=100, enabled="false",
-    )
-    counters = {"next": 0}
-
-    def next_call(_req):
-        counters["next"] += 1
-        return {"choices": [{"message": {"content": "x"}, "finish_reason": "stop"}], "usage": {}}
-
-    run = make_run_llm_execution(
-        api_request_id="r1", provider="p", model="m", api_mode="chat_completions",
-        approx_input_tokens=500,
-    )
-    resp = run({"messages": [{"role": "user", "content": "x"}], "max_tokens": 500}, next_call)
-    # 未启用 → 直通 next · 未 reserve
-    assert counters["next"] == 1
-    assert not _is_fail_closed(resp)
-
-
-@pytest.mark.parametrize("enabled_value", [1, "true", "yes", [1], {"x": 1}])
-def test_enabled_non_bool_treated_as_disabled(tmp_path, monkeypatch, enabled_value):
-    """任何非 literal-True 值(int / str / list / dict)· 视 as 禁用 · 直通 next。"""
-    _, _, _ = _enable_cache(
-        tmp_path, monkeypatch, daily_budget=100, enabled=enabled_value,
-    )
-    counters = {"next": 0}
-
-    def next_call(_req):
-        counters["next"] += 1
-        return {"choices": [{"message": {"content": "x"}, "finish_reason": "stop"}], "usage": {}}
-
-    run = make_run_llm_execution(
-        api_request_id="r1", provider="p", model="m", api_mode="chat_completions",
-    )
-    resp = run({"messages": [{"role": "user", "content": "hi"}]}, next_call)
-    assert counters["next"] == 1
-    assert not _is_fail_closed(resp)
-
-
 # ── Cache miss(cacheable request) → reserve+settle 各 1 次 ─────
 
 

@@ -74,6 +74,15 @@ class ConfigShapeError(RuntimeError):
     """The runtime config has an invalid shape for this plugin."""
 
 
+class ConfigEnabledTypeError(RuntimeError):
+    """``enabled`` was present but was not a literal boolean.
+
+    Keep the fixed message deliberately value-free: configuration values can
+    contain secrets or other sensitive operator data and must never surface in
+    a middleware response or log record.
+    """
+
+
 def _budget_module():
     """Locate the budget sibling module regardless of parent package.
 
@@ -172,12 +181,19 @@ def _get_plugin_config() -> Dict[str, Any]:
 def _is_enabled(plugin_cfg: Optional[Dict[str, Any]] = None) -> bool:
     """`plugins.spike_p3_m0_cache.enabled` **严格 bool** · 只接受 literal `True`。
 
-    Codex §III 硬约束:拒 `bool("false") == True`(str 转 bool 陷阱)· 拒 int/list/dict。
-    True → 启用;其他(False / None / "true" / 1 / [] / {} / ...)→ 视 as 禁用。
+    Missing is the backwards-compatible explicit-off default; ``False`` is a
+    valid explicit off switch.  Any *present* non-bool value is a configuration
+    error rather than a silent bypass, because the outer middleware chain is
+    fail-open for ordinary plugin exceptions.
     """
     if plugin_cfg is None:
         plugin_cfg = _get_plugin_config()
-    return plugin_cfg.get("enabled") is True
+    if "enabled" not in plugin_cfg:
+        return False
+    value = plugin_cfg["enabled"]
+    if not isinstance(value, bool):
+        raise ConfigEnabledTypeError("config_enabled_type_invalid")
+    return value
 
 
 def _get_tenant_context(
@@ -490,11 +506,13 @@ def cache_and_budget_middleware(
         )
         return _fail_closed_response(model, reason_code="config_internal_error")
 
-    # 2. Only an explicitly disabled plugin may pass through.  Missing/false
-    # ``enabled`` is a deliberate off switch; read/shape failures above are
-    # never converted into this branch.
+    # 2. Only a missing/false literal bool may pass through. A present non-bool
+    # is fail-CLOSED instead of being silently interpreted as disabled.
     try:
         enabled = _is_enabled(plugin_cfg)
+    except ConfigEnabledTypeError:
+        logger.error("spike-cache: config_enabled_type_invalid · fail-CLOSED")
+        return _fail_closed_response(model, reason_code="config_enabled_type_invalid")
     except Exception as exc:   # noqa: BLE001
         logger.error(
             "spike-cache: enabled-state resolution failed · type=%s · fail-CLOSED",
