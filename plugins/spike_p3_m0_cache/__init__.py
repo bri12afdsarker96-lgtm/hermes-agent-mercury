@@ -13,7 +13,7 @@
        ├─ 硬依赖门:budget module 缺失 → fail-CLOSED(结构化 error response · 不 next_call)
        ├─ tenant context 4 字段严格校验(缺/空/非白/超长)→ fail-CLOSED
        ├─ budget config 校验(BudgetConfigError → fail-CLOSED · 不静默 None)
-       ├─ 非 chat_completions api_mode → fail-CLOSED(M0 明确缩小支持范围 · 见 §II)
+       ├─ 非预算支持 api_mode → fail-CLOSED(见 §II)
        ├─ 非 dict request → fail-CLOSED
        │
        ├─ 判 cacheable_request(streaming/tools 非 cacheable · **但仍 reserve/settle**)
@@ -31,9 +31,9 @@
    profile_version 任一缺失/空/非法 → **不 next_call** · 返回结构化 fail-closed response
    · **禁**默认填 "system"/"0" 等安全值(Codex §III)
 
-4. **只**支持 `api_mode == "chat_completions"`:其他 3 mode(anthropic_messages /
-   bedrock_converse / codex_responses)fail-CLOSED · **不 next_call**(见 §II 明令)·
-   M0 缩小支持范围到 chat_completions · 其他 mode 需 M1+ 补 token 估算
+4. budget enforcement 支持 `chat_completions` 与 `anthropic_messages`；后者是
+   MiniMax M3 的正式 messages 走位，**只预算、不 lookup/insert cache**。其他
+   mode(`bedrock_converse` / `codex_responses` 等)fail-CLOSED · **不 next_call**。
 
 5. 顶层 `usage` = billable_usage(全 0)· 原始生成 usage 只在 `cache_meta.origin_usage`
 
@@ -74,6 +74,15 @@ class ConfigShapeError(RuntimeError):
     """The runtime config has an invalid shape for this plugin."""
 
 
+class ConfigEnabledTypeError(RuntimeError):
+    """``enabled`` was present but was not a literal boolean.
+
+    Keep the fixed message deliberately value-free: configuration values can
+    contain secrets or other sensitive operator data and must never surface in
+    a middleware response or log record.
+    """
+
+
 def _budget_module():
     """Locate the budget sibling module regardless of parent package.
 
@@ -101,6 +110,14 @@ def _budget_module():
 CACHE_CONTRACT_VERSION = "v2"
 CODEC_VERSION = "codec_v1"
 CACHE_MAX_SIZE = 256   # LRU cap · 简单进程内 · M0 不 persistent
+
+# Gate 2C-A separates an execution mode that can be budget-enforced from one
+# whose response has a stable cache codec.  MiniMax M3 uses
+# ``anthropic_messages``: its token accounting is supported, but it is never a
+# cache key/lookup/insert candidate.  Keep these explicit allowlists so a new
+# upstream API mode cannot accidentally become billable or cacheable.
+_BUDGET_ENFORCED_API_MODES = frozenset({"chat_completions", "anthropic_messages"})
+_CACHEABLE_API_MODES = frozenset({"chat_completions"})
 
 # 允许 tenant_id/principal_id/permission_scope_version/profile_version 的字符白名单
 # (类比 Hermes_AI `_validate_tenant_id` · 保守集合)
@@ -164,12 +181,19 @@ def _get_plugin_config() -> Dict[str, Any]:
 def _is_enabled(plugin_cfg: Optional[Dict[str, Any]] = None) -> bool:
     """`plugins.spike_p3_m0_cache.enabled` **严格 bool** · 只接受 literal `True`。
 
-    Codex §III 硬约束:拒 `bool("false") == True`(str 转 bool 陷阱)· 拒 int/list/dict。
-    True → 启用;其他(False / None / "true" / 1 / [] / {} / ...)→ 视 as 禁用。
+    Missing is the backwards-compatible explicit-off default; ``False`` is a
+    valid explicit off switch.  Any *present* non-bool value is a configuration
+    error rather than a silent bypass, because the outer middleware chain is
+    fail-open for ordinary plugin exceptions.
     """
     if plugin_cfg is None:
         plugin_cfg = _get_plugin_config()
-    return plugin_cfg.get("enabled") is True
+    if "enabled" not in plugin_cfg:
+        return False
+    value = plugin_cfg["enabled"]
+    if not isinstance(value, bool):
+        raise ConfigEnabledTypeError("config_enabled_type_invalid")
+    return value
 
 
 def _get_tenant_context(
@@ -217,8 +241,8 @@ def _get_tenant_context(
 # ── Cacheability guards ─────────────────────────────────────────────
 
 def _api_mode_supported(api_mode: str) -> bool:
-    """M0 只支持 `chat_completions`(见 §II)· 其他 mode fail-CLOSED · 不 next_call。"""
-    return api_mode == "chat_completions"
+    """Return whether this mode can run behind the budget enforcement gate."""
+    return api_mode in _BUDGET_ENFORCED_API_MODES
 
 
 def is_cacheable_request(request: Any, *, api_mode: str = "chat_completions") -> bool:
@@ -226,7 +250,7 @@ def is_cacheable_request(request: Any, *, api_mode: str = "chat_completions") ->
 
     Codex §II:streaming / tools 可以不缓存 · 但**不能不计预算**。
     """
-    if not _api_mode_supported(api_mode):
+    if api_mode not in _CACHEABLE_API_MODES:
         return False
     if not isinstance(request, dict):
         return False
@@ -482,11 +506,13 @@ def cache_and_budget_middleware(
         )
         return _fail_closed_response(model, reason_code="config_internal_error")
 
-    # 2. Only an explicitly disabled plugin may pass through.  Missing/false
-    # ``enabled`` is a deliberate off switch; read/shape failures above are
-    # never converted into this branch.
+    # 2. Only a missing/false literal bool may pass through. A present non-bool
+    # is fail-CLOSED instead of being silently interpreted as disabled.
     try:
         enabled = _is_enabled(plugin_cfg)
+    except ConfigEnabledTypeError:
+        logger.error("spike-cache: config_enabled_type_invalid · fail-CLOSED")
+        return _fail_closed_response(model, reason_code="config_enabled_type_invalid")
     except Exception as exc:   # noqa: BLE001
         logger.error(
             "spike-cache: enabled-state resolution failed · type=%s · fail-CLOSED",
@@ -511,7 +537,8 @@ def cache_and_budget_middleware(
         )
         return _fail_closed_response(model, reason_code="budget_module_error")
 
-    # 4. api_mode 支持范围收紧(Codex §II:非 chat_completions fail-CLOSED · 不静默 pass-through)
+    # 4. api_mode 支持范围收紧。MiniMax M3 anthropic_messages is budget-only;
+    # all other unknown modes fail-CLOSED instead of silently passing through.
     try:
         api_mode_supported = _api_mode_supported(api_mode)
     except Exception as exc:   # noqa: BLE001
@@ -522,10 +549,13 @@ def cache_and_budget_middleware(
         return _fail_closed_response(model, reason_code="api_mode_error")
     if not api_mode_supported:
         logger.warning(
-            "spike-cache: unsupported api_mode=%s · M0 only supports chat_completions · fail-CLOSED",
+            "spike-cache: unsupported budget api_mode=%s · fail-CLOSED",
             api_mode,
         )
-        return _fail_closed_response(model, reason_code="unsupported_api_mode", api_mode=api_mode)
+        # The unknown API-mode value is useful only for server logs.  It is
+        # attacker-controlled context and must not be reflected in the wire
+        # response or cache metadata.
+        return _fail_closed_response(model, reason_code="unsupported_api_mode")
 
     # 5. request 类型门(non-dict 无法 estimate token · fail-CLOSED)
     if not isinstance(request, dict):

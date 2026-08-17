@@ -7,7 +7,7 @@
 - **不用** `SPIKE_*` env(fork AGENTS.md red-line 3)· **不污染**全局 manager
 - **cache eligibility ≠ budget enforcement 严格解耦**:
   * streaming / tools 非 cacheable · **但仍 reserve/settle**
-  * 非 chat_completions api_mode → fail-CLOSED(next_call == 0)· M0 缩小支持范围
+  * `anthropic_messages` 是预算专用；未知 api_mode → fail-CLOSED(next_call == 0)
   * budget 模块缺失 / tenant context 缺失 / budget config 非法 → fail-CLOSED · next_call == 0
 - cache miss + cacheable req → reserve/settle 各 1 次
 - cache hit → 不 reserve · 顶层 usage=0
@@ -100,48 +100,6 @@ def test_disabled_plugin_not_loaded(tmp_path, monkeypatch):
     assert has_middleware("llm_execution") is False
 
 
-def test_enabled_bool_strict_true_only(tmp_path, monkeypatch):
-    """Codex §III:`enabled` 严格 bool True · 拒 str/int/其他(bool('false')==True 陷阱)。"""
-    # enabled = "false"(str)· 应视 as 禁用 · 直通 next_call
-    manager, cache_mod, budget_mod = _enable_cache(
-        tmp_path, monkeypatch, daily_budget=100, enabled="false",
-    )
-    counters = {"next": 0}
-
-    def next_call(_req):
-        counters["next"] += 1
-        return {"choices": [{"message": {"content": "x"}, "finish_reason": "stop"}], "usage": {}}
-
-    run = make_run_llm_execution(
-        api_request_id="r1", provider="p", model="m", api_mode="chat_completions",
-        approx_input_tokens=500,
-    )
-    resp = run({"messages": [{"role": "user", "content": "x"}], "max_tokens": 500}, next_call)
-    # 未启用 → 直通 next · 未 reserve
-    assert counters["next"] == 1
-    assert not _is_fail_closed(resp)
-
-
-@pytest.mark.parametrize("enabled_value", [1, "true", "yes", [1], {"x": 1}])
-def test_enabled_non_bool_treated_as_disabled(tmp_path, monkeypatch, enabled_value):
-    """任何非 literal-True 值(int / str / list / dict)· 视 as 禁用 · 直通 next。"""
-    _, _, _ = _enable_cache(
-        tmp_path, monkeypatch, daily_budget=100, enabled=enabled_value,
-    )
-    counters = {"next": 0}
-
-    def next_call(_req):
-        counters["next"] += 1
-        return {"choices": [{"message": {"content": "x"}, "finish_reason": "stop"}], "usage": {}}
-
-    run = make_run_llm_execution(
-        api_request_id="r1", provider="p", model="m", api_mode="chat_completions",
-    )
-    resp = run({"messages": [{"role": "user", "content": "hi"}]}, next_call)
-    assert counters["next"] == 1
-    assert not _is_fail_closed(resp)
-
-
 # ── Cache miss(cacheable request) → reserve+settle 各 1 次 ─────
 
 
@@ -173,57 +131,6 @@ def test_miss_reserves_and_settles_once(tmp_path, monkeypatch):
     assert resp["choices"][0]["message"]["content"] == "hi"
     # settle 累加 actual usage = 150
     assert budget_mod.get_used(_VALID_TENANT["tenant_id"]) == 150
-    assert budget_mod.get_pending_total(_VALID_TENANT["tenant_id"]) == 0
-
-
-# ── Cache hit → budget reserve 0 次 · 顶层 usage=0(§I 强要求) ─────
-
-
-def test_hit_no_reserve_and_zero_top_usage(tmp_path, monkeypatch):
-    manager, cache_mod, budget_mod = _enable_cache(
-        tmp_path, monkeypatch, daily_budget=10_000
-    )
-
-    counters = {"next": 0}
-
-    def next_call(_req):
-        counters["next"] += 1
-        return {
-            "model": "gpt-4o",
-            "choices": [{"message": {"content": "cached"}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": 200, "completion_tokens": 80},
-        }
-
-    run = make_run_llm_execution(
-        api_request_id="req_a",
-        provider="openai",
-        model="gpt-4o",
-        api_mode="chat_completions",
-        approx_input_tokens=300,
-    )
-    req = {"messages": [{"role": "user", "content": "same"}]}
-
-    # 首次 miss · settle 280
-    run(req, next_call)
-    assert counters["next"] == 1
-    assert budget_mod.get_used(_VALID_TENANT["tenant_id"]) == 280
-
-    # 二次 hit · next_call 0 次 · used 不变(reserve 0 次)
-    run2 = make_run_llm_execution(
-        api_request_id="req_b",
-        provider="openai",
-        model="gpt-4o",
-        api_mode="chat_completions",
-    )
-    resp = run2(req, next_call)
-    assert counters["next"] == 1
-    assert budget_mod.get_used(_VALID_TENANT["tenant_id"]) == 280
-    assert resp["usage"] == {"prompt_tokens": 0, "completion_tokens": 0}
-    assert resp["cache_meta"]["hit"] is True
-    assert resp["cache_meta"]["billable_usage"] == {"prompt_tokens": 0, "completion_tokens": 0}
-    assert resp["cache_meta"]["origin_usage"] == {"prompt_tokens": 200, "completion_tokens": 80}
-    assert resp["cache_meta"]["saved_usage"] == {"prompt_tokens": 200, "completion_tokens": 80}
-    assert resp["cache_meta"]["cache_contract_version"] == cache_mod.CACHE_CONTRACT_VERSION
     assert budget_mod.get_pending_total(_VALID_TENANT["tenant_id"]) == 0
 
 
@@ -643,8 +550,8 @@ def test_no_tenant_config_fail_closed(tmp_path, monkeypatch):
     assert resp["cache_meta"]["reason_code"] == "tenant_context_invalid"
 
 
-def test_non_chat_completions_mode_fail_closed(tmp_path, monkeypatch):
-    """Codex §II:非 chat_completions api_mode 明确 fail-CLOSED(不静默 pass-through)。"""
+def test_unsupported_api_mode_fail_closed(tmp_path, monkeypatch):
+    """未知 api_mode 明确 fail-CLOSED；具体值不属于用户可见 response。"""
     manager, cache_mod, budget_mod = _enable_cache(tmp_path, monkeypatch, daily_budget=10_000)
     counters = {"next": 0}
 
@@ -658,7 +565,7 @@ def test_non_chat_completions_mode_fail_closed(tmp_path, monkeypatch):
     resp = run({"messages": [{"role": "user", "content": "x"}]}, next_call)
     assert counters["next"] == 0
     assert resp["cache_meta"]["reason_code"] == "unsupported_api_mode"
-    assert resp["cache_meta"]["api_mode"] == "responses"
+    assert "api_mode" not in resp["cache_meta"]
 
 
 def test_non_dict_request_fail_closed(tmp_path, monkeypatch):

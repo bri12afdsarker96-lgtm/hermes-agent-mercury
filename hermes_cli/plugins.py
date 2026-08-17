@@ -274,6 +274,23 @@ def _get_enabled_plugins() -> Optional[set]:
         return None
 
 
+def _plugin_is_enabled(
+    enabled: Optional[set], lookup_key: str, manifest_name: str,
+) -> bool:
+    """Return whether config selects a plugin by its stable supported aliases.
+
+    Plugin manifests use hyphenated names while plugin-scoped configuration
+    commonly uses the same identifier with underscores.  Accept both forms at
+    the allow-list boundary so an operator cannot silently disable a plugin by
+    copying its config namespace into ``plugins.enabled``.
+    """
+    if enabled is None:
+        return False
+    aliases = {lookup_key, manifest_name}
+    aliases.update(identifier.replace("-", "_") for identifier in tuple(aliases))
+    return not aliases.isdisjoint(enabled)
+
+
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
@@ -1466,13 +1483,10 @@ class PluginManager:
                 continue
 
             # Everything else (standalone, user-installed backends,
-            # entry-point plugins) is opt-in via plugins.enabled.
-            # Accept both the path-derived key and the legacy bare name
-            # so existing configs keep working.
-            is_enabled = (
-                enabled is not None
-                and (lookup_key in enabled or manifest.name in enabled)
-            )
+            # entry-point plugins) is opt-in via plugins.enabled.  Accept the
+            # path-derived key, legacy bare name, and their underscore aliases
+            # so plugin-scoped config and the allow-list cannot drift apart.
+            is_enabled = _plugin_is_enabled(enabled, lookup_key, manifest.name)
             if not is_enabled:
                 loaded = LoadedPlugin(manifest=manifest, enabled=False)
                 loaded.error = (
@@ -1580,7 +1594,7 @@ class PluginManager:
             lookup_key = manifest.key or manifest.name
             if lookup_key in disabled or manifest.name in disabled:
                 continue
-            if lookup_key not in enabled and manifest.name not in enabled:
+            if not _plugin_is_enabled(enabled, lookup_key, manifest.name):
                 continue
             try:
                 from hermes_cli.agent_plugins import _discover_mcp
