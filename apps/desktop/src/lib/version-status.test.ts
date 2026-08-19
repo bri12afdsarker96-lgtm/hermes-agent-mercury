@@ -67,9 +67,7 @@ describe('resolveVersionStatus', () => {
     expect(client({ applyMessage: 'Pulling…', applying: true, version: '0.4.2' }).tooltip).toBe(
       'Pulling… · hermes_Agent v0.4.2'
     )
-    expect(client({ applying: true, version: '0.4.2' }).tooltip).toBe(
-      `${copy.updateInProgress} · hermes_Agent v0.4.2`
-    )
+    expect(client({ applying: true, version: '0.4.2' }).tooltip).toBe(`${copy.updateInProgress} · hermes_Agent v0.4.2`)
   })
 
   it('labels the backend target distinctly and never claims a client sha', () => {

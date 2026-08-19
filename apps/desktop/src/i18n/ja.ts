@@ -2197,8 +2197,7 @@ export const ja = defineLocale({
       'セッショントークンまたはブラウザーサインインでリモートバックエンドを使用します。ローカルインストールは開始されません。',
     installLocalTitle: 'Hermes をローカルにインストール',
     installLocalDesc: 'Hermes をダウンロードし、Python 環境を作成して、このコンピューターでバックエンドを実行します。',
-    localStartUnavailable:
-      'ローカルインストールを開始できません。hermes_Agent を再起動して、もう一度お試しください。',
+    localStartUnavailable: 'ローカルインストールを開始できません。hermes_Agent を再起動して、もう一度お試しください。',
     remoteSetupTitle: '既存の Hermes に接続',
     remoteSetupDesc:
       'ゲートウェイ URL を入力してください。hermes_Agent がトークンとブラウザーサインインのどちらが必要かを検出します。',
