@@ -107,7 +107,13 @@ def _budget_module():
     )
 
 
-CACHE_CONTRACT_VERSION = "v2"
+# v3 (P3-M2 orchestration): key adds ``authority_epoch`` sourced from the
+# host-injected ``request["_kb_epoch"]`` (Hermes_AI ``EpochSnapshot.cache_epoch``,
+# e.g. "g1.t3").  Any knowledge publish/withdraw/quarantine/restore bumps an
+# epoch, changes the key, and forces a miss — cached answers can never outlive
+# a withdrawal.  Missing ``_kb_epoch`` hashes as "" so deployments without the
+# knowledge dataplane keep their existing cache behaviour unchanged.
+CACHE_CONTRACT_VERSION = "v3"
 CODEC_VERSION = "codec_v1"
 CACHE_MAX_SIZE = 256   # LRU cap · 简单进程内 · M0 不 persistent
 
@@ -307,7 +313,7 @@ def build_cache_key(
     generation_options = {
         key: value
         for key, value in request.items()
-        if key not in {"messages", "tools", "stream", "_kb_collection", "_kb_version"}
+        if key not in {"messages", "tools", "stream", "_kb_collection", "_kb_version", "_kb_epoch"}
         and not key.startswith("_")
     }
     generation_options_bytes = json.dumps(
@@ -334,6 +340,7 @@ def build_cache_key(
         "profile_version": tenant_ctx["profile_version"],
         "knowledge_collection": str(request.get("_kb_collection") or ""),
         "knowledge_collection_version": str(request.get("_kb_version") or ""),
+        "authority_epoch": str(request.get("_kb_epoch") or ""),
         "normalized_semantic_messages": hashlib.sha256(messages_bytes).hexdigest(),
         "cache_contract_version": CACHE_CONTRACT_VERSION,
     }
