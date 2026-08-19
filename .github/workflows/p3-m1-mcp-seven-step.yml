@@ -15,7 +15,7 @@ name: p3-m1-mcp-seven-step
 # - 装 fork 的 CI-faithful profile via `uv sync --locked`（不改 uv.lock）
 # - 装 Hermes_AI @ pinned SHA：私仓 actions/checkout + fine-grained PAT
 #   （HERMES_AI_TOKEN，仅 HA `Contents: Read-only`），persist-credentials: false
-# - 依赖全部来自 fork locked sync：mcp==1.28.1 / httpx==0.28.1 / websockets==15.0.1
+# - 依赖全部来自 fork locked sync：mcp==2.0.0 / httpx==0.28.1 / websockets==15.0.1
 #   （fork uv.lock @ 89f81710 权威 pin），只断言不重装；缺包/版本不符 CI 立即失败
 # - Hermes_AI 仅 `pip install --no-deps ./_hermes_ai` 写 .venv/site-packages（不侵 pyproject.toml/uv.lock）
 # - junit + 严格 no-skip（tests>0 · skipped==0 · failures==0 · errors==0，全部条件同时满足）
@@ -99,7 +99,7 @@ jobs:
 
       - name: Assert locked-sync versions (mcp / httpx / websockets · Codex path-2 BLOCKER 3)
         # 只断言，不重装、不浮动补装。这三条都由 fork uv.lock @ 89f81710 权威
-        # 固定（mcp==1.28.1 / httpx==0.28.1 / websockets==15.0.1，均为 mcp 的
+        # 固定（mcp==2.0.0 / httpx==0.28.1 / websockets==15.0.1，均为 mcp 的
         # transitive dep 且 --extra dev/mcp 会拉取）。缺包或版本不符 CI 必须
         # 立即失败；不得 force-reinstall 或 uv pip install "pkg>=X" 浮动补装
         # 掩盖 lock 漂移，也不得改 uv.lock / pyproject.toml。
@@ -107,7 +107,7 @@ jobs:
           source .venv/bin/activate
           python - <<'PY'
           import importlib.metadata as m
-          for pkg, want in (("mcp", "1.28.1"), ("httpx", "0.28.1"), ("websockets", "15.0.1")):
+          for pkg, want in (("mcp", "2.0.0"), ("httpx", "0.28.1"), ("websockets", "15.0.1")):
               got = m.version(pkg)
               print(f"{pkg}=={got}")
               assert got == want, f"{pkg}: expected {want}, got {got} (uv.lock drift?)"
