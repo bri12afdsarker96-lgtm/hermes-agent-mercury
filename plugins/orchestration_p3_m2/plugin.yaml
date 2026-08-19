@@ -1,0 +1,7 @@
+name: orchestration-p3-m2
+version: "0.1.0"
+description: "P3-M2 orchestration · L0 search-query rewrite (tool_request middleware, fail-open) + long-chain verifier (llm_execution middleware, pass/fail whitelist, never auto-retry). Both sub-features default OFF and are enabled per-feature via plugins.orchestration_p3_m2.l0_rewrite.enabled / .verifier.enabled (strict bool). Model calls reuse agent.auxiliary_client.call_llm (auxiliary.l0_query_rewrite.* / auxiliary.task_verifier.* config picks the small model, e.g. MiniMax M2 tier). No fork-core changes."
+author: "Hermes_AI × NousResearch/hermes-agent"
+provides_hooks:
+  - "tool_request (middleware)"
+  - "llm_execution (middleware)"
