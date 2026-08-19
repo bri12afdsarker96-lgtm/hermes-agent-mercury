@@ -92,6 +92,14 @@ def _budget_module():
 
     **Codex §III**:budget 模块缺失时 middleware **不**得 fail-open · 由调用方(orchestrator)
     捕获 ImportError 走 fail-CLOSED response · 保持"cache 单独启用"场景可测。
+
+    Upstream v0.20.4 (v2026.8.18) may load a plugin under a suffixed module
+    name (``spike_p3_m0_budget__<path-hash>``) when the plain name was used
+    by an earlier discovery in the same process, so a plain sibling import
+    is no longer sufficient. The authoritative source is the PluginManager
+    registry: ask it for the loaded ``spike-p3-m0-budget`` module before
+    giving up. Enablement semantics are unchanged — a disabled budget
+    plugin still raises ImportError → fail-CLOSED.
     """
     parent = __name__.rsplit(".", 1)[0] if "." in __name__ else ""
     if parent:
@@ -102,6 +110,14 @@ def _budget_module():
             return importlib.import_module(candidate)
         except ImportError:
             pass
+    try:
+        from hermes_cli.plugins import get_plugin_manager
+
+        loaded = get_plugin_manager()._plugins.get("spike-p3-m0-budget")
+        if loaded is not None and loaded.module is not None:
+            return loaded.module
+    except Exception:  # noqa: BLE001 - registry 不可用时保持原 fail-CLOSED 语义
+        pass
     raise ImportError(
         "spike_p3_m0_budget module not loaded; enable spike-p3-m0-budget in plugins.enabled"
     )
