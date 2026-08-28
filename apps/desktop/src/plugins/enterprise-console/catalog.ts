@@ -1,0 +1,94 @@
+/**
+ * The Phase-1 page catalog — the DESKTOP_PHASE1_INTERFACE_FREEZE encoded in
+ * code. Each entry records the server-contract reality (B3 census) so the shell
+ * renders honest status and never presents a server gap as a working feature.
+ *
+ * status:
+ *   'ready'     — server authority complete; buildable now.
+ *   'ready-dev' — routes exist but the backing capability is DEV/CONTRACT;
+ *                 render with a maturity badge, never as production-live.
+ *   'partial'   — only a read-only / partial slice has server authority.
+ *   'blocked'   — SERVER_API_GAP: no server route/authority. The console must
+ *                 NOT fabricate it; it shows the gap and defers to TOTAL-CONTROL.
+ */
+
+export type PageStatus = 'blocked' | 'partial' | 'ready' | 'ready-dev'
+
+export interface ConsolePage {
+  /** Capability key in whoami.product_capabilities (Capability Truth badge). */
+  capability?: string
+  /** For blocked/partial: what the server is missing, for the operator. */
+  gap?: string
+  id: string
+  /** i18n key for the nav label. */
+  labelKey: string
+  /** Coarse UI-display permission hint; the server still enforces its own. */
+  permission?: string
+  status: PageStatus
+}
+
+export const CONSOLE_PAGES: ConsolePage[] = [
+  { capability: 'metrics', id: 'dashboard', labelKey: 'page.dashboard', permission: 'metrics.view', status: 'ready' },
+  {
+    gap: 'server has only a static connector schema — no integration status, callback health, or secret-state authority',
+    id: 'wecom',
+    labelKey: 'page.wecom',
+    status: 'blocked'
+  },
+  {
+    gap: 'ChannelBinding has no HTTP route (identity/principals is ready)',
+    id: 'identity',
+    labelKey: 'page.identity',
+    permission: 'principal.crud',
+    status: 'partial'
+  },
+  {
+    capability: 'delivery',
+    gap: 'inbound / held / recovery have no server route; outbound delivery-outbox is read-only',
+    id: 'conversations',
+    labelKey: 'page.conversations',
+    permission: 'delivery.read',
+    status: 'partial'
+  },
+  { capability: 'biz_tasks', id: 'tasks', labelKey: 'page.tasks', permission: 'biztask.read', status: 'ready' },
+  {
+    gap: 'enterprise/followup.py exists but exposes no HTTP route (cross-lane server dependency)',
+    id: 'followup',
+    labelKey: 'page.followup',
+    status: 'blocked'
+  },
+  {
+    capability: 'reminders',
+    id: 'reminders',
+    labelKey: 'page.reminders',
+    permission: 'reminder.read',
+    status: 'ready'
+  },
+  {
+    capability: 'knowledge_rag',
+    id: 'knowledge',
+    labelKey: 'page.knowledge',
+    permission: 'kb.author',
+    status: 'ready-dev'
+  },
+  { capability: 'handoff', id: 'handoff', labelKey: 'page.handoff', permission: 'inbox.list', status: 'ready' },
+  { capability: 'metrics', id: 'alerts', labelKey: 'page.alerts', permission: 'metrics.view', status: 'ready' },
+  { id: 'provider', labelKey: 'page.provider', permission: 'provider.set', status: 'ready' },
+  {
+    gap: 'budget config is ready; real-time token usage/spend has no server endpoint',
+    id: 'usage',
+    labelKey: 'page.usage',
+    permission: 'metrics.view',
+    status: 'partial'
+  },
+  {
+    gap: 'audit is append-only write — no read/replay route',
+    id: 'audit',
+    labelKey: 'page.audit',
+    status: 'blocked'
+  }
+]
+
+export function findPage(id: string): ConsolePage | undefined {
+  return CONSOLE_PAGES.find(page => page.id === id)
+}
