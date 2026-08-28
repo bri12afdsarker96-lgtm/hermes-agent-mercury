@@ -614,6 +614,16 @@ export {
   DialogTrigger
 } from '@/components/ui/dialog'
 export {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger
+} from '@/components/ui/sheet'
+export {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
