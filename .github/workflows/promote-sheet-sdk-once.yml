@@ -1,0 +1,42 @@
+name: Promote Sheet to plugin SDK once
+
+on:
+  push:
+    branches:
+      - claude/p3-m4a-ui-design-system-01
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/p3-m4a-ui-design-system-01
+          fetch-depth: 0
+      - name: Promote existing host primitive only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('apps/desktop/src/sdk/index.ts')
+          s = p.read_text(encoding='utf-8')
+          anchor = "} from '@/components/ui/dialog'\n"
+          export_block = "export {\n  Sheet,\n  SheetClose,\n  SheetContent,\n  SheetDescription,\n  SheetFooter,\n  SheetHeader,\n  SheetTitle,\n  SheetTrigger\n} from '@/components/ui/sheet'\n"
+          assert s.count(anchor) == 1, 'dialog export anchor drifted'
+          assert "from '@/components/ui/sheet'" not in s, 'Sheet already exported'
+          p.write_text(s.replace(anchor, anchor + export_block), encoding='utf-8')
+          PY
+      - name: Commit and self-delete
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/desktop/src/sdk/index.ts
+          git rm .github/workflows/promote-sheet-sdk-once.yml
+          git commit -m 'feat(ui): expose existing Sheet through plugin SDK'
+          git push origin HEAD:claude/p3-m4a-ui-design-system-01
