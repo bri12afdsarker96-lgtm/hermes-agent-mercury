@@ -53,7 +53,7 @@ function CreateReminder() {
 
   return (
     <FormAction
-      canSubmit={subjectId.trim().length > 0 && Number.isFinite(scheduledFor)}
+      canSubmit={subjectId.trim().length > 0 && subjectType.trim().length > 0 && Number.isFinite(scheduledFor)}
       invalidateKey={REMINDERS_KEY}
       onSuccess={() => setIdempotencyKey(crypto.randomUUID())}
       permission="reminder.write"
