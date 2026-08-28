@@ -1,15 +1,13 @@
 /**
  * IpcHermesTransport — the PRODUCTION transport. Renderer → typed preload /
  * contextBridge → IPC → Electron main → HTTPS (reusing the desktop's main
- * `fetchJson` engine). The bearer is shipped to the main process once at
- * construction and is never held in the renderer; requests carry only
- * `{ path, method, body }`, and main injects the credential.
+ * `fetchJson` engine). The native bearer never enters the renderer; requests
+ * carry only `{ path, method, body }`, and main injects the credential.
  *
  * This works where `FetchHermesTransport` cannot: the Hermes server emits no
  * CORS and enforces a strict Origin allowlist, so a renderer `fetch` is both
  * blocked and Origin-rejected — a main-process request sends no Origin and rides
- * the bearer. Installed via `setTransportFactory` when the desktop bridge is
- * present (see plugin.tsx); pages never change (they depend on HermesTransport).
+ * the bearer. Pages never change (they depend on HermesTransport).
  */
 
 import { codeForStatus, HermesApiError } from './fetch-transport'
@@ -33,30 +31,27 @@ export function hasIpcBridge(): boolean {
 }
 
 export class IpcHermesTransport extends BaseHermesTransport {
-  // One-way handshake: the token crosses to main here and is never stored on
-  // this instance (or anywhere in the renderer). `#ready` resolves the opaque
-  // sessionId (not a secret) that fences every later call to this session.
+  // Token-free handshake: main resolves the native bearer and `#ready` receives
+  // only an opaque sessionId that fences every later call to this session.
   readonly #ready: Promise<string>
 
-  // Overloads: the (baseUrl, token) break-glass path, and the token-free one-login
-  // path where main resolves the trusted origin + native bearer itself.
-  constructor(baseUrl: string, token: string)
-  constructor(mode: { readonly auto: true })
-  constructor(a: string | { readonly auto: true }, token?: string) {
+  private constructor() {
     super()
 
-    const handshake =
-      typeof a === 'object' && a.auto
-        ? // B16-OL · one-login: no url/token leaves the renderer; main returns
-          // only the opaque sessionId (bearer stays in main).
-          bridge().autoConnect()
-        : bridge().connect(a as string, token as string)
+    // B16-OL · one-login: no url/token leaves the renderer; main returns only
+    // the opaque sessionId (bearer stays in main).
+    const handshake = bridge().autoConnect()
 
     this.#ready = handshake.then(result => {
       if (!result.ok) {
         // Structured, already-redacted connect error from main (bad base URL /
-        // not https / missing token / no native session). Coarse message; no secret.
-        throw new HermesApiError(0, 'error', result.message)
+        // not https / missing token / no native session). Coarse message; no
+        // secret. Forward ONLY the whitelisted non-secret `no_native_session`
+        // reason so the FSM can map it to UNKNOWN (not UNAVAILABLE); every other
+        // failure stays coarse 'error'. Never forward a bearer/sessionId/baseUrl.
+        const code = result.code === 'no_native_session' ? 'no_native_session' : 'error'
+
+        throw new HermesApiError(0, code, result.message)
       }
 
       return result.sessionId
@@ -66,7 +61,7 @@ export class IpcHermesTransport extends BaseHermesTransport {
   /** B16-OL · One-login transport: bind to a main-established enterprise session
    *  without ever handling a URL or bearer in the renderer. */
   static autoConnecting(): IpcHermesTransport {
-    return new IpcHermesTransport({ auto: true })
+    return new IpcHermesTransport()
   }
 
   async request<T>(path: string, opts: TransportRequest = {}): Promise<T> {

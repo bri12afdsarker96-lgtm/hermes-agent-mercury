@@ -43,6 +43,7 @@ function who(partial: Partial<Whoami> = {}): Whoami {
   return {
     capability_revision: 0,
     data_scope: { mode: 'legacy_tenant_scope', scopes: [] },
+    effective_permissions: ['*'],
     name: 'alice',
     principal_id: 'p1',
     product_capabilities: {},

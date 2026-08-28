@@ -31,7 +31,7 @@ import {
 import { type ChangeEvent, useState } from 'react'
 
 import { actionError, ConfirmAction, FormAction } from './actions'
-import { capabilityStatus } from './capabilities'
+import { capabilityStatus, hasPermission } from './capabilities'
 import { ConsoleRows, fmtEpoch, QueryBody, useConsoleQuery } from './page-kit'
 import { $whoami } from './session'
 import { CapabilityBadge } from './status-badge'
@@ -106,6 +106,7 @@ function GapReview({ gapId }: { gapId: string }) {
       <FormAction
         canSubmit={text.trim().length > 0}
         invalidateKey={KB_GAPS_KEY}
+        permission="kb.author"
         submit={() => transport.post('/api/kb-gap-author', { gap_id: gapId, text })}
         submitLabel="Author"
         testId={`kb-author-${gapId}`}
@@ -122,6 +123,7 @@ function GapReview({ gapId }: { gapId: string }) {
       <FormAction
         canSubmit={reason.trim().length >= 3}
         invalidateKey={KB_GAPS_KEY}
+        permission="kb.author"
         submit={() => transport.post('/api/kb-gap-reject', { gap_id: gapId, reason })}
         submitLabel="Reject"
         testId={`kb-reject-${gapId}`}
@@ -175,6 +177,8 @@ function CandidatesSection() {
 function UploadPanel() {
   const transport = useTransport()
   const queryClient = useQueryClient()
+  const who = useValue($whoami)
+  const canAuthor = who === null || hasPermission(who, 'kb.upload')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<null | string>(null)
 
@@ -202,6 +206,10 @@ function UploadPanel() {
     } finally {
       setBusy(false)
     }
+  }
+
+  if (!canAuthor) {
+    return null
   }
 
   return (
@@ -273,6 +281,7 @@ function PublishAction({ uploadId }: { uploadId: string }) {
     <FormAction
       canSubmit={collection.trim().length > 0 && collection.length <= 64}
       invalidateKey={UPLOADS_KEY}
+      permission="kb.commit"
       submit={() => transport.post('/api/knowledge-commit', { collection, upload_id: uploadId })}
       submitLabel="Publish"
       testId={`kb-publish-${uploadId}`}
@@ -327,6 +336,7 @@ function UploadsSection() {
                       <ConfirmAction
                         destructive
                         invalidateKey={UPLOADS_KEY}
+                        permission="kb.upload"
                         run={() => transport.post('/api/knowledge-rollback', { upload_id: upload.upload_id })}
                         testId={`kb-rollback-${upload.upload_id}`}
                         title="Roll back this upload?"
@@ -355,6 +365,7 @@ function WithdrawAction({ collection, source }: { collection: string; source: st
     <FormAction
       canSubmit={reason.trim().length >= 3}
       invalidateKey={['enterprise-console', 'kb-entries', collection]}
+      permission="kb.delete"
       submit={() => transport.post('/api/knowledge-delete', { collection, reason, source })}
       submitLabel="Withdraw"
       testId={`kb-withdraw-${source}`}

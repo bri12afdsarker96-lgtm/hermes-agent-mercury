@@ -11,10 +11,11 @@ import type { ComponentType } from 'react'
 
 import { hasPermission } from './capabilities'
 import { CONSOLE_PAGES, type ConsolePage } from './catalog'
-import { ConnectForm } from './connect-form'
 import { AlertsPage } from './page-alerts'
+import { AuditPage } from './page-audit'
 import { ConversationsPage } from './page-conversations'
 import { DashboardPage } from './page-dashboard'
+import { FollowupPage } from './page-followup'
 import { HandoffPage } from './page-handoff'
 import { IdentityPage } from './page-identity'
 import { KnowledgePage } from './page-knowledge'
@@ -23,6 +24,7 @@ import { ProviderPage } from './page-provider'
 import { RemindersPage } from './page-reminders'
 import { TasksPage } from './page-tasks'
 import { UsagePage } from './page-usage'
+import { WeComPage } from './page-wecom'
 import { $whoami, disconnect } from './session'
 import { PageStatusBadge } from './status-badge'
 import type { Whoami } from './types'
@@ -34,15 +36,18 @@ export const $activePage = atom<string>('dashboard')
  *  status placeholder (blocked / partial / pending) — never a fabricated view. */
 const PAGE_COMPONENTS: Record<string, ComponentType> = {
   alerts: AlertsPage,
+  audit: AuditPage,
   conversations: ConversationsPage,
   dashboard: DashboardPage,
+  followup: FollowupPage,
   handoff: HandoffPage,
   identity: IdentityPage,
   knowledge: KnowledgePage,
   provider: ProviderPage,
   reminders: RemindersPage,
   tasks: TasksPage,
-  usage: UsagePage
+  usage: UsagePage,
+  wecom: WeComPage
 }
 
 function renderPage(page: ConsolePage, who: Whoami) {
@@ -93,17 +98,30 @@ export function ConsoleShell() {
   const activeId = useValue($activePage)
 
   if (!who) {
-    return <ConnectForm />
+    // Production console access is native one-login only. Never render a
+    // renderer token form as a fallback: the main process owns the bearer.
+    return (
+      <div className="mx-auto mt-16 max-w-sm text-sm text-muted-foreground" data-testid="console-session-unavailable">
+        enterprise session unavailable — sign in to the desktop account and retry
+      </div>
+    )
   }
 
-  const active = CONSOLE_PAGES.find(page => page.id === activeId) ?? CONSOLE_PAGES[0]
+  // Nav rows for surfaces flagged hideWhenUnpermitted (e.g. audit, tenant_admin
+  // only) are omitted entirely for viewers who lack the permission — the row
+  // does not merely deny in content. Other pages keep the row + DeniedPage.
+  const navPages = CONSOLE_PAGES.filter(
+    page => !(page.hideWhenUnpermitted && page.permission && !hasPermission(who, page.permission))
+  )
+
+  const active = navPages.find(page => page.id === activeId) ?? navPages[0]
 
   return (
     <div className="flex h-full flex-col" data-testid="enterprise-console">
       <SessionHeader who={who} />
       <div className="flex min-h-0 flex-1">
         <nav className="w-52 shrink-0 overflow-y-auto border-r border-border p-2" data-testid="console-nav">
-          {CONSOLE_PAGES.map(page => (
+          {navPages.map(page => (
             <button
               className={
                 page.id === active.id

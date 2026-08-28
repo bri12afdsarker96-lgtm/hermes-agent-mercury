@@ -52,6 +52,23 @@ function isRevocation(err: unknown): boolean {
 }
 
 /**
+ * Map a probe failure to the honest FSM state (frozen contract):
+ *   no authenticated native session (coarse non-secret reason) → UNKNOWN;
+ *   401/403 from a real whoami                                 → REVOKED;
+ *   network / 5xx / authority outage / no enterprise origin     → UNAVAILABLE.
+ * A missing native session is NOT an outage — the console is simply not yet
+ * eligible (the user has not completed native login), so it must read UNKNOWN,
+ * never UNAVAILABLE.
+ */
+function stateForError(err: unknown): EnterpriseSessionState {
+  if (err instanceof HermesApiError && err.code === 'no_native_session') {
+    return 'UNKNOWN'
+  }
+
+  return isRevocation(err) ? 'REVOKED' : 'UNAVAILABLE'
+}
+
+/**
  * How a session becomes a transport. Defaults to the DEV fetch adapter; the B-T
  * workstream installs the secure main-process/IPC transport via
  * `setTransportFactory` without touching any page or this module's flow.
@@ -70,6 +87,11 @@ export function setTransportFactory(factory: TransportFactory): void {
 // until the desktop bridge installs the auto factory.
 type AutoTransportFactory = () => HermesTransport
 let autoTransportFactory: AutoTransportFactory = () => new UnavailableHermesTransport()
+
+// Every async probe captures this generation. A later probe, disconnect, or
+// plugin disposal invalidates earlier completions so an old successful whoami
+// can never resurrect AUTHENTICATED after logout/revocation.
+let sessionGeneration = 0
 
 export function setAutoTransportFactory(factory: AutoTransportFactory): void {
   autoTransportFactory = factory
@@ -128,10 +150,11 @@ export async function connect(baseUrl: string, token: string): Promise<void> {
     $whoami.set(who)
     $sessionState.set('AUTHENTICATED')
   } catch (err) {
+    transport.dispose?.()
     $transport.set(null)
     $whoami.set(null)
     $connectError.set(redactError(err))
-    $sessionState.set(isRevocation(err) ? 'REVOKED' : 'UNAVAILABLE')
+    $sessionState.set(stateForError(err))
     throw err
   } finally {
     $connecting.set(false)
@@ -146,27 +169,41 @@ export async function connect(baseUrl: string, token: string): Promise<void> {
  * Returns true iff it reached AUTHENTICATED.
  */
 export async function autoConnect(): Promise<boolean> {
+  const generation = ++sessionGeneration
   $connecting.set(true)
   $connectError.set(null)
   const transport = autoTransportFactory()
 
   try {
     const who = await transport.request<Whoami>('/api/whoami')
+
+    if (generation !== sessionGeneration) {
+      transport.dispose?.()
+      return false
+    }
+
     $transport.set(transport)
     $whoami.set(who)
     $sessionState.set('AUTHENTICATED')
 
     return true
   } catch (err) {
+    if (generation !== sessionGeneration) {
+      transport.dispose?.()
+      return false
+    }
+
     transport.dispose?.()
     $transport.set(null)
     $whoami.set(null)
     $connectError.set(redactError(err))
-    $sessionState.set(isRevocation(err) ? 'REVOKED' : 'UNAVAILABLE')
+    $sessionState.set(stateForError(err))
 
     return false
   } finally {
-    $connecting.set(false)
+    if (generation === sessionGeneration) {
+      $connecting.set(false)
+    }
   }
 }
 
@@ -175,28 +212,43 @@ export async function autoConnect(): Promise<boolean> {
  *  deactivates the console). A transient outage leaves the session intact. */
 export async function refreshWhoami(): Promise<void> {
   const transport = $transport.get()
+  const generation = sessionGeneration
 
   if (!transport) {
     return
   }
 
   try {
-    $whoami.set(await transport.request<Whoami>('/api/whoami'))
+    const who = await transport.request<Whoami>('/api/whoami')
+
+    if (generation !== sessionGeneration || $transport.get() !== transport) {
+      return
+    }
+
+    $whoami.set(who)
     $sessionState.set('AUTHENTICATED')
   } catch (err) {
+    if (generation !== sessionGeneration || $transport.get() !== transport) {
+      return
+    }
     if (isRevocation(err)) {
       transport.dispose?.()
       $transport.set(null)
       $whoami.set(null)
       $connectError.set(redactError(err))
       $sessionState.set('REVOKED')
+    } else {
+      // Transient outage: KEEP the live transport (recovery reuses it), but the
+      // state must go UNAVAILABLE so $enterpriseAvailable flips false — the
+      // console must not keep asserting AUTHENTICATED through an outage.
+      $sessionState.set('UNAVAILABLE')
     }
-    // else: transient outage — keep the live session; do not lie about state.
   }
 }
 
 /** Drop the session — clears the transport (and its in-memory credential) + identity. */
 export function disconnect(): void {
+  sessionGeneration += 1
   $transport.get()?.dispose?.()
   $transport.set(null)
   $whoami.set(null)

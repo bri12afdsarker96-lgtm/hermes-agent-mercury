@@ -46,12 +46,15 @@ function CreateTask() {
   const [title, setTitle] = useState('')
   const [carrier, setCarrier] = useState('device')
   const [goal, setGoal] = useState('')
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   return (
     <FormAction
       canSubmit={title.trim().length > 0}
       invalidateKey={TASKS_KEY}
-      submit={() => transport.post('/api/biz-task-create', { carrier, goal: goal || undefined, title })}
+      onSuccess={() => setIdempotencyKey(crypto.randomUUID())}
+      permission="biztask.write"
+      submit={() => transport.post('/api/biz-task-create', { carrier, goal: goal || undefined, idempotency_key: idempotencyKey, title })}
       submitLabel="Create"
       testId="console-task-create"
       title="Create task"
@@ -110,6 +113,7 @@ export function TasksPage() {
                     <>
                       <ConfirmAction
                         invalidateKey={TASKS_KEY}
+                        permission="biztask.write"
                         run={() => transport.post('/api/biz-task-retry', { task_id: task.task_id })}
                         testId={`console-task-retry-${task.task_id}`}
                         title="Retry this task?"
@@ -118,6 +122,7 @@ export function TasksPage() {
                       </ConfirmAction>
                       <ConfirmAction
                         invalidateKey={TASKS_KEY}
+                        permission="biztask.escalate"
                         run={() => transport.post('/api/biz-task-escalate', { task_id: task.task_id })}
                         testId={`console-task-escalate-${task.task_id}`}
                         title="Escalate this task?"
@@ -128,6 +133,7 @@ export function TasksPage() {
                         description="This closes the task on the server."
                         destructive
                         invalidateKey={TASKS_KEY}
+                        permission="biztask.write"
                         run={() => transport.post('/api/biz-task-close', { task_id: task.task_id })}
                         testId={`console-task-close-${task.task_id}`}
                         title="Close this task?"

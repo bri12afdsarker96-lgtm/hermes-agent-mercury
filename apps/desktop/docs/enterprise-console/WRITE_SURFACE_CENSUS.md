@@ -1,5 +1,12 @@
 # B13 · Server Write-Surface Census (Desktop control actions)
 
+> **WAVE-7 currency note (see DEV_LOG Entry 11)**: this census predates server PR #131
+> (SC1–SC6). The `SERVER_API_GAP` rows for Follow-up (SC1), ChannelBinding (SC2),
+> Conversations (SC3), Audit (SC4), and WeCom status (SC5) are now CLOSED — those routes
+> exist and the desktop consumes them. The Phase-1 action census found **0 remaining hard
+> Phase-1 write gaps**. Rows below are retained as historical evidence; the live truth is
+> `catalog.ts` + DEV_LOG Entry 11.
+
 > Read-only census of the Hermes web server at live default
 > `claude/hermes-desktop-multi-ai-phone-aiw5mr` @ `3bc2870f36cff698c9bd5eb21dc7e36242a33040`.
 > Only **real webserver `/api/*` routes** count as Desktop-consumable API — domain
