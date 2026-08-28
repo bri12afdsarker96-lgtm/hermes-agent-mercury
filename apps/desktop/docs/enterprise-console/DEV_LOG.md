@@ -3,6 +3,63 @@
 > C8 process log for gate `P3-M4A-DESKTOP-ASSISTANT-CONSOLE-01`. Mercury-owned docs
 > only; no Hermes_AI docs are touched by this lane.
 
+## Entry 3 — transport HIGH-1..4 remediation (session fencing, hardening, fail-closed)
+
+**Changed files**
+- New pure core: `electron/enterprise-transport.ts` (electron-free — session
+  fencing store + base-URL/path/method validation) + `electron/
+  enterprise-transport.test.ts` (14 tests, node project).
+- `electron/main.ts`: handlers rewritten to per-WebContents fenced sessions
+  (opaque `sessionId`), sender-`destroyed` cleanup, method allowlist, structural
+  path/origin guard. `electron/preload.ts` + `src/global.d.ts`: `disconnect`
+  and `request` now carry the `sessionId`. `electron/connection-config.ts`: none
+  (its `normalizeRemoteBaseUrl` was already exported — reused, not rebuilt).
+- Plugin: `transport.ts` (+`UnavailableHermesTransport`, the fail-closed
+  default), `session.ts` (default factory now Unavailable), `ipc-transport.ts`
+  (sessionId handshake; dispose fenced), `plugin.tsx` (no direct-fetch
+  fallback), `connect-form.tsx` (clear the token input on handoff) + reworked
+  `session`/`ipc-transport` tests.
+
+**Why — TOTAL-CONTROL raised 4 HIGH (all accepted, all correct)**
+- **HIGH-1** global session → cross-window bleed + stale teardown race. Fixed:
+  `Map<webContentsId, {sessionId,baseUrl,token}>`; request/disconnect require
+  sender AND sessionId match; a superseded sessionId can neither read the new
+  credential nor tear down the new session.
+- **HIGH-2** failed/stale connect didn't clear main. Fixed: connect-failure
+  path disposes its own fenced session (fenced so it can't kill a newer one);
+  the fail-closed default means a non-connect never leaves a session.
+- **HIGH-3** base-URL/request boundary. Fixed by WRAPping the shared
+  `normalizeRemoteBaseUrl` (already drops query/hash) + enterprise policy (no
+  URL credentials; non-loopback ⇒ https; loopback may be http). Path guard is
+  structural (dotdot/backslash/scheme-relative/percent-encoded/control-char
+  rejected + on-origin assertion); method allowlist = GET/POST only. TLS never
+  relaxed.
+- **HIGH-4** production must fail closed without IPC. Fixed: default transport is
+  `UnavailableHermesTransport`; the IPC transport is installed only when the
+  desktop bridge is present; `FetchHermesTransport` is never an automatic
+  fallback (unit/dev only, injected explicitly). Sender-destroyed cleanup drops
+  orphan bearers.
+- **Bearer-claim correction (accepted):** the wording is now accurate — a
+  user-entered credential exists transiently in the renderer during connect (and
+  is cleared from the input on handoff); after the IPC handoff the renderer does
+  not persist/store/re-expose it; main owns the session credential; never
+  persisted, never logged.
+
+**How verified**
+- `tsc -p .` 0, `tsc -p tsconfig.electron.json` 0, `eslint` clean (plugin +
+  electron + global.d.ts). `vitest --project ui` **8 files / 36** pass;
+  `vitest --project electron enterprise-transport.test.ts` **14** pass. No
+  regression in `contrib` (70), `session-windows` + `renderer-bundle` (28).
+- Test matrix covered: per-window isolation, cross-window, stale sessionId
+  reject, stale disconnect fencing, sender-destroyed cleanup, missing-bridge
+  fail-closed, no-direct-fetch-fallback, loopback-http/https accepted,
+  non-loopback-http/URL-credentials/bad-scheme rejected, encoded/backslash/
+  scheme-relative/control-char path rejected, method allowlist, 401 fail-closed,
+  token never persisted, error redaction.
+
+**Deferred (per TC)**: SDK `useVirtualizer` export = HOLD (prove need first);
+renderer CSP = deferred hardening (B-AUD2/5). `READY = NO`, `MERGE = NO`.
+
 ## Entry 2 — transport amendment (HermesTransport + secure main-process WRAP)
 
 **Changed files**

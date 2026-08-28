@@ -34,19 +34,20 @@ export function hasIpcBridge(): boolean {
 
 export class IpcHermesTransport extends BaseHermesTransport {
   // One-way handshake: the token crosses to main here and is never stored on
-  // this instance (or anywhere in the renderer).
-  readonly #ready: Promise<void>
+  // this instance (or anywhere in the renderer). `#ready` resolves the opaque
+  // sessionId (not a secret) that fences every later call to this session.
+  readonly #ready: Promise<string>
 
   constructor(baseUrl: string, token: string) {
     super()
     this.#ready = bridge()
       .connect(baseUrl, token)
-      .then(() => undefined)
+      .then(result => result.sessionId)
   }
 
   async request<T>(path: string, opts: TransportRequest = {}): Promise<T> {
-    await this.#ready
-    const result = await bridge().request({ body: opts.body, method: opts.method, path })
+    const sessionId = await this.#ready
+    const result = await bridge().request({ body: opts.body, method: opts.method, path, sessionId })
 
     if (result.kind === 'ok') {
       return result.data as T
@@ -56,6 +57,8 @@ export class IpcHermesTransport extends BaseHermesTransport {
   }
 
   dispose(): void {
-    void bridge().disconnect()
+    // Tear down exactly this session in main (fenced by sessionId) — even if the
+    // connect handshake is still in flight.
+    void this.#ready.then(sessionId => bridge().disconnect(sessionId)).catch(() => undefined)
   }
 }

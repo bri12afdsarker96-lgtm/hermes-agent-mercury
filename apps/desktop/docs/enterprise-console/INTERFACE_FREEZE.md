@@ -20,8 +20,12 @@
 - **Transport (amended per TOTAL-CONTROL):** pages depend on a narrow `HermesTransport`
   interface (`get/post/request`) and never see a token. Production = renderer → typed
   preload/contextBridge → IPC → Electron **main** → HTTPS, reusing the desktop's existing
-  main `fetchJson` engine (**WRAP**, per the B-T census): the bearer lives in the **main
-  process only** and is never held in the renderer. This is also the only design that
+  main `fetchJson` engine (**WRAP**, per the B-T census). **Bearer contract (accurate):** a
+  user-entered credential exists transiently in the renderer during connect (cleared from
+  the input on handoff); after the IPC handoff the renderer does not persist/store/
+  re-expose it; **main owns the authenticated session credential** (per WebContents, fenced
+  by an opaque `sessionId`), never persisted, never logged. This is also the only design
+  that
   works against the Hermes server, which emits no CORS and enforces a strict Origin
   allowlist — a renderer `fetch` is both CORS-blocked and Origin-rejected; a main-process
   request sends no Origin and rides the bearer. The bundled `FetchHermesTransport` (direct

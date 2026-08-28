@@ -40,6 +40,19 @@ export abstract class BaseHermesTransport implements HermesTransport {
   }
 }
 
+/**
+ * The default transport before a real one is installed: every call FAILS
+ * CLOSED. Production installs `IpcHermesTransport` only when the desktop bridge
+ * is present; tests inject a `FakeHermesTransport`. The renderer-direct fetch
+ * adapter is never an automatic fallback (a packaged app without the bridge
+ * must not silently downgrade to cross-origin renderer fetch).
+ */
+export class UnavailableHermesTransport extends BaseHermesTransport {
+  request<T>(): Promise<T> {
+    return Promise.reject(new Error('enterprise-console: transport unavailable'))
+  }
+}
+
 /** The active transport for the connected session (null when disconnected). */
 export const $transport = atom<HermesTransport | null>(null)
 

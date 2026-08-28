@@ -20,13 +20,17 @@ export function ConnectForm() {
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
+    const bearer = token
 
-    if (!baseUrl.trim() || !token || connecting) {
+    if (!baseUrl.trim() || !bearer || connecting) {
       return
     }
 
-    // Rejection is surfaced via $connectError; nothing to do here.
-    void connect(baseUrl, token).catch(() => undefined)
+    // Hand the credential off and clear the renderer input immediately — the
+    // bearer belongs to the transport (the main process, for the production
+    // adapter), not this form. Rejection is surfaced via $connectError.
+    setToken('')
+    void connect(baseUrl, bearer).catch(() => undefined)
   }
 
   return (

@@ -15,8 +15,8 @@
 
 import { atom, computed, type PluginStorage } from '@hermes/plugin-sdk'
 
-import { FetchHermesTransport, HermesApiError } from './fetch-transport'
-import { $transport, type HermesTransport } from './transport'
+import { HermesApiError } from './fetch-transport'
+import { $transport, type HermesTransport, UnavailableHermesTransport } from './transport'
 import type { Whoami } from './types'
 
 /** Persisted: the Hermes web-server base URL (e.g. http://127.0.0.1:8765). */
@@ -41,7 +41,9 @@ const BASE_URL_KEY = 'hermesBaseUrl'
  */
 type TransportFactory = (baseUrl: string, token: string) => HermesTransport
 
-let transportFactory: TransportFactory = (baseUrl, token) => new FetchHermesTransport(baseUrl, token)
+// Fail closed by default: until the desktop bridge installs the secure IPC
+// transport (or a test injects a fake), connect cannot reach a server.
+let transportFactory: TransportFactory = () => new UnavailableHermesTransport()
 
 export function setTransportFactory(factory: TransportFactory): void {
   transportFactory = factory

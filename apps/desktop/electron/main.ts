@@ -128,6 +128,7 @@ import {
 } from './desktop-uninstall'
 import { describeDevCdpDecision, resolveDevCdpPort } from './dev-cdp'
 import { installEmbedReferer } from './embed-referer'
+import { EnterpriseSessionStore, isAllowedEnterpriseMethod, resolveEnterpriseUrl } from './enterprise-transport'
 import { createEventDeduper } from './event-dedupe'
 import {
   buildTerminalScript,
@@ -13440,62 +13441,66 @@ ipcMain.handle('hermes:api', async (_event, request) => {
 
 // ── Enterprise Console transport (P3-M4A) ────────────────────────────────────
 // The bearer for an EXTERNAL Hermes web server lives HERE, in the main process,
-// for the session only — never persisted, never returned to the renderer. The
-// renderer sends baseUrl+token once via `connect`, then only { path, method,
-// body }; main injects the bearer and rides node https via the existing
-// `fetchJson` engine (no browser Origin, so the server's strict-Origin / no-CORS
+// per renderer (WebContents) — never persisted, never returned to any renderer.
+// Each connect mints an opaque sessionId bound to the sender; every request /
+// disconnect must match BOTH the sender AND the current sessionId, so a stale
+// transport can neither borrow a newer credential nor tear down a newer session.
+// Requests are constrained to `/api/*` and injected in main via the existing
+// `fetchJson` engine (no browser Origin — the server's strict-Origin / no-CORS
 // posture stays intact). Consumed by the console plugin's IpcHermesTransport.
-let enterpriseConsoleSession: { baseUrl: string; token: string } | null = null
+const enterpriseSessions = new EnterpriseSessionStore()
+const enterpriseWiredSenders = new Set<number>()
 
-function normalizeEnterpriseBaseUrl(raw) {
-  const parsed = new URL(String(raw))
+ipcMain.handle('hermes:enterprise:connect', (event, payload) => {
+  const senderId = event.sender.id
+  const sessionId = enterpriseSessions.connect(senderId, payload?.baseUrl, payload?.token)
 
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error('unsupported protocol')
+  // Drop the session when the renderer is destroyed, so no orphan bearer
+  // survives a closed window. Wire the listener once per sender.
+  if (!enterpriseWiredSenders.has(senderId)) {
+    enterpriseWiredSenders.add(senderId)
+    event.sender.once('destroyed', () => {
+      enterpriseSessions.destroySender(senderId)
+      enterpriseWiredSenders.delete(senderId)
+    })
   }
 
-  return String(raw).trim().replace(/\/+$/, '')
-}
-
-ipcMain.handle('hermes:enterprise:connect', (_event, payload) => {
-  const baseUrl = normalizeEnterpriseBaseUrl(payload?.baseUrl)
-  const token = String(payload?.token ?? '')
-
-  if (!token) {
-    throw new Error('missing token')
-  }
-
-  enterpriseConsoleSession = { baseUrl, token }
-
-  return { ok: true }
+  return { ok: true, sessionId }
 })
 
-ipcMain.handle('hermes:enterprise:disconnect', () => {
-  enterpriseConsoleSession = null
+ipcMain.handle('hermes:enterprise:disconnect', (event, payload) => {
+  const removed = enterpriseSessions.disconnect(event.sender.id, payload?.sessionId)
 
-  return { ok: true }
+  return { ok: removed }
 })
 
-ipcMain.handle('hermes:enterprise:request', async (_event, req) => {
-  const session = enterpriseConsoleSession
+ipcMain.handle('hermes:enterprise:request', async (event, req) => {
+  const session = enterpriseSessions.resolve(event.sender.id, req?.sessionId)
 
   if (!session) {
     return { code: 'network', kind: 'error', message: 'not connected', status: 0 }
   }
 
-  const path = req?.path
+  const method = req?.method || 'GET'
 
-  // Narrow allowlist: only the server's /api/* surface, no traversal — this
-  // handler must never become an arbitrary SSRF proxy.
-  if (typeof path !== 'string' || !path.startsWith('/api/') || path.includes('..')) {
+  if (!isAllowedEnterpriseMethod(method)) {
+    return { code: 'error', kind: 'error', message: 'method not allowed', status: 0 }
+  }
+
+  let url: string
+
+  try {
+    // Structural /api/* + origin guard: never an arbitrary SSRF proxy.
+    url = resolveEnterpriseUrl(session.baseUrl, req?.path)
+  } catch {
     return { code: 'error', kind: 'error', message: 'invalid path', status: 0 }
   }
 
   try {
-    const data = await fetchJson(session.baseUrl + path, '', {
+    const data = await fetchJson(url, '', {
       bearer: session.token,
       body: req?.body,
-      method: req?.method || 'GET'
+      method: String(method).toUpperCase()
     })
 
     return { data, kind: 'ok' }

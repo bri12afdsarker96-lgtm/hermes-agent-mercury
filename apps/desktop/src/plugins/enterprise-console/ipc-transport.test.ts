@@ -7,16 +7,16 @@ type EnterpriseResult = { data: unknown; kind: 'ok' } | { code: string; kind: 'e
 type WindowWithBridge = {
   hermesDesktop?: {
     enterprise: {
-      connect: (baseUrl: string, token: string) => Promise<{ ok: boolean }>
-      disconnect: () => Promise<{ ok: boolean }>
-      request: (req: { body?: unknown; method?: string; path: string }) => Promise<EnterpriseResult>
+      connect: (baseUrl: string, token: string) => Promise<{ ok: boolean; sessionId: string }>
+      disconnect: (sessionId: string) => Promise<{ ok: boolean }>
+      request: (req: { body?: unknown; method?: string; path: string; sessionId: string }) => Promise<EnterpriseResult>
     }
   }
 }
 
 function makeBridge(result: EnterpriseResult = { data: { ok: true }, kind: 'ok' }) {
   const bridge = {
-    connect: vi.fn(async () => ({ ok: true })),
+    connect: vi.fn(async () => ({ ok: true, sessionId: 'sid-1' })),
     disconnect: vi.fn(async () => ({ ok: true })),
     request: vi.fn(async () => result)
   }
@@ -39,16 +39,20 @@ describe('hasIpcBridge', () => {
 })
 
 describe('IpcHermesTransport', () => {
-  it('ships the bearer to main once and never holds it in the renderer', async () => {
+  it('ships the bearer to main once and fences requests by the returned sessionId', async () => {
     const bridge = makeBridge()
 
     const transport = new IpcHermesTransport('http://h:1', 'secret-bearer')
     await transport.get('/api/whoami')
 
     expect(bridge.connect).toHaveBeenCalledWith('http://h:1', 'secret-bearer')
-    // The request payload never carries the token.
-    expect(bridge.request).toHaveBeenCalledWith({ body: undefined, method: undefined, path: '/api/whoami' })
-    // The transport object exposes no bearer.
+    // The request carries the opaque sessionId, never the token.
+    expect(bridge.request).toHaveBeenCalledWith({
+      body: undefined,
+      method: undefined,
+      path: '/api/whoami',
+      sessionId: 'sid-1'
+    })
     expect(JSON.stringify(transport)).not.toContain('secret-bearer')
     expect(Object.keys(transport)).not.toContain('token')
   })
@@ -63,10 +67,17 @@ describe('IpcHermesTransport', () => {
     await expect(errTransport.get('/api/whoami')).rejects.toMatchObject({ code: 'unauthorized', status: 401 })
   })
 
-  it('clears the main-process session on dispose', () => {
+  it('clears exactly its session on dispose (fenced by sessionId)', async () => {
     const bridge = makeBridge()
     const transport = new IpcHermesTransport('http://h:1', 't')
+    // Let the connect handshake resolve so dispose has the sessionId.
+    await transport.get('/api/health')
     transport.dispose()
-    expect(bridge.disconnect).toHaveBeenCalled()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(bridge.disconnect).toHaveBeenCalledWith('sid-1')
+  })
+
+  it('fails closed (throws) when the desktop bridge is absent', () => {
+    expect(() => new IpcHermesTransport('http://h:1', 't')).toThrow()
   })
 })

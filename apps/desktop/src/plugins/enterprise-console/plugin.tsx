@@ -35,8 +35,9 @@ const plugin: HermesPlugin = {
     ctx.i18n.register(ENTERPRISE_CONSOLE_LOCALES)
 
     // In the desktop shell, route transport through the secure main-process
-    // bridge (bearer stays in main). Dev/browser/tests without the bridge keep
-    // the direct-fetch fallback. Pages are unaffected either way.
+    // bridge (bearer stays in main). Without the bridge the default transport
+    // fails closed — no silent renderer-direct-fetch fallback. Pages are
+    // unaffected either way (they depend on the HermesTransport interface).
     if (hasIpcBridge()) {
       setTransportFactory((baseUrl, token) => new IpcHermesTransport(baseUrl, token))
     }

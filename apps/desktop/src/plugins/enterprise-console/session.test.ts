@@ -1,8 +1,9 @@
 import type { PluginStorage } from '@hermes/plugin-sdk'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { $baseUrl, $connectError, $whoami, bindSession, connect, disconnect } from './session'
-import { $transport } from './transport'
+import { FetchHermesTransport } from './fetch-transport'
+import { $baseUrl, $connectError, $whoami, bindSession, connect, disconnect, setTransportFactory } from './session'
+import { $transport, UnavailableHermesTransport } from './transport'
 import type { Whoami } from './types'
 
 function fakeResponse(status: number, body: unknown): Response {
@@ -44,6 +45,8 @@ beforeEach(() => {
   $whoami.set(null)
   $connectError.set(null)
   $transport.set(null)
+  // The production default fails closed; tests inject a transport explicitly.
+  setTransportFactory((baseUrl, token) => new FetchHermesTransport(baseUrl, token))
 })
 
 afterEach(() => {
@@ -107,6 +110,16 @@ describe('disconnect', () => {
   it('clears the transport and identity', () => {
     $whoami.set(WHO)
     disconnect()
+    expect($transport.get()).toBeNull()
+    expect($whoami.get()).toBeNull()
+  })
+})
+
+describe('fail-closed default transport', () => {
+  it('cannot connect when no real transport is installed', async () => {
+    setTransportFactory(() => new UnavailableHermesTransport())
+
+    await expect(connect('http://h:1', 'secret-bearer')).rejects.toBeTruthy()
     expect($transport.get()).toBeNull()
     expect($whoami.get()).toBeNull()
   })

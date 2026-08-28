@@ -184,12 +184,13 @@ declare global {
        * dev/browser/tests fall back to the direct-fetch adapter.
        */
       enterprise?: {
-        connect: (baseUrl: string, token: string) => Promise<{ ok: boolean }>
-        disconnect: () => Promise<{ ok: boolean }>
+        connect: (baseUrl: string, token: string) => Promise<{ ok: boolean; sessionId: string }>
+        disconnect: (sessionId: string) => Promise<{ ok: boolean }>
         request: (req: {
           body?: unknown
           method?: string
           path: string
+          sessionId: string
         }) => Promise<{ data: unknown; kind: 'ok' } | { code: string; kind: 'error'; message: string; status: number }>
       }
       notify: (payload: HermesNotification) => Promise<boolean>

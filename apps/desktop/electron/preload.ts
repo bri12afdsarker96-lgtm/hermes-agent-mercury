@@ -169,11 +169,12 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     set: name => ipcRenderer.invoke('hermes:profile:set', name)
   },
   api: request => ipcRenderer.invoke('hermes:api', request),
-  // Enterprise Console (P3-M4A): the bearer goes to MAIN once via connect and
-  // never comes back; requests carry only { path, method, body }.
+  // Enterprise Console (P3-M4A): the bearer goes to MAIN once via connect (which
+  // returns an opaque sessionId) and never comes back; requests carry only the
+  // sessionId + { path, method, body }, fenced per renderer in main.
   enterprise: {
     connect: (baseUrl, token) => ipcRenderer.invoke('hermes:enterprise:connect', { baseUrl, token }),
-    disconnect: () => ipcRenderer.invoke('hermes:enterprise:disconnect'),
+    disconnect: sessionId => ipcRenderer.invoke('hermes:enterprise:disconnect', { sessionId }),
     request: req => ipcRenderer.invoke('hermes:enterprise:request', req)
   },
   notify: payload => ipcRenderer.invoke('hermes:notify', payload),

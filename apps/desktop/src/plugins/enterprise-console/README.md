@@ -11,9 +11,11 @@ entry, no core edits, no shared-root files.
   permission decision. `PermissionGate` / `CapabilityGate` are UI display control only.
 - **Capability Truth.** Every capability shows the server's maturity verdict
   (`LIVE/DEV/CONTRACT/PLANNED`); DEV/CONTRACT/PLANNED never renders as production-live.
-- **Secret hygiene.** The session bearer lives in memory only — never persisted (only the
-  non-secret base URL is), never logged; connector/provider secrets are never shown in
-  plaintext (the server never returns them).
+- **Secret hygiene.** The bearer is entered transiently in the renderer at connect and
+  cleared from the input on handoff; thereafter **main owns the session credential** (per
+  window, fenced by an opaque `sessionId`) — never persisted (only the non-secret base URL
+  is), never logged. Without the desktop bridge the transport **fails closed** (no
+  renderer-direct-fetch fallback). Connector/provider secrets are never shown in plaintext.
 - **No fabrication.** Pages with no server route render an honest "server API missing"
   state; they are not faked on the client. See `docs/enterprise-console/INTERFACE_FREEZE.md`.
 
