@@ -7,6 +7,8 @@
 import { StatusDot, type StatusTone } from '@hermes/plugin-sdk'
 
 import { ConsoleRows, QueryBody, useConsoleQuery } from './page-kit'
+import { PageStatusBadge } from './status-badge'
+import { ConsolePanel, PageHeader } from './ui'
 
 interface MetricAlert {
   code: string
@@ -28,43 +30,62 @@ export function AlertsPage() {
   const query = useConsoleQuery<MetricsAlertsResp>(['enterprise-console', 'alerts'], '/api/metrics/alerts', 60_000)
 
   return (
-    <div data-page-status="ready" data-testid="console-page-alerts">
+    <div
+      className="mx-auto flex w-full max-w-[96rem] flex-col px-(--ec-page-inset-x) py-(--ec-page-inset-y)"
+      data-page-status="ready"
+      data-testid="console-page-alerts"
+    >
+      <PageHeader
+        purpose="Current server-reported alert conditions and source-level collection errors."
+        status={<PageStatusBadge status="ready" />}
+        title="Alerts & exceptions"
+      />
+
       <QueryBody
         emptyText="no active alerts"
         isEmpty={data => data.alerts.length === 0 && Object.keys(data.errors ?? {}).length === 0}
         query={query}
       >
         {data => (
-          <div className="flex flex-col gap-3">
-            <ConsoleRows testId="console-alerts">
-              {data.alerts.map(alert => (
-                <li
-                  className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
-                  key={alert.code}
-                >
-                  <div className="min-w-0">
-                    <div className="truncate">{alert.message}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {alert.code} · {alert.value}/{alert.threshold}
+          <div className="grid items-start gap-(--ec-gutter) xl:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.6fr)]">
+            <ConsolePanel divided title="Active alerts">
+              <ConsoleRows testId="console-alerts">
+                {data.alerts.map(alert => (
+                  <li
+                    className="flex min-h-14 items-center justify-between gap-4 border-b border-(--ui-stroke-tertiary) py-3 last:border-b-0"
+                    key={alert.code}
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate font-medium text-(--ui-text-primary)">{alert.message}</div>
+                      <div className="text-(--ui-text-tertiary)" data-ec-mono="">
+                        {alert.code} · {alert.value}/{alert.threshold}
+                      </div>
                     </div>
-                  </div>
-                  <span className="inline-flex shrink-0 items-center gap-1 text-xs uppercase">
-                    <StatusDot tone={LEVEL_TONE[alert.level] ?? 'warn'} />
-                    {alert.level}
-                  </span>
-                </li>
-              ))}
-            </ConsoleRows>
-            {Object.entries(data.errors ?? {}).length > 0 ? (
-              <div className="rounded-md border border-border p-2" data-testid="console-alert-errors">
-                <div className="mb-1 text-xs font-medium text-muted-foreground">source errors</div>
-                {Object.entries(data.errors).map(([source, detail]) => (
-                  <div className="text-xs" key={source}>
-                    {source}: {detail}
-                  </div>
+                    <span className="inline-flex shrink-0 items-center gap-1 uppercase text-(--ui-text-secondary)">
+                      <StatusDot tone={LEVEL_TONE[alert.level] ?? 'warn'} />
+                      {alert.level}
+                    </span>
+                  </li>
                 ))}
-              </div>
-            ) : null}
+              </ConsoleRows>
+            </ConsolePanel>
+
+            <ConsolePanel divided title="Source errors">
+              {Object.entries(data.errors ?? {}).length > 0 ? (
+                <dl className="flex flex-col" data-testid="console-alert-errors">
+                  {Object.entries(data.errors).map(([source, detail]) => (
+                    <div className="border-b border-(--ui-stroke-tertiary) py-3 last:border-b-0" key={source}>
+                      <dt className="font-medium text-(--ui-text-primary)" data-ec-mono="">
+                        {source}
+                      </dt>
+                      <dd className="mt-1 break-words text-(--ui-text-secondary)">{detail}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : (
+                <p className="text-(--ui-text-tertiary)">no source errors</p>
+              )}
+            </ConsolePanel>
           </div>
         )}
       </QueryBody>
