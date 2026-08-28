@@ -3,6 +3,42 @@
 > C8 process log for gate `P3-M4A-DESKTOP-ASSISTANT-CONSOLE-01`. Mercury-owned docs
 > only; no Hermes_AI docs are touched by this lane.
 
+## Entry 10 — B16-C L1 activation mechanism (WRAP existing plugin lifecycle)
+
+**Changed files**
+- `src/contrib/enterprise-eligibility.ts` (new) — host-level, NON-SECRET `$enterpriseAvailable`
+  atom + a small `registerEligibility`/`eligibilityAtomFor` registry so the loader stays
+  plugin-agnostic. Carries a boolean only; no bearer, never persisted.
+- `src/contrib/plugins-store.ts` — new `bindEligibility(id, atom)` + `reconcileEligible`: drive
+  the EXISTING `activate`/`deactivate` handles from availability composed with the user's
+  localStorage decision. Explicit decision ALWAYS wins; never writes a decision (auto-enable is
+  not a manual choice). No second plugin manager.
+- `src/contrib/plugins.ts` — discovery binds eligibility for eligibility-registered ids; every
+  other plugin keeps the unchanged one-shot `pluginActive` gate.
+- `src/app/contrib/controller.tsx` — registers `enterprise-console` eligibility before discovery.
+- Tests: `src/contrib/enterprise-eligibility.test.ts` (7 cases: available→shown, unavailable→hidden,
+  manual disable wins, manual enable pins on/break-glass, revoke hides entry, never writes a
+  decision, disposer detaches).
+
+**Why**: TC WAVE-2 §13/§14 — L1 product activation must ride the EXISTING plugin lifecycle
+(no second manager, no `defaultEnabled:true`), with manual disable winning and revoke removing
+the entry. This lands the contract-independent MECHANISM. The SOURCE that feeds
+`$enterpriseAvailable` (main-process federated whoami → non-secret availability) lands with the
+frozen federation contract (B16-D) — until then the atom stays `false`, so the console stays
+hidden exactly as its `defaultEnabled:false` floor does today (no behavior change for existing
+users; a manual Settings enable still pins it on as the DEV/break-glass path).
+
+**Frozen federation contract (B16-D council, informs the pending one-login wiring)**: auth =
+UPSTREAM-NATIVE-BEARER + HERMES-FEDERATED-PRINCIPAL-BINDING. The desktop keeps its existing
+main-owned native OAuth bearer (never to the renderer); Hermes verifies it server-to-server by
+WRAPping the gateway `GET /api/auth/me` and maps the verified external identity → an existing
+Hermes principal via a new `federated_principal_bindings` table (external ids are lookup keys
+only; principal/tenant/perms re-read from IdentityRepository every request). No second token
+stack. That server work is a SEPARATE Hermes Draft PR (B16-D).
+
+**How verified**: `tsc -p .`=0, eslint clean, `vitest --project ui` eligibility+contrib 17 pass.
+`READY = NO`, `MERGE = NO`.
+
 ## Entry 9 — B16-B security hardening (M1–M4) + B16-A native-session architecture council
 
 **B16-B — security hardening (real code, Mercury PR #8 only)**

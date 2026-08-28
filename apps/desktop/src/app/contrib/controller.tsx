@@ -33,6 +33,7 @@ import {
   watchContributedPanes
 } from '@/components/pane-shell/tree/store'
 import { SidebarProvider } from '@/components/ui/sidebar'
+import { $enterpriseAvailable, registerEligibility } from '@/contrib/enterprise-eligibility'
 import { discoverBundledPlugins } from '@/contrib/plugins'
 import { Slot } from '@/contrib/react/slot'
 import { useContributions } from '@/contrib/react/use-contributions'
@@ -414,6 +415,14 @@ registry.registerMany([
 ])
 
 declareDefaultTree(DEFAULT_TREE)
+
+// The Enterprise Console is availability-gated: it appears on an authenticated
+// enterprise session (a non-secret signal), not via a manual Plugins toggle.
+// Register its eligibility atom BEFORE discovery so the loader binds it through
+// the existing plugin lifecycle. Until the enterprise session feeds
+// `$enterpriseAvailable` it stays false → the console stays hidden, exactly as
+// its `defaultEnabled: false` floor does today.
+registerEligibility('enterprise-console', $enterpriseAvailable)
 
 // Bundled plugins load AFTER core, so a same-id contribution from a plugin
 // deliberately overrides the core default (last writer wins). Third-party
