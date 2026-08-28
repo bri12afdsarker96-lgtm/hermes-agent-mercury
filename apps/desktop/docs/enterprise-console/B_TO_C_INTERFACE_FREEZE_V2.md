@@ -43,7 +43,7 @@ All real actions reuse `ConfirmAction`/`FormAction`: only a resolved server writ
 invalidates its React Query key and refetches authoritative state. 401/403/409,
 network, unavailable, and server-module errors keep the form/dialog open and do
 not create local success. Action controls require the action-specific effective
-permission (`biztask.*`, `reminder.write`, `inbox.*`, `kb.*`, provider and binding
+permission (`biztask.*`, `reminder.write`, `inbox.*`, `kb.upload`/`kb.commit`/`kb.delete`, provider and binding
 permissions); this UI gate does not replace server checks. Task/reminder create
 uses one UUID idempotency key per form intent, retaining it across a failed retry.
 

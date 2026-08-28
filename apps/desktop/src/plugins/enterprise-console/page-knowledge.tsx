@@ -178,7 +178,7 @@ function UploadPanel() {
   const transport = useTransport()
   const queryClient = useQueryClient()
   const who = useValue($whoami)
-  const canAuthor = who === null || hasPermission(who, 'kb.author')
+  const canAuthor = who === null || hasPermission(who, 'kb.upload')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<null | string>(null)
 
@@ -336,7 +336,7 @@ function UploadsSection() {
                       <ConfirmAction
                         destructive
                         invalidateKey={UPLOADS_KEY}
-                        permission="kb.commit"
+                        permission="kb.upload"
                         run={() => transport.post('/api/knowledge-rollback', { upload_id: upload.upload_id })}
                         testId={`kb-rollback-${upload.upload_id}`}
                         title="Roll back this upload?"
@@ -365,7 +365,7 @@ function WithdrawAction({ collection, source }: { collection: string; source: st
     <FormAction
       canSubmit={reason.trim().length >= 3}
       invalidateKey={['enterprise-console', 'kb-entries', collection]}
-      permission="kb.commit"
+      permission="kb.delete"
       submit={() => transport.post('/api/knowledge-delete', { collection, reason, source })}
       submitLabel="Withdraw"
       testId={`kb-withdraw-${source}`}
