@@ -11,7 +11,9 @@ import { useState } from 'react'
 
 import { ConfirmAction, FormAction } from './actions'
 import { ConsoleRows, fmtEpoch, QueryBody, useConsoleQuery } from './page-kit'
+import { PageStatusBadge } from './status-badge'
 import { useTransport } from './transport'
+import { ConsolePanel, PageHeader } from './ui'
 
 interface ReminderRow {
   generation: number
@@ -99,52 +101,58 @@ export function RemindersPage() {
   const query = useConsoleQuery<RemindersResp>(REMINDERS_KEY, '/api/reminders')
 
   return (
-    <div className="flex flex-col gap-2" data-page-status="ready" data-testid="console-page-reminders">
-      <div className="flex justify-end">
-        <CreateReminder />
-      </div>
-      <QueryBody
-        emptyText="no reminders"
-        isEmpty={data => !data.available || data.reminders.length === 0}
-        query={query}
-      >
-        {data => (
-          <ConsoleRows testId="console-reminders">
-            {data.reminders.map(reminder => (
-              <li
-                className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
-                key={reminder.reminder_id}
-              >
-                <div className="min-w-0">
-                  <div className="truncate">{reminder.title}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {reminder.subject_type}:{reminder.subject_id} · {fmtEpoch(reminder.scheduled_for)} ·{' '}
-                    {reminder.timezone}
+    <div
+      className="mx-auto flex w-full max-w-[96rem] flex-col px-(--ec-page-inset-x) py-(--ec-page-inset-y)"
+      data-page-status="ready"
+      data-testid="console-page-reminders"
+    >
+      <PageHeader
+        actions={<CreateReminder />}
+        purpose="Schedule and cancel server-authoritative reminders without duplicating the reminder state machine."
+        status={<PageStatusBadge status="ready" />}
+        title="Reminders"
+      />
+
+      <ConsolePanel divided title="Schedule">
+        <QueryBody
+          emptyText="no reminders"
+          isEmpty={data => !data.available || data.reminders.length === 0}
+          query={query}
+        >
+          {data => (
+            <ConsoleRows testId="console-reminders">
+              {data.reminders.map(reminder => (
+                <li className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm" key={reminder.reminder_id}>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium text-(--ui-text-primary)">{reminder.title || 'Untitled reminder'}</div>
+                    <div className="text-(--ui-text-tertiary)">
+                      {reminder.subject_type}:{reminder.subject_id} · {fmtEpoch(reminder.scheduled_for)} · {reminder.timezone}
+                    </div>
                   </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <span className="inline-flex items-center gap-1 text-xs">
-                    <StatusDot tone={REMINDER_TONE[reminder.state] ?? 'muted'} />
-                    {reminder.state}
-                  </span>
-                  {reminder.state === 'active' ? (
-                    <ConfirmAction
-                      destructive
-                      invalidateKey={REMINDERS_KEY}
-                      permission="reminder.write"
-                      run={() => transport.post('/api/reminder-cancel', { reminder_id: reminder.reminder_id })}
-                      testId={`console-reminder-cancel-${reminder.reminder_id}`}
-                      title="Cancel this reminder?"
-                    >
-                      cancel
-                    </ConfirmAction>
-                  ) : null}
-                </div>
-              </li>
-            ))}
-          </ConsoleRows>
-        )}
-      </QueryBody>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1 text-xs">
+                      <StatusDot tone={REMINDER_TONE[reminder.state] ?? 'muted'} />
+                      {reminder.state}
+                    </span>
+                    {reminder.state === 'active' ? (
+                      <ConfirmAction
+                        destructive
+                        invalidateKey={REMINDERS_KEY}
+                        permission="reminder.write"
+                        run={() => transport.post('/api/reminder-cancel', { reminder_id: reminder.reminder_id })}
+                        testId={`console-reminder-cancel-${reminder.reminder_id}`}
+                        title="Cancel this reminder?"
+                      >
+                        cancel
+                      </ConfirmAction>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ConsoleRows>
+          )}
+        </QueryBody>
+      </ConsolePanel>
     </div>
   )
 }
