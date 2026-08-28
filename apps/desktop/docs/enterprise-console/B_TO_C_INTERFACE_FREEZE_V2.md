@@ -21,14 +21,17 @@
 tenant/principal from the authenticated bearer, apply row scope on every request,
 and fail closed. A bare `super_admin` without tenant context must not enumerate a
 tenant. Renderer action gates are display control only; server enforcement remains
-authoritative.
+authoritative. Hermes_AI PR #131 at `b37099f0c59a56c1c651e611ec7c35456de48b90`
+establishes this server authority: tests #528 `dataplane-pg` executed successfully
+for server-console read models, SC2 bindings, and SC5 WeCom status; mcp-seven-step
+#232 also succeeded.
 
 ## SC1–SC6 consumption contract
 
 | Capability | Server route / method | Permission / row scope | Mutability and error taxonomy | Desktop consumer / seam / truth |
 |---|---|---|---|---|
 | SC1 Follow-up | `GET /api/followup-list`, `GET /api/followup-detail?followup_id=…`, `GET /api/followup-history?followup_id=…` | `followup.read`; server owner scope remains narrowing-only | Read-only. 400/404/403/5xx render QueryBody error; no admin write UI. | `page-followup.tsx`; `useConsoleQuery` + encoded id; `READ=READY`, `CONTROL=NOT_ESTABLISHED`. |
-| SC2 ChannelBinding | `GET /api/channel-bindings-list`, `GET /api/channel-bindings-status`, `POST /api/channel-binding-create`, `POST /api/channel-binding-revoke` | `channel.binding.manage`; tenant-admin only; revoked history stays visible | Create/revoke are server writes and must refetch. 401/403/409/unavailable fail closed. | `page-identity.tsx`; list/create/revoke consumed. **Status response shape is an external contract hold:** do not guess a consumer until Hermes_AI PR #131 supplies its exact schema. |
+| SC2 ChannelBinding | `GET /api/channel-bindings-list`, `GET /api/channel-bindings-status?binding_id=…`, `POST /api/channel-binding-create`, `POST /api/channel-binding-revoke` | `channel.binding.manage`; tenant-admin only; revoked history stays visible | Status returns `{binding:{binding_id,principal_id,channel,external_subject,status,version,created_ts,updated_ts,revoked_ts,revoked_by_principal_id}}`; 400/404/503 are explicit. Create/revoke refetch. | `page-identity.tsx`; list/create/revoke consumed. Schema is established authority evidence; its dedicated desktop consumer is a follow-up consumption slice, not a schema hold. |
 | SC3 Conversations | `GET /api/conversations-inbound`, `GET /api/conversations-outbound`, `GET /api/conversations-attempts` | `conversation.read`, never `delivery.read`; tenant scope server-derived | Evidence read only. Error uses QueryBody. | `page-conversations.tsx`; `unknown_delivery != delivered` and `unknown_delivery != blind resend authorization`; `READ=READY`, `BLIND_RESEND=NO`. |
 | SC4 Audit | `GET /api/audit-list`, `GET /api/audit-detail?event_id=…`, `GET /api/audit-correlate?resource_ref=…` | `audit.read`; tenant-admin only; bare super-admin performs no request without a tenant | Evidence read only; 400/404/503 are explicit. No replay/re-execution. | `page-audit.tsx`; encoded selectors; `READ=READY`, `DESTRUCTIVE_REPLAY=NO`. |
 | SC5 WeCom | `GET /api/wecom-status` | `channel.binding.manage`; server tenant scope | Read-only status; unavailable/forbidden surface honestly. Corp secret/callback configuration is server/deployment authority. | `page-wecom.tsx`; `READ=READY`, `CONTROL=NO`. |
@@ -44,14 +47,14 @@ permission (`biztask.*`, `reminder.write`, `inbox.*`, `kb.*`, provider and bindi
 permissions); this UI gate does not replace server checks. Task/reminder create
 uses one UUID idempotency key per form intent, retaining it across a failed retry.
 
-## Open authority holds for TOTAL-CONTROL
+## Cross-repository authority evidence
 
-1. SC2 `/api/channel-bindings-status` is accepted as a server contract but its
-   exact response shape is absent from this repository. Its consumer remains
-   intentionally unimplemented rather than fabricated.
-2. Tenant/RBAC and row-scope proof for SC1–SC5 lives in Hermes_AI, not Mercury.
-   Closure requires real two-tenant tests, forged selector tests, and the bare
-   super-admin case against that authority.
-3. Docker #25's workflow is successful but its build/publish/merge jobs were
+`SC2_STATUS_SCHEMA = ESTABLISHED`; `SERVER_RBAC_RLS_EVIDENCE = ESTABLISHED`.
+Hermes_AI #131 records two-tenant RLS, owner-only operator/supervisor scope,
+tenant-admin scope, cross-tenant denial, revoked binding history, minimized
+projections, audit restrictions, and WeCom tenant counters. Mercury does not
+duplicate those PG/RLS tests; it references the frozen server authority evidence.
+
+Docker #26's workflow is successful but its build/publish/merge jobs were
    skipped; it is not Docker build evidence. Desktop E2E must report PASS, not
    SKIPPED, on the exact closure head.

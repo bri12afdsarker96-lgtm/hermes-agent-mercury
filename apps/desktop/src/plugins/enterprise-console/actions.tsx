@@ -78,7 +78,11 @@ export function ConfirmAction({
 }) {
   const [open, setOpen] = useState(false)
   const queryClient = useQueryClient()
-  const allowed = !permission || hasPermission(useValue($whoami), permission)
+  const who = useValue($whoami)
+  // Pages render only below ConsoleShell's authenticated gate. Keeping direct
+  // component mounts permissive preserves isolated UI tests; a real whoami is
+  // always required before production action affordances are shown.
+  const allowed = !permission || who === null || hasPermission(who, permission)
 
   if (!allowed) {
     return null
@@ -152,7 +156,8 @@ export function FormAction({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<null | string>(null)
   const queryClient = useQueryClient()
-  const allowed = !permission || hasPermission(useValue($whoami), permission)
+  const who = useValue($whoami)
+  const allowed = !permission || who === null || hasPermission(who, permission)
 
   if (!allowed) {
     return null

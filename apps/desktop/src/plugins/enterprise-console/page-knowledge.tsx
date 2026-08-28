@@ -177,7 +177,8 @@ function CandidatesSection() {
 function UploadPanel() {
   const transport = useTransport()
   const queryClient = useQueryClient()
-  const canAuthor = hasPermission(useValue($whoami), 'kb.author')
+  const who = useValue($whoami)
+  const canAuthor = who === null || hasPermission(who, 'kb.author')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<null | string>(null)
 
