@@ -117,9 +117,8 @@ function MetricsCard() {
       ) : (
         <ul className="flex flex-col gap-1" data-testid="console-alerts">
           {alerts.map((alert, index) => (
-            <li className="text-sm" key={alert.kind ?? index}>
-              {alert.kind ?? 'alert'}
-              {alert.detail ? ` — ${alert.detail}` : ''}
+            <li className="text-sm" key={alert.code ?? index}>
+              {alert.message ?? alert.code ?? 'alert'}
             </li>
           ))}
         </ul>

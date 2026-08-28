@@ -3,6 +3,35 @@
 > C8 process log for gate `P3-M4A-DESKTOP-ASSISTANT-CONSOLE-01`. Mercury-owned docs
 > only; no Hermes_AI docs are touched by this lane.
 
+## Entry 4 — B6-B12 pages (real server data, read-only)
+
+**Changed files**
+- New shared kit `page-kit.tsx` (`useConsoleQuery` + `QueryBody` states + `ConsoleRows`
+  + `fmtEpoch`) — pure reuse of SDK React Query + Loader/ErrorState/EmptyState/ScrollArea;
+  no table/virtualization engine (per B-REUSE-SKEPTIC; SDK `useVirtualizer` export is on
+  HOLD per TC).
+- New pages: READY — `page-tasks`, `page-reminders`, `page-alerts`, `page-provider`,
+  `page-handoff`, `page-knowledge`; PARTIAL — `page-identity`, `page-conversations`,
+  `page-usage`. Wired via a `PAGE_COMPONENTS` registry in `console.tsx`.
+- `page-dashboard.tsx` + `types.ts`: corrected the Alert shape.
+- `pages.test.tsx` (10 tests); `i18n.ts` (+error/module keys).
+
+**Why / correctness**
+- Built from the exact server field shapes (census of `webserver.py`). Notable fixes the
+  census caught: Alerts are `{level,code,value,threshold,message}` (NOT `severity/kind/
+  detail`) — the dashboard previously rendered non-existent fields; delivery metrics use
+  the server's remapped keys (`delivered_total←sent`, `permanent_failure_total←failed`).
+- Truth discipline: READY pages show real data; `knowledge` shows its DEV maturity badge
+  (Capability Truth); PARTIAL pages render only what the server has and name the gap
+  (Identity → ChannelBinding missing; Conversations → inbound/held/recovery missing; Usage
+  → real budget, realtime usage unavailable); Handoff renders an honest "module
+  unavailable" state on 501. BLOCKED pages (wecom/followup/audit) stay honest placeholders.
+  Nothing is faked; all reads go through the fenced transport; pages never see a token.
+
+**How verified**: `tsc -p .` 0, `eslint` clean, `vitest --project ui` **9 files / 44**
+pass. `READY = NO`, `MERGE = NO`. Remaining: write actions (create/claim/commit…) behind
+confirm dialogs, and E2E (Lane-C) — a later slice.
+
 ## Entry 3 — transport HIGH-1..4 remediation (session fencing, hardening, fail-closed)
 
 **Changed files**

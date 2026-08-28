@@ -51,9 +51,11 @@ export interface Metrics {
 }
 
 export interface MetricAlert {
-  detail?: string
-  kind?: string
-  severity?: string
+  code?: string
+  level?: string
+  message?: string
+  threshold?: number
+  value?: number
   [key: string]: unknown
 }
 

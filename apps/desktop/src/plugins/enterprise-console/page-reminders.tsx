@@ -1,0 +1,67 @@
+/**
+ * Reminder page — real `/api/reminders` data (read-only). Fields are the
+ * server's explicit list projection (not the full dataclass).
+ */
+
+import { StatusDot, type StatusTone } from '@hermes/plugin-sdk'
+
+import { ConsoleRows, fmtEpoch, QueryBody, useConsoleQuery } from './page-kit'
+
+interface ReminderRow {
+  generation: number
+  reminder_id: string
+  scheduled_for: number
+  state: string
+  subject_id: string
+  subject_type: string
+  timezone: string
+  title: string
+}
+
+interface RemindersResp {
+  available: boolean
+  reminders: ReminderRow[]
+}
+
+const REMINDER_TONE: Record<string, StatusTone> = {
+  active: 'good',
+  cancelled: 'muted',
+  exhausted: 'warn'
+}
+
+export function RemindersPage() {
+  const query = useConsoleQuery<RemindersResp>(['enterprise-console', 'reminders'], '/api/reminders')
+
+  return (
+    <div data-page-status="ready" data-testid="console-page-reminders">
+      <QueryBody
+        emptyText="no reminders"
+        isEmpty={data => !data.available || data.reminders.length === 0}
+        query={query}
+      >
+        {data => (
+          <ConsoleRows testId="console-reminders">
+            {data.reminders.map(reminder => (
+              <li
+                className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
+                key={reminder.reminder_id}
+              >
+                <div className="min-w-0">
+                  <div className="truncate">{reminder.title}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {reminder.subject_type}:{reminder.subject_id} · {fmtEpoch(reminder.scheduled_for)} ·{' '}
+                    {reminder.timezone}
+                  </div>
+                </div>
+                <span className="inline-flex shrink-0 items-center gap-1 text-xs">
+                  <StatusDot tone={REMINDER_TONE[reminder.state] ?? 'muted'} />
+                  {reminder.state}
+                </span>
+              </li>
+            ))}
+          </ConsoleRows>
+        )}
+      </QueryBody>
+    </div>
+  )
+}

@@ -7,12 +7,22 @@
  */
 
 import { atom, Button, usePluginI18n, useValue } from '@hermes/plugin-sdk'
+import type { ComponentType } from 'react'
 
 import { hasPermission } from './capabilities'
 import { CONSOLE_PAGES, type ConsolePage } from './catalog'
 import { ConnectForm } from './connect-form'
+import { AlertsPage } from './page-alerts'
+import { ConversationsPage } from './page-conversations'
 import { DashboardPage } from './page-dashboard'
+import { HandoffPage } from './page-handoff'
+import { IdentityPage } from './page-identity'
+import { KnowledgePage } from './page-knowledge'
 import { BlockedPage, DeniedPage, PartialPlaceholder, PendingPage } from './page-placeholder'
+import { ProviderPage } from './page-provider'
+import { RemindersPage } from './page-reminders'
+import { TasksPage } from './page-tasks'
+import { UsagePage } from './page-usage'
 import { $whoami, disconnect } from './session'
 import { PageStatusBadge } from './status-badge'
 import type { Whoami } from './types'
@@ -20,13 +30,30 @@ import type { Whoami } from './types'
 /** In-memory selected page (defaults to the live dashboard). */
 export const $activePage = atom<string>('dashboard')
 
+/** Pages with a real implementation. Everything else falls through to an honest
+ *  status placeholder (blocked / partial / pending) — never a fabricated view. */
+const PAGE_COMPONENTS: Record<string, ComponentType> = {
+  alerts: AlertsPage,
+  conversations: ConversationsPage,
+  dashboard: DashboardPage,
+  handoff: HandoffPage,
+  identity: IdentityPage,
+  knowledge: KnowledgePage,
+  provider: ProviderPage,
+  reminders: RemindersPage,
+  tasks: TasksPage,
+  usage: UsagePage
+}
+
 function renderPage(page: ConsolePage, who: Whoami) {
   if (page.permission && !hasPermission(who, page.permission)) {
     return <DeniedPage page={page} />
   }
 
-  if (page.id === 'dashboard') {
-    return <DashboardPage />
+  const Component = PAGE_COMPONENTS[page.id]
+
+  if (Component) {
+    return <Component />
   }
 
   if (page.status === 'blocked') {
