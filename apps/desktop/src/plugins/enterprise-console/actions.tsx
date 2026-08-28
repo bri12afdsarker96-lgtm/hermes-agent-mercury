@@ -17,11 +17,14 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  useQueryClient
+  useQueryClient,
+  useValue
 } from '@hermes/plugin-sdk'
 import { type FormEvent, type ReactNode, useState } from 'react'
 
 import { HermesApiError } from './fetch-transport'
+import { hasPermission } from './capabilities'
+import { $whoami } from './session'
 
 export function actionError(err: unknown): string {
   if (err instanceof HermesApiError) {
@@ -58,6 +61,7 @@ export function ConfirmAction({
   destructive = false,
   disabled = false,
   invalidateKey,
+  permission,
   run,
   testId,
   title
@@ -67,12 +71,18 @@ export function ConfirmAction({
   destructive?: boolean
   disabled?: boolean
   invalidateKey?: readonly unknown[]
+  permission?: string
   run: () => Promise<unknown>
   testId?: string
   title: ReactNode
 }) {
   const [open, setOpen] = useState(false)
   const queryClient = useQueryClient()
+  const allowed = !permission || hasPermission(useValue($whoami), permission)
+
+  if (!allowed) {
+    return null
+  }
 
   return (
     <>
@@ -119,6 +129,8 @@ export function FormAction({
   canSubmit = true,
   children,
   invalidateKey,
+  onSuccess,
+  permission,
   submit,
   submitLabel = 'Submit',
   testId,
@@ -128,6 +140,8 @@ export function FormAction({
   canSubmit?: boolean
   children: ReactNode
   invalidateKey?: readonly unknown[]
+  onSuccess?: () => void
+  permission?: string
   submit: () => Promise<unknown>
   submitLabel?: string
   testId?: string
@@ -138,6 +152,11 @@ export function FormAction({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<null | string>(null)
   const queryClient = useQueryClient()
+  const allowed = !permission || hasPermission(useValue($whoami), permission)
+
+  if (!allowed) {
+    return null
+  }
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault()
@@ -156,6 +175,7 @@ export function FormAction({
         await queryClient.invalidateQueries({ queryKey: invalidateKey })
       }
 
+      onSuccess?.()
       setOpen(false)
     } catch (err) {
       setError(actionError(err))

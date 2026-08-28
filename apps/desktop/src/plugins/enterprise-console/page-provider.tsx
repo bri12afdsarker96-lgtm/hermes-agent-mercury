@@ -38,6 +38,7 @@ function SetKeyAction({ label, providerKey }: { label: string; providerKey: stri
     <FormAction
       canSubmit={apiKey.length > 0}
       invalidateKey={PROVIDERS_KEY}
+      permission="provider.set_key"
       submit={() =>
         transport.post('/api/set-provider-key', {
           api_key: apiKey,
@@ -99,6 +100,7 @@ export function ProviderPage() {
                   {canManage && provider.key !== data.active ? (
                     <ConfirmAction
                       invalidateKey={PROVIDERS_KEY}
+                      permission="provider.set"
                       run={() => transport.post('/api/select-provider', { key: provider.key })}
                       testId={`console-provider-select-${provider.key}`}
                       title={`Switch active provider to ${provider.label}?`}

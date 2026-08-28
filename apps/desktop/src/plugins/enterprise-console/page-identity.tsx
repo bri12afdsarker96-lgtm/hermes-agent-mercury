@@ -93,6 +93,7 @@ function CreateBinding() {
     <FormAction
       canSubmit={channel.trim().length > 0 && externalSubject.trim().length > 0 && principalId.length > 0}
       invalidateKey={CHANNEL_BINDINGS_KEY}
+      permission="channel.binding.manage"
       submit={() =>
         transport.post('/api/channel-binding-create', {
           channel: channel.trim(),
@@ -170,6 +171,7 @@ function ChannelBindingsSection() {
                       description="This revokes the binding on the server."
                       destructive
                       invalidateKey={CHANNEL_BINDINGS_KEY}
+                      permission="channel.binding.manage"
                       run={() => transport.post('/api/channel-binding-revoke', { binding_id: binding.binding_id })}
                       testId={`console-binding-revoke-${binding.binding_id}`}
                       title="Revoke this binding?"

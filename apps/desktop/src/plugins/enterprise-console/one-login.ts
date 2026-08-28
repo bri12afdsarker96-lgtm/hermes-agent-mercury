@@ -70,7 +70,14 @@ export function reprobeEnterpriseSession(): void {
     return
   }
 
-  void autoConnect()
+  void autoConnect().finally(() => {
+    // Nanostores does not notify a listener when UNAVAILABLE is written again.
+    // Re-arm here after every completed failed probe so the finite 2/4/8s
+    // recovery sequence actually reaches all three attempts.
+    if (started && $sessionState.get() === 'UNAVAILABLE') {
+      armBackoff()
+    }
+  })
 }
 
 export function bootstrapEnterpriseSession(): void {
@@ -87,7 +94,7 @@ export function bootstrapEnterpriseSession(): void {
   }
 
   setAutoTransportFactory(() => IpcHermesTransport.autoConnecting())
-  void autoConnect()
+  reprobeEnterpriseSession()
 
   // Reuse the existing connection-applied push seam (re-home / soft-switch /
   // reconnect, and — via the main-side wiring — native login/logout) to drive a

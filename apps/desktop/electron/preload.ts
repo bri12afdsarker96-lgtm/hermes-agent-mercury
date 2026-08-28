@@ -169,15 +169,13 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     set: name => ipcRenderer.invoke('hermes:profile:set', name)
   },
   api: request => ipcRenderer.invoke('hermes:api', request),
-  // Enterprise Console (P3-M4A): the bearer goes to MAIN once via connect (which
-  // returns an opaque sessionId) and never comes back; requests carry only the
-  // sessionId + { path, method, body }, fenced per renderer in main.
+  // Enterprise Console (P3-M4A): native one-login is token-free in the
+  // renderer; main returns only an opaque sessionId and fences every request.
   enterprise: {
     // B16-OL · one-login: main resolves the trusted enterprise origin + native
     // bearer itself; the renderer passes NO url/token and gets back only
     // { ok, sessionId, baseUrl } (or { ok:false, code, message }).
     autoConnect: () => ipcRenderer.invoke('hermes:enterprise:auto-connect'),
-    connect: (baseUrl, token) => ipcRenderer.invoke('hermes:enterprise:connect', { baseUrl, token }),
     disconnect: sessionId => ipcRenderer.invoke('hermes:enterprise:disconnect', { sessionId }),
     request: req => ipcRenderer.invoke('hermes:enterprise:request', req),
     upload: req => ipcRenderer.invoke('hermes:enterprise:upload', req)

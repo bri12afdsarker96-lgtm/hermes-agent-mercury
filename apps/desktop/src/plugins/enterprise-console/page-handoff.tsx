@@ -51,6 +51,7 @@ function ReplyAction({ msgId }: { msgId: string }) {
     <FormAction
       canSubmit={text.trim().length > 0}
       invalidateKey={HANDOFFS_KEY}
+      permission="inbox.reply"
       submit={() => transport.post('/api/handoff-reply', { msg_id: msgId, text })}
       submitLabel="Send"
       testId={`console-handoff-reply-${msgId}`}
@@ -102,6 +103,7 @@ export function HandoffPage() {
                   {handoff.agent_id == null ? (
                     <ConfirmAction
                       invalidateKey={HANDOFFS_KEY}
+                      permission="inbox.claim"
                       run={() => transport.post('/api/handoff-claim', { msg_id: handoff.msg_id })}
                       testId={`console-handoff-claim-${handoff.msg_id}`}
                       title="Claim this handoff?"
@@ -113,6 +115,7 @@ export function HandoffPage() {
                   {handoff.state === 'parked' ? (
                     <ConfirmAction
                       invalidateKey={HANDOFFS_KEY}
+                      permission="inbox.requeue"
                       run={() => transport.post('/api/handoff-requeue', { msg_id: handoff.msg_id })}
                       testId={`console-handoff-requeue-${handoff.msg_id}`}
                       title="Requeue this handoff?"

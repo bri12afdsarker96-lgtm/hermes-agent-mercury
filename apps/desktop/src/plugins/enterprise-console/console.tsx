@@ -11,7 +11,6 @@ import type { ComponentType } from 'react'
 
 import { hasPermission } from './capabilities'
 import { CONSOLE_PAGES, type ConsolePage } from './catalog'
-import { ConnectForm } from './connect-form'
 import { AlertsPage } from './page-alerts'
 import { AuditPage } from './page-audit'
 import { ConversationsPage } from './page-conversations'
@@ -99,7 +98,13 @@ export function ConsoleShell() {
   const activeId = useValue($activePage)
 
   if (!who) {
-    return <ConnectForm />
+    // Production console access is native one-login only. Never render a
+    // renderer token form as a fallback: the main process owns the bearer.
+    return (
+      <div className="mx-auto mt-16 max-w-sm text-sm text-muted-foreground" data-testid="console-session-unavailable">
+        enterprise session unavailable — sign in to the desktop account and retry
+      </div>
+    )
   }
 
   // Nav rows for surfaces flagged hideWhenUnpermitted (e.g. audit, tenant_admin

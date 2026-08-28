@@ -202,6 +202,28 @@ describe('autoConnect — B16-OL one-login FSM', () => {
     expect(seen).not.toContain('AUTHENTICATED')
   })
 
+  it('cannot resurrect AUTHENTICATED when an older probe resolves after logout', async () => {
+    let resolveWhoami: ((who: Whoami) => void) | null = null
+
+    class DelayedTransport extends BaseHermesTransport {
+      request<T>(): Promise<T> {
+        return new Promise(resolve => {
+          resolveWhoami = who => resolve(who as T)
+        })
+      }
+    }
+
+    setAutoTransportFactory(() => new DelayedTransport())
+    const pending = autoConnect()
+    disconnect()
+    resolveWhoami?.(WHO)
+
+    await expect(pending).resolves.toBe(false)
+    expect($sessionState.get()).toBe('UNKNOWN')
+    expect($whoami.get()).toBeNull()
+    expect($transport.get()).toBeNull()
+  })
+
   // §13 — a missing native session is UNKNOWN (not-yet-eligible), never a fake
   // AUTHENTICATED and never a spurious UNAVAILABLE outage.
   it('no_native_session maps to UNKNOWN (not UNAVAILABLE)', async () => {

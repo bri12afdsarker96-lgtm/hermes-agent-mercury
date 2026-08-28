@@ -88,6 +88,11 @@ export function setTransportFactory(factory: TransportFactory): void {
 type AutoTransportFactory = () => HermesTransport
 let autoTransportFactory: AutoTransportFactory = () => new UnavailableHermesTransport()
 
+// Every async probe captures this generation. A later probe, disconnect, or
+// plugin disposal invalidates earlier completions so an old successful whoami
+// can never resurrect AUTHENTICATED after logout/revocation.
+let sessionGeneration = 0
+
 export function setAutoTransportFactory(factory: AutoTransportFactory): void {
   autoTransportFactory = factory
 }
@@ -164,18 +169,30 @@ export async function connect(baseUrl: string, token: string): Promise<void> {
  * Returns true iff it reached AUTHENTICATED.
  */
 export async function autoConnect(): Promise<boolean> {
+  const generation = ++sessionGeneration
   $connecting.set(true)
   $connectError.set(null)
   const transport = autoTransportFactory()
 
   try {
     const who = await transport.request<Whoami>('/api/whoami')
+
+    if (generation !== sessionGeneration) {
+      transport.dispose?.()
+      return false
+    }
+
     $transport.set(transport)
     $whoami.set(who)
     $sessionState.set('AUTHENTICATED')
 
     return true
   } catch (err) {
+    if (generation !== sessionGeneration) {
+      transport.dispose?.()
+      return false
+    }
+
     transport.dispose?.()
     $transport.set(null)
     $whoami.set(null)
@@ -184,7 +201,9 @@ export async function autoConnect(): Promise<boolean> {
 
     return false
   } finally {
-    $connecting.set(false)
+    if (generation === sessionGeneration) {
+      $connecting.set(false)
+    }
   }
 }
 
@@ -193,15 +212,25 @@ export async function autoConnect(): Promise<boolean> {
  *  deactivates the console). A transient outage leaves the session intact. */
 export async function refreshWhoami(): Promise<void> {
   const transport = $transport.get()
+  const generation = sessionGeneration
 
   if (!transport) {
     return
   }
 
   try {
-    $whoami.set(await transport.request<Whoami>('/api/whoami'))
+    const who = await transport.request<Whoami>('/api/whoami')
+
+    if (generation !== sessionGeneration || $transport.get() !== transport) {
+      return
+    }
+
+    $whoami.set(who)
     $sessionState.set('AUTHENTICATED')
   } catch (err) {
+    if (generation !== sessionGeneration || $transport.get() !== transport) {
+      return
+    }
     if (isRevocation(err)) {
       transport.dispose?.()
       $transport.set(null)
@@ -219,6 +248,7 @@ export async function refreshWhoami(): Promise<void> {
 
 /** Drop the session — clears the transport (and its in-memory credential) + identity. */
 export function disconnect(): void {
+  sessionGeneration += 1
   $transport.get()?.dispose?.()
   $transport.set(null)
   $whoami.set(null)

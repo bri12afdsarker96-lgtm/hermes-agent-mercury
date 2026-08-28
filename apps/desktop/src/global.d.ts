@@ -179,18 +179,13 @@ declare global {
       /**
        * Enterprise Console transport bridge (P3-M4A): renderer → main → HTTPS to
        * an EXTERNAL Hermes web server. The bearer is held in the MAIN process
-       * only — the renderer sends baseUrl+token once via `connect`, then only
-       * `{ path, method, body }`. Optional: absent outside the desktop shell, so
-       * dev/browser/tests fall back to the direct-fetch adapter.
+       * only — the renderer uses token-free `autoConnect`, then sends only
+       * `{ path, method, body }`. Optional: absent outside the desktop shell.
        */
       enterprise?: {
         autoConnect: () => Promise<
           { baseUrl: string; ok: true; sessionId: string } | { code: string; message: string; ok: false }
         >
-        connect: (
-          baseUrl: string,
-          token: string
-        ) => Promise<{ ok: true; sessionId: string } | { code: string; message: string; ok: false }>
         disconnect: (sessionId: string) => Promise<{ ok: boolean }>
         request: (req: {
           body?: unknown

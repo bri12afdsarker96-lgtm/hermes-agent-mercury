@@ -69,6 +69,7 @@ afterEach(() => {
   __resetOneLoginBootstrap()
   delete (window as unknown as { hermesDesktop?: unknown }).hermesDesktop
   vi.clearAllTimers()
+  vi.useRealTimers()
 })
 
 describe('bootstrapEnterpriseSession — WAVE-7 §10 recovery', () => {
@@ -104,5 +105,34 @@ describe('bootstrapEnterpriseSession — WAVE-7 §10 recovery', () => {
     bootstrapEnterpriseSession()
 
     expect(bridge.appliedCallbacks.length).toBe(1)
+  })
+
+  it('retries a persistent enterprise outage exactly three times with bounded 2/4/8s backoff', async () => {
+    vi.useFakeTimers()
+    const enterprise = {
+      autoConnect: vi.fn(async (): Promise<AutoResult> => ({ code: 'error', message: 'down', ok: false })),
+      disconnect: vi.fn(async () => ({ ok: true })),
+      request: vi.fn(),
+      upload: vi.fn()
+    }
+    ;(window as unknown as { hermesDesktop?: unknown }).hermesDesktop = {
+      enterprise,
+      onConnectionApplied: () => () => undefined
+    }
+
+    bootstrapEnterpriseSession()
+    await vi.runAllTicks()
+    expect(enterprise.autoConnect).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(2000)
+    await vi.runAllTicks()
+    await vi.advanceTimersByTimeAsync(4000)
+    await vi.runAllTicks()
+    await vi.advanceTimersByTimeAsync(8000)
+    await vi.runAllTicks()
+    expect(enterprise.autoConnect).toHaveBeenCalledTimes(4)
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(enterprise.autoConnect).toHaveBeenCalledTimes(4)
   })
 })

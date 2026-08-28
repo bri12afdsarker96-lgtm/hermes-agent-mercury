@@ -28,6 +28,7 @@ import {
   shell,
   systemPreferences
 } from 'electron'
+import type { WebContents } from 'electron'
 import nodePty from 'node-pty'
 
 import { classifyActiveRuntime } from './active-runtime-state'
@@ -13482,6 +13483,13 @@ ipcMain.handle('hermes:api', async (_event, request) => {
 const enterpriseSessions = new EnterpriseSessionStore()
 const enterpriseWiredSenders = new Set<number>()
 
+/** Only the primary desktop shell may establish or use an enterprise session.
+ * Overlay, quick-entry, and helper windows share the preload but are not
+ * console-capable renderers; sender/session fencing alone is insufficient. */
+function isEnterpriseConsoleSender(sender: WebContents): boolean {
+  return !sender.isDestroyed() && mainWindow?.webContents.id === sender.id
+}
+
 // WAVE-7 §10-C/§10-D: drop every wired enterprise session (and its main-held
 // bearer snapshot). Invoked when the native token dies so no stale enterprise
 // bearer outlives the native session that minted it; the next re-probe rebuilds.
@@ -13492,33 +13500,6 @@ function destroyAllEnterpriseSessions(): void {
 
   enterpriseWiredSenders.clear()
 }
-
-ipcMain.handle('hermes:enterprise:connect', (event, payload) => {
-  const senderId = event.sender.id
-
-  let sessionId: string
-
-  try {
-    sessionId = enterpriseSessions.connect(senderId, payload?.baseUrl, payload?.token)
-  } catch (err) {
-    // Base-URL / https / missing-token validation failed. Return a safe,
-    // structured code + message — never the raw URL, credentials, stack, or a
-    // server response body.
-    return { ok: false, ...classifyConnectError(err) }
-  }
-
-  // Drop the session when the renderer is destroyed, so no orphan bearer
-  // survives a closed window. Wire the listener once per sender.
-  if (!enterpriseWiredSenders.has(senderId)) {
-    enterpriseWiredSenders.add(senderId)
-    event.sender.once('destroyed', () => {
-      enterpriseSessions.destroySender(senderId)
-      enterpriseWiredSenders.delete(senderId)
-    })
-  }
-
-  return { ok: true, sessionId }
-})
 
 // B16-OL · One-login. Establish the enterprise session ENTIRELY in main from the
 // existing native OAuth bearer — no URL/token pasted in the renderer, no bearer
@@ -13533,6 +13514,10 @@ ipcMain.handle('hermes:enterprise:connect', (event, payload) => {
 //     the configured trusted origin is forbidden.
 // Idempotent per sender; returns only {ok, sessionId, baseUrl} (bearer stripped).
 ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
+  if (!isEnterpriseConsoleSender(event.sender)) {
+    return { code: 'forbidden_sender', message: 'enterprise session unavailable', ok: false }
+  }
+
   const senderId = event.sender.id
 
   const enterpriseOrigin = normalizeEnterpriseApiOriginOrNull(
@@ -13591,12 +13576,20 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
 })
 
 ipcMain.handle('hermes:enterprise:disconnect', (event, payload) => {
+  if (!isEnterpriseConsoleSender(event.sender)) {
+    return { ok: false }
+  }
+
   const removed = enterpriseSessions.disconnect(event.sender.id, payload?.sessionId)
 
   return { ok: removed }
 })
 
 ipcMain.handle('hermes:enterprise:request', async (event, req) => {
+  if (!isEnterpriseConsoleSender(event.sender)) {
+    return { code: 'forbidden_sender', kind: 'error', message: 'not connected', status: 0 }
+  }
+
   const session = enterpriseSessions.resolve(event.sender.id, req?.sessionId)
 
   if (!session) {
@@ -13644,6 +13637,10 @@ ipcMain.handle('hermes:enterprise:request', async (event, req) => {
 // Multipart upload (knowledge-upload) — same fencing + path guard as request;
 // reuses fetchJson's existing multipart (`options.upload`, field name "file").
 ipcMain.handle('hermes:enterprise:upload', async (event, req) => {
+  if (!isEnterpriseConsoleSender(event.sender)) {
+    return { code: 'forbidden_sender', kind: 'error', message: 'not connected', status: 0 }
+  }
+
   const session = enterpriseSessions.resolve(event.sender.id, req?.sessionId)
 
   if (!session) {

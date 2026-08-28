@@ -41,15 +41,19 @@ function CreateReminder() {
   const [timezone, setTimezone] = useState('Asia/Shanghai')
   const [when, setWhen] = useState('')
   const [title, setTitle] = useState('')
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
   const scheduledFor = when ? Math.floor(new Date(when).getTime() / 1000) : Number.NaN
 
   return (
     <FormAction
       canSubmit={subjectId.trim().length > 0 && !Number.isNaN(scheduledFor)}
       invalidateKey={REMINDERS_KEY}
+      onSuccess={() => setIdempotencyKey(crypto.randomUUID())}
+      permission="reminder.write"
       submit={() =>
         transport.post('/api/reminder-create', {
           scheduled_for: scheduledFor,
+          idempotency_key: idempotencyKey,
           subject_id: subjectId,
           subject_type: subjectType,
           timezone,
@@ -118,6 +122,7 @@ export function RemindersPage() {
                     <ConfirmAction
                       destructive
                       invalidateKey={REMINDERS_KEY}
+                      permission="reminder.write"
                       run={() => transport.post('/api/reminder-cancel', { reminder_id: reminder.reminder_id })}
                       testId={`console-reminder-cancel-${reminder.reminder_id}`}
                       title="Cancel this reminder?"
