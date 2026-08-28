@@ -3,6 +3,51 @@
 > C8 process log for gate `P3-M4A-DESKTOP-ASSISTANT-CONSOLE-01`. Mercury-owned docs
 > only; no Hermes_AI docs are touched by this lane.
 
+## Entry 2 — transport amendment (HermesTransport + secure main-process WRAP)
+
+**Changed files**
+- Plugin (leaf): `transport.ts` (new — interface + `$transport` + get/useTransport +
+  `dispose`), `fetch-transport.ts` (was `hermes-client.ts`; `FetchHermesTransport` DEV
+  adapter + exported `codeForStatus`), `fake-transport.ts` (new), `ipc-transport.ts` (new
+  — production `IpcHermesTransport`), `session.ts` (drop public `$token`; swappable
+  `transportFactory`; `dispose` on teardown), `page-dashboard.tsx` (`useTransport`),
+  `plugin.tsx` (install IPC factory when bridge present) + tests
+  (`transport.test.ts`, `ipc-transport.test.ts`, reworked `fetch-transport`/`session`/
+  `page-dashboard` tests).
+- Core (Integrator, minimal, additive): `electron/main.ts` (+`hermes:enterprise:*` IPC
+  handlers reusing `fetchJson`; session bearer held in main memory only), `electron/
+  preload.ts` (+`enterprise` bridge), `src/global.d.ts` (+`hermesDesktop.enterprise` type).
+- Docs: `INTERFACE_FREEZE.md` transport section amended; catalog follow-up note corrected.
+
+**Why (incl. corrections to my own prior call)**
+- TOTAL-CONTROL flagged renderer-direct-fetch as a HIGH item. I initially judged the
+  plugin-local `fetch` (Option B) an acceptable LANE-B-scoped choice. **That was wrong on
+  the merits, and the B-T census proved it:** the Hermes server emits **no CORS** and
+  enforces a **strict Origin allowlist** (`webserver.py:3240-3242`), so a renderer
+  `file://` fetch is both CORS-blocked and Origin-rejected — it would not even function
+  against a strict-mode server, independent of the (real) credential-surface concern.
+- B-T1/B-T2 census → **WRAP**: the desktop main already owns `fetchJson`
+  (`electron/main.ts:4762`; node https, `options.bearer` → `Authorization: Bearer`, no
+  redirect-follow). Reused it behind a new minimal IPC bridge rather than building any
+  networking framework or relaxing server CORS.
+- B-T3/B-T4 security: window baseline PASS; **no server refresh contract** → none
+  fabricated; safeStorage deferred; one follow-up = renderer CSP `connect-src`.
+- Scope guard: this is a bounded transport remediation, not target expansion — pages are
+  byte-unchanged except `page-dashboard` swapping `apiRequest` for `useTransport`.
+
+**How verified**
+- `tsc -p .` (renderer) 0 errors; `tsc -p tsconfig.electron.json` (main + preload) 0
+  errors; `eslint` clean on plugin + `electron/main.ts` + `electron/preload.ts` +
+  `global.d.ts`; `vitest --project ui` **8 files / 34 tests pass** (adds transport
+  delegation, getTransport-fail, Fake/Ipc transports, IPC token-to-main-once + bearer
+  never in renderer, error-code mapping, dispose→main clear). No regression in the
+  electron `renderer-bundle` test.
+
+**Remaining / not executed**
+- Renderer CSP `connect-src` hardening (defense-in-depth follow-up).
+- End-to-end run inside a packaged Electron shell (validated by types + unit; E2E is
+  Lane-C). `READY = NO`, `MERGE = NO`.
+
 ## Entry 1 — kickoff, census, freeze, first verified slice
 
 **Changed files**

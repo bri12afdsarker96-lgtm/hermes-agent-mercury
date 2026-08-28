@@ -23,7 +23,8 @@ import {
 
 import { ConsoleShell } from './console'
 import { ENTERPRISE_CONSOLE_LOCALES } from './i18n'
-import { bindSession } from './session'
+import { hasIpcBridge, IpcHermesTransport } from './ipc-transport'
+import { bindSession, setTransportFactory } from './session'
 
 const plugin: HermesPlugin = {
   id: 'enterprise-console',
@@ -32,8 +33,16 @@ const plugin: HermesPlugin = {
   defaultEnabled: false,
   register(ctx) {
     ctx.i18n.register(ENTERPRISE_CONSOLE_LOCALES)
+
+    // In the desktop shell, route transport through the secure main-process
+    // bridge (bearer stays in main). Dev/browser/tests without the bridge keep
+    // the direct-fetch fallback. Pages are unaffected either way.
+    if (hasIpcBridge()) {
+      setTransportFactory((baseUrl, token) => new IpcHermesTransport(baseUrl, token))
+    }
+
     // Persist only the (non-secret) server URL; the disposer wipes the
-    // in-memory bearer + identity on unload/disable.
+    // in-memory session + identity on unload/disable.
     ctx.onDispose(bindSession(ctx.storage))
 
     ctx.registerMany([

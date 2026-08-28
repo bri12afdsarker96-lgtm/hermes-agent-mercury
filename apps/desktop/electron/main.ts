@@ -13438,6 +13438,82 @@ ipcMain.handle('hermes:api', async (_event, request) => {
   return handleHermesApiRequest(request).finally(releaseProfileDeletion)
 })
 
+// ── Enterprise Console transport (P3-M4A) ────────────────────────────────────
+// The bearer for an EXTERNAL Hermes web server lives HERE, in the main process,
+// for the session only — never persisted, never returned to the renderer. The
+// renderer sends baseUrl+token once via `connect`, then only { path, method,
+// body }; main injects the bearer and rides node https via the existing
+// `fetchJson` engine (no browser Origin, so the server's strict-Origin / no-CORS
+// posture stays intact). Consumed by the console plugin's IpcHermesTransport.
+let enterpriseConsoleSession: { baseUrl: string; token: string } | null = null
+
+function normalizeEnterpriseBaseUrl(raw) {
+  const parsed = new URL(String(raw))
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('unsupported protocol')
+  }
+
+  return String(raw).trim().replace(/\/+$/, '')
+}
+
+ipcMain.handle('hermes:enterprise:connect', (_event, payload) => {
+  const baseUrl = normalizeEnterpriseBaseUrl(payload?.baseUrl)
+  const token = String(payload?.token ?? '')
+
+  if (!token) {
+    throw new Error('missing token')
+  }
+
+  enterpriseConsoleSession = { baseUrl, token }
+
+  return { ok: true }
+})
+
+ipcMain.handle('hermes:enterprise:disconnect', () => {
+  enterpriseConsoleSession = null
+
+  return { ok: true }
+})
+
+ipcMain.handle('hermes:enterprise:request', async (_event, req) => {
+  const session = enterpriseConsoleSession
+
+  if (!session) {
+    return { code: 'network', kind: 'error', message: 'not connected', status: 0 }
+  }
+
+  const path = req?.path
+
+  // Narrow allowlist: only the server's /api/* surface, no traversal — this
+  // handler must never become an arbitrary SSRF proxy.
+  if (typeof path !== 'string' || !path.startsWith('/api/') || path.includes('..')) {
+    return { code: 'error', kind: 'error', message: 'invalid path', status: 0 }
+  }
+
+  try {
+    const data = await fetchJson(session.baseUrl + path, '', {
+      bearer: session.token,
+      body: req?.body,
+      method: req?.method || 'GET'
+    })
+
+    return { data, kind: 'ok' }
+  } catch (err) {
+    // fetchJson rejects Error('<status>: <text>') for HTTP >= 400, else a
+    // transport error. Surface status + a coarse code only — never the response
+    // text (which can echo input) nor the bearer.
+    const message = err instanceof Error ? err.message : ''
+    const match = /^(\d{3}):/.exec(message)
+
+    if (match) {
+      return { code: 'http', kind: 'error', message: `request failed (${match[1]})`, status: Number(match[1]) }
+    }
+
+    return { code: 'network', kind: 'error', message: 'cannot reach the Hermes server', status: 0 }
+  }
+})
+
 // One deduper per cross-window cue — the choke point every window shares. Main
 // handles IPC serially, so the first window to claim a key wins with no race.
 const isDuplicateNotification = createEventDeduper()

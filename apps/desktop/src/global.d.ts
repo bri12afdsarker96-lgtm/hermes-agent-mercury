@@ -176,6 +176,22 @@ declare global {
         set: (name: string | null) => Promise<DesktopActiveProfile>
       }
       api: <T>(request: HermesApiRequest) => Promise<T>
+      /**
+       * Enterprise Console transport bridge (P3-M4A): renderer → main → HTTPS to
+       * an EXTERNAL Hermes web server. The bearer is held in the MAIN process
+       * only — the renderer sends baseUrl+token once via `connect`, then only
+       * `{ path, method, body }`. Optional: absent outside the desktop shell, so
+       * dev/browser/tests fall back to the direct-fetch adapter.
+       */
+      enterprise?: {
+        connect: (baseUrl: string, token: string) => Promise<{ ok: boolean }>
+        disconnect: () => Promise<{ ok: boolean }>
+        request: (req: {
+          body?: unknown
+          method?: string
+          path: string
+        }) => Promise<{ data: unknown; kind: 'ok' } | { code: string; kind: 'error'; message: string; status: number }>
+      }
       notify: (payload: HermesNotification) => Promise<boolean>
       requestMicrophoneAccess: () => Promise<boolean>
       /** read_window_below tool: metadata for the OS window directly underneath this one (never pixels). */

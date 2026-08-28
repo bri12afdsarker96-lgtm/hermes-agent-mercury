@@ -52,7 +52,7 @@ export const CONSOLE_PAGES: ConsolePage[] = [
   },
   { capability: 'biz_tasks', id: 'tasks', labelKey: 'page.tasks', permission: 'biztask.read', status: 'ready' },
   {
-    gap: 'enterprise/followup.py exists but exposes no HTTP route (cross-lane server dependency)',
+    gap: 'domain exists (enterprise/followup.py) but no HTTP route — awaiting a server companion',
     id: 'followup',
     labelKey: 'page.followup',
     status: 'blocked'

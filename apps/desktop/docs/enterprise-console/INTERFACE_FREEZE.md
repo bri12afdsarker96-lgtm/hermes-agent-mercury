@@ -17,11 +17,21 @@
   The console reads `GET /api/whoami` and mirrors it; it defines no second identity
   authority and makes no local permission decision. `PermissionGate` / `CapabilityGate`
   are **UI display control only**, never a security boundary.
-- **REST seam (decision — see §GAP-0):** the desktop's `ctx.rest` is namespace-locked
-  to `/api/plugins/<id>/*` and cannot reach Hermes's core `/api/*`. LANE-B therefore
-  uses a **plugin-local `fetch` client** (`hermes-client.ts`) targeting a configurable
-  Hermes base URL with an **in-memory** session bearer (never persisted, never logged).
-  This needs **no Hermes_AI change** and no desktop-core change.
+- **Transport (amended per TOTAL-CONTROL):** pages depend on a narrow `HermesTransport`
+  interface (`get/post/request`) and never see a token. Production = renderer → typed
+  preload/contextBridge → IPC → Electron **main** → HTTPS, reusing the desktop's existing
+  main `fetchJson` engine (**WRAP**, per the B-T census): the bearer lives in the **main
+  process only** and is never held in the renderer. This is also the only design that
+  works against the Hermes server, which emits no CORS and enforces a strict Origin
+  allowlist — a renderer `fetch` is both CORS-blocked and Origin-rejected; a main-process
+  request sends no Origin and rides the bearer. The bundled `FetchHermesTransport` (direct
+  renderer fetch) is a **DEV/test adapter only**, swapped out via `setTransportFactory`
+  when the desktop bridge is present. No Hermes_AI change; the only core-file touch is the
+  minimal `hermes:enterprise:*` IPC handler + preload bridge (Integrator-owned).
+  There is **no refresh contract** on the server, so none is implemented; the session
+  bearer is main-memory only, dropped on disconnect/quit (safeStorage only if a refresh
+  contract ever lands). Follow-up (defense-in-depth): add a renderer CSP `connect-src`
+  that excludes the external Hermes origin.
 - **Capability Truth:** every capability is rendered with the server's own maturity
   verdict (`product_capabilities[cap].status` = LIVE/DEV/CONTRACT/PLANNED). DEV/CONTRACT/
   PLANNED is never shown as production-live.
@@ -60,10 +70,10 @@ Freeze encoded in code: `src/plugins/enterprise-console/catalog.ts`.
 These pages have **no server authority**; the console renders an honest "server API
 missing" state and does **not** fabricate them.
 
-- **GAP-0 (architecture decision, resolved LANE-B-side):** REST seam. LANE-B adopts the
-  plugin-local `fetch` client (Option B) — no Hermes_AI change. Option A (mount console
-  endpoints under `/api/plugins/enterprise-console/` on the Hermes server) is a future
-  server-side option that would require an A-line change; deferred to TC.
+- **GAP-0 (transport — resolved per TOTAL-CONTROL amendment):** WRAP the desktop's main
+  `fetchJson` behind a minimal `hermes:enterprise:*` IPC bridge + `IpcHermesTransport`;
+  bearer stays in main. Implemented. No Hermes_AI change and no wide-CORS relaxation.
+  Follow-up: renderer CSP `connect-src` hardening (defense-in-depth).
 - **GAP-1 · WeCom (page 2) — SERVER_AUTHORITY_MISSING.** No per-tenant connector config
   store, no callback-health probe, no secret state machine (configured/missing/invalid/
   rotated). Needs a server-side connector-config authority + WeCom callback health route.

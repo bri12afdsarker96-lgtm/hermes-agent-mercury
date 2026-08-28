@@ -20,6 +20,8 @@ export interface TransportRequest {
 }
 
 export interface HermesTransport {
+  /** Release any out-of-renderer state (e.g. clear the main-process bearer). */
+  dispose?(): void
   get<T>(path: string): Promise<T>
   post<T>(path: string, body?: unknown): Promise<T>
   request<T>(path: string, opts?: TransportRequest): Promise<T>

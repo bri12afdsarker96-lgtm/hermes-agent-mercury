@@ -58,6 +58,7 @@ export function bindSession(storage: PluginStorage): () => void {
 
   return () => {
     unsub()
+    $transport.get()?.dispose?.()
     $transport.set(null)
     $whoami.set(null)
     $connectError.set(null)
@@ -119,6 +120,7 @@ export async function refreshWhoami(): Promise<void> {
 
 /** Drop the session — clears the transport (and its in-memory credential) + identity. */
 export function disconnect(): void {
+  $transport.get()?.dispose?.()
   $transport.set(null)
   $whoami.set(null)
   $connectError.set(null)

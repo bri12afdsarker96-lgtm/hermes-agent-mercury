@@ -36,7 +36,7 @@ export interface RawRequestOptions extends TransportRequest {
   token?: null | string
 }
 
-function classify(status: number): HermesErrorCode {
+export function codeForStatus(status: number): HermesErrorCode {
   if (status === 401) {
     return 'unauthorized'
   }
@@ -114,7 +114,11 @@ export async function rawRequest<T>(baseUrl: string, path: string, opts: RawRequ
   }
 
   if (!res.ok) {
-    throw new HermesApiError(res.status, classify(res.status), serverMessage(data, `request failed (${res.status})`))
+    throw new HermesApiError(
+      res.status,
+      codeForStatus(res.status),
+      serverMessage(data, `request failed (${res.status})`)
+    )
   }
 
   return data as T

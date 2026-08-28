@@ -19,10 +19,16 @@ entry, no core edits, no shared-root files.
 
 ## Layout
 
-- `plugin.tsx` — registers the route + sidebar nav + i18n.
-- `hermes-client.ts` — plugin-local `fetch` door to the Hermes core `/api/*` (the desktop's
-  `ctx.rest` is namespace-locked and cannot reach it).
-- `session.ts` — connect / whoami / in-memory bearer; persists only the base URL.
+- `plugin.tsx` — registers the route + sidebar nav + i18n; installs the secure transport.
+- `transport.ts` — the `HermesTransport` contract every page depends on (pages never see a
+  token). `ctx.rest` is namespace-locked to `/api/plugins/<id>/*` and cannot reach the
+  Hermes core `/api/*`, so the console brings its own transport.
+- `ipc-transport.ts` — **production** transport: renderer → preload/IPC → main → HTTPS
+  (reuses the desktop's main `fetchJson`); the bearer lives in the main process only.
+- `fetch-transport.ts` — DEV/test adapter (direct renderer fetch); swapped out for the IPC
+  transport when the desktop bridge is present.
+- `fake-transport.ts` — a `HermesTransport` for tests (no network, no credential).
+- `session.ts` — connect / whoami; persists only the base URL (never the bearer).
 - `capabilities.ts` / `gate.tsx` — UI-only permission + capability gates.
 - `catalog.ts` — the 13-page interface freeze, encoded.
 - `console.tsx` — the shell (connect gate → sub-nav + content).
