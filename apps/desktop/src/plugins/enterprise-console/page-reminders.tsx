@@ -3,9 +3,10 @@
  * server's explicit list projection (not the full dataclass).
  */
 
-import { StatusDot, type StatusTone } from '@hermes/plugin-sdk'
+import { Input, StatusDot, type StatusTone } from '@hermes/plugin-sdk'
+import { useState } from 'react'
 
-import { ConfirmAction } from './actions'
+import { ConfirmAction, FormAction } from './actions'
 import { ConsoleRows, fmtEpoch, QueryBody, useConsoleQuery } from './page-kit'
 import { useTransport } from './transport'
 
@@ -33,12 +34,62 @@ const REMINDER_TONE: Record<string, StatusTone> = {
 
 const REMINDERS_KEY = ['enterprise-console', 'reminders'] as const
 
+function CreateReminder() {
+  const transport = useTransport()
+  const [subjectType, setSubjectType] = useState('biz_task')
+  const [subjectId, setSubjectId] = useState('')
+  const [timezone, setTimezone] = useState('Asia/Shanghai')
+  const [when, setWhen] = useState('')
+  const [title, setTitle] = useState('')
+  const scheduledFor = when ? Math.floor(new Date(when).getTime() / 1000) : Number.NaN
+
+  return (
+    <FormAction
+      canSubmit={subjectId.trim().length > 0 && !Number.isNaN(scheduledFor)}
+      invalidateKey={REMINDERS_KEY}
+      submit={() =>
+        transport.post('/api/reminder-create', {
+          scheduled_for: scheduledFor,
+          subject_id: subjectId,
+          subject_type: subjectType,
+          timezone,
+          title: title || undefined
+        })
+      }
+      submitLabel="Create"
+      testId="console-reminder-create"
+      title="Create reminder"
+      trigger="new reminder"
+    >
+      <Input
+        data-testid="console-reminder-subject"
+        onChange={event => setSubjectId(event.target.value)}
+        placeholder="subject id"
+        value={subjectId}
+      />
+      <Input onChange={event => setSubjectType(event.target.value)} placeholder="subject type" value={subjectType} />
+      <Input onChange={event => setTimezone(event.target.value)} placeholder="timezone (IANA)" value={timezone} />
+      <input
+        className="rounded-md border border-border bg-transparent px-2 py-1 text-sm"
+        data-testid="console-reminder-when"
+        onChange={event => setWhen(event.target.value)}
+        type="datetime-local"
+        value={when}
+      />
+      <Input onChange={event => setTitle(event.target.value)} placeholder="title (optional)" value={title} />
+    </FormAction>
+  )
+}
+
 export function RemindersPage() {
   const transport = useTransport()
   const query = useConsoleQuery<RemindersResp>(REMINDERS_KEY, '/api/reminders')
 
   return (
-    <div data-page-status="ready" data-testid="console-page-reminders">
+    <div className="flex flex-col gap-2" data-page-status="ready" data-testid="console-page-reminders">
+      <div className="flex justify-end">
+        <CreateReminder />
+      </div>
       <QueryBody
         emptyText="no reminders"
         isEmpty={data => !data.available || data.reminders.length === 0}

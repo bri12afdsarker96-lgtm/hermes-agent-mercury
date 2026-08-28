@@ -3,9 +3,10 @@
  * key; we show `configured` status only (never a secret value).
  */
 
-import { StatusDot, useValue } from '@hermes/plugin-sdk'
+import { Input, StatusDot, useValue } from '@hermes/plugin-sdk'
+import { useState } from 'react'
 
-import { ConfirmAction } from './actions'
+import { ConfirmAction, FormAction } from './actions'
 import { isSuperAdmin } from './capabilities'
 import { ConsoleRows, QueryBody, useConsoleQuery } from './page-kit'
 import { $whoami } from './session'
@@ -26,6 +27,43 @@ interface ProvidersResp {
 }
 
 const PROVIDERS_KEY = ['enterprise-console', 'providers'] as const
+
+function SetKeyAction({ label, providerKey }: { label: string; providerKey: string }) {
+  const transport = useTransport()
+  const [apiKey, setApiKey] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
+  const [model, setModel] = useState('')
+
+  return (
+    <FormAction
+      canSubmit={apiKey.length > 0}
+      invalidateKey={PROVIDERS_KEY}
+      submit={() =>
+        transport.post('/api/set-provider-key', {
+          api_key: apiKey,
+          base_url: baseUrl || undefined,
+          model: model || undefined,
+          provider: providerKey
+        })
+      }
+      submitLabel="Save"
+      testId={`console-provider-setkey-${providerKey}`}
+      title={`Set key for ${label}`}
+      trigger="set key"
+    >
+      {/* Password field: the secret is never displayed and never logged. */}
+      <Input
+        data-testid={`console-provider-apikey-${providerKey}`}
+        onChange={event => setApiKey(event.target.value)}
+        placeholder="api key"
+        type="password"
+        value={apiKey}
+      />
+      <Input onChange={event => setBaseUrl(event.target.value)} placeholder="base url (optional)" value={baseUrl} />
+      <Input onChange={event => setModel(event.target.value)} placeholder="model (optional)" value={model} />
+    </FormAction>
+  )
+}
 
 export function ProviderPage() {
   const transport = useTransport()
@@ -57,6 +95,7 @@ export function ProviderPage() {
                     <StatusDot tone={provider.configured ? 'good' : 'muted'} />
                     {provider.configured ? 'configured' : 'not configured'}
                   </span>
+                  {canManage ? <SetKeyAction label={provider.label} providerKey={provider.key} /> : null}
                   {canManage && provider.key !== data.active ? (
                     <ConfirmAction
                       invalidateKey={PROVIDERS_KEY}

@@ -9,8 +9,17 @@
  * dialog and keep it open.
  */
 
-import { Button, ConfirmDialog, useQueryClient } from '@hermes/plugin-sdk'
-import { type ReactNode, useState } from 'react'
+import {
+  Button,
+  ConfirmDialog,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  useQueryClient
+} from '@hermes/plugin-sdk'
+import { type FormEvent, type ReactNode, useState } from 'react'
 
 import { HermesApiError } from './fetch-transport'
 
@@ -95,6 +104,91 @@ export function ConfirmAction({
         open={open}
         title={title}
       />
+    </>
+  )
+}
+
+/**
+ * A form action in a dialog — reuses the existing Dialog + form primitives. The
+ * caller owns the controlled fields (passed as children) and the submit body;
+ * this owns open/busy/error, posts to the server, invalidates on success, and
+ * closes. Errors surface inline and keep the dialog open (fail closed). Secrets
+ * live only in the caller's field state and the request body — never logged.
+ */
+export function FormAction({
+  canSubmit = true,
+  children,
+  invalidateKey,
+  submit,
+  submitLabel = 'Submit',
+  testId,
+  title,
+  trigger
+}: {
+  canSubmit?: boolean
+  children: ReactNode
+  invalidateKey?: readonly unknown[]
+  submit: () => Promise<unknown>
+  submitLabel?: string
+  testId?: string
+  title: ReactNode
+  trigger: ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<null | string>(null)
+  const queryClient = useQueryClient()
+
+  const onSubmit = async (event: FormEvent) => {
+    event.preventDefault()
+
+    if (busy || !canSubmit) {
+      return
+    }
+
+    setBusy(true)
+    setError(null)
+
+    try {
+      await submit()
+
+      if (invalidateKey) {
+        await queryClient.invalidateQueries({ queryKey: invalidateKey })
+      }
+
+      setOpen(false)
+    } catch (err) {
+      setError(actionError(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <Button data-testid={testId} onClick={() => setOpen(true)} size="sm" variant="ghost">
+        {trigger}
+      </Button>
+      <Dialog onOpenChange={setOpen} open={open}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{title}</DialogTitle>
+          </DialogHeader>
+          <form className="flex flex-col gap-2" onSubmit={onSubmit}>
+            {children}
+            {error ? (
+              <div className="text-xs text-destructive" data-testid={testId ? `${testId}-error` : undefined}>
+                {error}
+              </div>
+            ) : null}
+            <DialogFooter>
+              <Button data-testid={testId ? `${testId}-submit` : undefined} disabled={busy || !canSubmit} type="submit">
+                {submitLabel}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }

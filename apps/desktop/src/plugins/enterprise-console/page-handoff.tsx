@@ -4,9 +4,10 @@
  * "server module unavailable" state (never faked).
  */
 
-import { StatusDot, type StatusTone } from '@hermes/plugin-sdk'
+import { StatusDot, type StatusTone, Textarea } from '@hermes/plugin-sdk'
+import { useState } from 'react'
 
-import { ConfirmAction } from './actions'
+import { ConfirmAction, FormAction } from './actions'
 import { ConsoleRows, QueryBody, useConsoleQuery } from './page-kit'
 import { useTransport } from './transport'
 
@@ -41,6 +42,30 @@ function ageTone(ageSeconds: null | number): StatusTone {
 }
 
 const HANDOFFS_KEY = ['enterprise-console', 'handoffs'] as const
+
+function ReplyAction({ msgId }: { msgId: string }) {
+  const transport = useTransport()
+  const [text, setText] = useState('')
+
+  return (
+    <FormAction
+      canSubmit={text.trim().length > 0}
+      invalidateKey={HANDOFFS_KEY}
+      submit={() => transport.post('/api/handoff-reply', { msg_id: msgId, text })}
+      submitLabel="Send"
+      testId={`console-handoff-reply-${msgId}`}
+      title="Reply to this handoff"
+      trigger="reply"
+    >
+      <Textarea
+        data-testid={`console-handoff-reply-text-${msgId}`}
+        onChange={event => setText(event.target.value)}
+        placeholder="reply text"
+        value={text}
+      />
+    </FormAction>
+  )
+}
 
 export function HandoffPage() {
   const transport = useTransport()
@@ -84,6 +109,7 @@ export function HandoffPage() {
                       claim
                     </ConfirmAction>
                   ) : null}
+                  {handoff.status === 'claimed' ? <ReplyAction msgId={handoff.msg_id} /> : null}
                   {handoff.state === 'parked' ? (
                     <ConfirmAction
                       invalidateKey={HANDOFFS_KEY}

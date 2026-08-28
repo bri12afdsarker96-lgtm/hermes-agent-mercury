@@ -33,10 +33,33 @@ is never mistaken for "the workflow is complete".
 7. **Knowledge publish/withdraw full flow** — gap author/reject + commit/delete routes exist, but the
    upload→preview→commit publish flow and committed-source withdraw need the upload surface (later slice).
 
-## Implementation plan (STEP 2 — real writes only)
+## STEP 2 — implemented (real writes only)
 
-- Confirm-style actions (retry/close/escalate/cancel/requeue/claim) via the existing
-  `ConfirmDialog` (owns pending→done→close + inline error). Form actions (create/reply/
-  author/set-key) via the existing `Dialog` + `Input`/`Select`/`Textarea`. Success →
-  `queryClient.invalidateQueries` (authoritative refetch). No local optimistic "success",
-  no local state machine, tenant/permission decided by the server.
+All via the existing `ConfirmDialog` / `Dialog` + `Input`/`Textarea` + React Query
+invalidation (`actions.tsx`: `ConfirmAction`, `FormAction`). Success →
+`invalidateQueries` (authoritative refetch); no local optimistic success, no local state
+machine, tenant/permission decided by the server; errors (401/403/409/unavailable) fail
+closed in the dialog.
+
+- **Task:** create, retry, escalate, close.
+- **Reminder:** create, cancel.
+- **Human Handoff:** claim → reply → requeue (the minimal operator flow).
+- **Knowledge review:** gap author, gap reject.
+- **Provider:** select-provider, set-provider-key (api key is a password field — never
+  displayed/logged).
+
+## Deferred writes (Phase-1 justification — real routes, not the minimal Phase-1 loop)
+
+- **biz-task claim / resolve** — operator-agent claim/resolve (needs agent-identity +
+  verifier context); the admin loop is covered by create/retry/close/escalate.
+- **handoff reassign / preempt / reset** — supervisor-advanced, role-gated; the minimal
+  operator flow is claim/reply/requeue.
+- **Knowledge publish (commit) / withdraw (delete)** — need the upload→preview→commit
+  surface + a committed-source list; the minimal Phase-1 review flow is author/reject.
+- **Identity principal create/delete + delegations** — identity-admin writes; create
+  returns a one-time token needing a secure reveal UX. Read is shown; ChannelBinding is a
+  server gap.
+- **Budget edit (tenant-profile write)** — small follow-up; budget is shown read-only now.
+
+These are recorded as CONTROL_STATUS = partial where the page has some control, and are
+follow-up slices — not fabricated, not blocking.

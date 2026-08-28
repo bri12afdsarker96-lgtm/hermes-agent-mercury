@@ -3,6 +3,26 @@
 > C8 process log for gate `P3-M4A-DESKTOP-ASSISTANT-CONSOLE-01`. Mercury-owned docs
 > only; no Hermes_AI docs are touched by this lane.
 
+## Entry 6 — B13 form flows (create / review / reply / set-key)
+
+**Changed files**: `actions.tsx` (+`FormAction` — reuse Dialog + Input/Textarea), form
+actions wired: Task create (`page-tasks`), Reminder create (`page-reminders`), Handoff
+reply (`page-handoff`, completing claim→reply→requeue), Knowledge review author/reject
+(`page-knowledge`), Provider set-key (`page-provider`, password field). Tests:
+`actions.test.tsx` (+FormAction success/disabled/error), `form-flows.test.tsx` (knowledge
+review flow, handoff reply flow, provider set-key secret hygiene). Census doc updated with
+implemented-vs-deferred (Phase-1 justification).
+
+**Why**: closes TC's required Phase-1 flows — knowledge review flow + human-handoff flow —
+plus create/set-key. Deferred real writes (biz-task claim/resolve, handoff reassign/
+preempt/reset, knowledge publish/withdraw needing the upload surface, identity CRUD, budget
+edit) are justified as supervisor-advanced or needing an extra surface, recorded as
+CONTROL_STATUS = partial, never faked. Secrets: the api-key field is `type=password`, lives
+only in field state + request body, never logged.
+
+**How verified**: `tsc -p .` 0, `eslint` clean, `vitest --project ui` **11 files / 54**
+pass (Radix dialog form flows included). `READY = NO`, `MERGE = NO`.
+
 ## Entry 5 — B13 control actions + write-surface census + activation contract
 
 **Changed files**

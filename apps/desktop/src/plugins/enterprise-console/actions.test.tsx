@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import type { ReactNode } from 'react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { actionError, ConfirmAction } from './actions'
+import { actionError, ConfirmAction, FormAction } from './actions'
 import { HermesApiError } from './fetch-transport'
 
 // Radix Dialog uses these in jsdom.
@@ -84,6 +84,56 @@ describe('ConfirmAction', () => {
     fireEvent.click(confirmButton())
 
     await waitFor(() => expect(screen.getByText('not permitted')).toBeTruthy())
+    expect(invalidate).not.toHaveBeenCalled()
+  })
+})
+
+describe('FormAction', () => {
+  it('submits, invalidates the query, and closes on success', async () => {
+    const submit = vi.fn().mockResolvedValue({})
+
+    const { client } = wrap(
+      <FormAction invalidateKey={['k']} submit={submit} testId="f" title="Form" trigger="open">
+        <span>body</span>
+      </FormAction>
+    )
+
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+
+    fireEvent.click(screen.getByTestId('f'))
+    expect(screen.getByText('Form')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('f-submit'))
+
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['k'] }))
+  })
+
+  it('disables submit when canSubmit is false', () => {
+    wrap(
+      <FormAction canSubmit={false} submit={vi.fn()} testId="f" title="Form" trigger="open">
+        <span>body</span>
+      </FormAction>
+    )
+
+    fireEvent.click(screen.getByTestId('f'))
+    expect((screen.getByTestId('f-submit') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('surfaces an error and keeps the dialog open (no refetch)', async () => {
+    const submit = vi.fn().mockRejectedValue(new HermesApiError(409, 'error', 'x'))
+
+    const { client } = wrap(
+      <FormAction invalidateKey={['k']} submit={submit} testId="f" title="Form" trigger="open">
+        <span>body</span>
+      </FormAction>
+    )
+
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+
+    fireEvent.click(screen.getByTestId('f'))
+    fireEvent.click(screen.getByTestId('f-submit'))
+
+    await waitFor(() => expect(screen.getByTestId('f-error')).toBeTruthy())
     expect(invalidate).not.toHaveBeenCalled()
   })
 })
