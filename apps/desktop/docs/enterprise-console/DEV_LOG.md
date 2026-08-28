@@ -3,6 +3,35 @@
 > C8 process log for gate `P3-M4A-DESKTOP-ASSISTANT-CONSOLE-01`. Mercury-owned docs
 > only; no Hermes_AI docs are touched by this lane.
 
+## Entry 7 — B14 Knowledge full control (sources / upload / preview / publish / withdraw / rollback)
+
+**Changed files**
+- Transport upload (core WRAP): `transport.ts` (+`UploadFile` + `upload`), `fetch-transport.ts`
+  (`FetchHermesTransport.upload` multipart + shared `parseResponse`), `fake-transport.ts`,
+  `ipc-transport.ts` (`upload` via bridge); `electron/main.ts` (+`hermes:enterprise:upload`
+  reusing `fetchJson`'s multipart, field `file`, fenced by sessionId + path guard),
+  `electron/preload.ts` + `src/global.d.ts` (upload bridge).
+- `page-knowledge.tsx`: rebuilt into Uploads (upload → preview → publish/rollback) + Sources
+  (committed → withdraw) + Candidates/review sections. `catalog.ts`: knowledge control → ready.
+- Tests: `knowledge.test.tsx` (upload / publish / rollback / preview / withdraw flows), transport
+  upload tests (`fetch-transport.test`, `ipc-transport.test`).
+
+**Why (TC correction accepted)**: Knowledge publish/withdraw were mis-classified as deferred; they
+are Phase-1 required and the server routes exist. All mapped to real Hermes P1 routes (no new
+knowledge API): candidates/review→kb-gaps, upload→knowledge-upload, preview→knowledge-preview,
+publish→knowledge-commit, withdraw→knowledge-delete, sources→knowledge-committed, rollback→
+knowledge-rollback.
+
+**Authoritative completion**: `knowledge-commit` is SYNCHRONOUS — the HTTP response (`status:
+"committed"` or `idempotent`) is the authoritative completion; the page invalidates + refetches,
+never fakes a publish; SSE is not used as the completion authority (subscribe-after-commit race).
+Withdraw/rollback are destructive confirms; the file upload rides `fetchJson`'s existing multipart
+through the fenced IPC transport (bearer stays in main).
+
+**How verified**: `tsc -p .` 0, `tsc -p tsconfig.electron.json` 0, `eslint` clean, `vitest --project
+ui` **12 files / 61** pass; electron enterprise-transport + renderer-bundle 25 pass. `READY = NO`,
+`MERGE = NO`.
+
 ## Entry 6 — B13 form flows (create / review / reply / set-key)
 
 **Changed files**: `actions.tsx` (+`FormAction` — reuse Dialog + Input/Textarea), form

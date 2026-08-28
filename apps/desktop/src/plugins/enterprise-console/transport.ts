@@ -19,15 +19,25 @@ export interface TransportRequest {
   signal?: AbortSignal
 }
 
+/** A file to upload as multipart/form-data (field name `file`). */
+export interface UploadFile {
+  bytes: ArrayBuffer
+  contentType: string
+  filename: string
+}
+
 export interface HermesTransport {
   /** Release any out-of-renderer state (e.g. clear the main-process bearer). */
   dispose?(): void
   get<T>(path: string): Promise<T>
   post<T>(path: string, body?: unknown): Promise<T>
   request<T>(path: string, opts?: TransportRequest): Promise<T>
+  /** Multipart POST an file (knowledge-upload). Not all adapters support it. */
+  upload<T>(path: string, file: UploadFile): Promise<T>
 }
 
-/** Shared get/post sugar so each implementation only writes `request`. */
+/** Shared get/post sugar so each implementation only writes `request`. Upload
+ *  defaults to unsupported; adapters that can do multipart override it. */
 export abstract class BaseHermesTransport implements HermesTransport {
   abstract request<T>(path: string, opts?: TransportRequest): Promise<T>
 
@@ -37,6 +47,10 @@ export abstract class BaseHermesTransport implements HermesTransport {
 
   post<T>(path: string, body?: unknown): Promise<T> {
     return this.request<T>(path, { body, method: 'POST' })
+  }
+
+  upload<T>(_path: string, _file: UploadFile): Promise<T> {
+    return Promise.reject(new Error('enterprise-console: upload not supported by this transport'))
   }
 }
 

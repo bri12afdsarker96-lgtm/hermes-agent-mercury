@@ -13519,6 +13519,47 @@ ipcMain.handle('hermes:enterprise:request', async (event, req) => {
   }
 })
 
+// Multipart upload (knowledge-upload) — same fencing + path guard as request;
+// reuses fetchJson's existing multipart (`options.upload`, field name "file").
+ipcMain.handle('hermes:enterprise:upload', async (event, req) => {
+  const session = enterpriseSessions.resolve(event.sender.id, req?.sessionId)
+
+  if (!session) {
+    return { code: 'network', kind: 'error', message: 'not connected', status: 0 }
+  }
+
+  let url: string
+
+  try {
+    url = resolveEnterpriseUrl(session.baseUrl, req?.path)
+  } catch {
+    return { code: 'error', kind: 'error', message: 'invalid path', status: 0 }
+  }
+
+  try {
+    const data = await fetchJson(url, '', {
+      bearer: session.token,
+      method: 'POST',
+      upload: {
+        bytes: req?.bytes,
+        contentType: String(req?.contentType || 'application/octet-stream'),
+        filename: String(req?.filename || 'file')
+      }
+    })
+
+    return { data, kind: 'ok' }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : ''
+    const match = /^(\d{3}):/.exec(message)
+
+    if (match) {
+      return { code: 'http', kind: 'error', message: `request failed (${match[1]})`, status: Number(match[1]) }
+    }
+
+    return { code: 'network', kind: 'error', message: 'cannot reach the Hermes server', status: 0 }
+  }
+})
+
 // One deduper per cross-window cue — the choke point every window shares. Main
 // handles IPC serially, so the first window to claim a key wins with no race.
 const isDuplicateNotification = createEventDeduper()

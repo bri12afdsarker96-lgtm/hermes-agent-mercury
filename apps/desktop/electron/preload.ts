@@ -175,7 +175,8 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   enterprise: {
     connect: (baseUrl, token) => ipcRenderer.invoke('hermes:enterprise:connect', { baseUrl, token }),
     disconnect: sessionId => ipcRenderer.invoke('hermes:enterprise:disconnect', { sessionId }),
-    request: req => ipcRenderer.invoke('hermes:enterprise:request', req)
+    request: req => ipcRenderer.invoke('hermes:enterprise:request', req),
+    upload: req => ipcRenderer.invoke('hermes:enterprise:upload', req)
   },
   notify: payload => ipcRenderer.invoke('hermes:notify', payload),
   requestMicrophoneAccess: () => ipcRenderer.invoke('hermes:requestMicrophoneAccess'),

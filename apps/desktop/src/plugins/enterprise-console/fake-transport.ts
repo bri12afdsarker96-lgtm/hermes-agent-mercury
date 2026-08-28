@@ -27,4 +27,8 @@ export class FakeHermesTransport extends BaseHermesTransport {
 
     return Promise.resolve(this.#routes[key] as T)
   }
+
+  upload<T>(path: string): Promise<T> {
+    return this.request<T>(path)
+  }
 }

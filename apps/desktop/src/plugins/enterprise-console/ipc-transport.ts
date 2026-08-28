@@ -13,7 +13,7 @@
  */
 
 import { codeForStatus, HermesApiError } from './fetch-transport'
-import { BaseHermesTransport, type TransportRequest } from './transport'
+import { BaseHermesTransport, type TransportRequest, type UploadFile } from './transport'
 
 type EnterpriseBridge = NonNullable<Window['hermesDesktop']['enterprise']>
 
@@ -48,6 +48,24 @@ export class IpcHermesTransport extends BaseHermesTransport {
   async request<T>(path: string, opts: TransportRequest = {}): Promise<T> {
     const sessionId = await this.#ready
     const result = await bridge().request({ body: opts.body, method: opts.method, path, sessionId })
+
+    if (result.kind === 'ok') {
+      return result.data as T
+    }
+
+    throw new HermesApiError(result.status, codeForStatus(result.status), result.message)
+  }
+
+  async upload<T>(path: string, file: UploadFile): Promise<T> {
+    const sessionId = await this.#ready
+
+    const result = await bridge().upload({
+      bytes: file.bytes,
+      contentType: file.contentType,
+      filename: file.filename,
+      path,
+      sessionId
+    })
 
     if (result.kind === 'ok') {
       return result.data as T

@@ -15,7 +15,7 @@
  * code only (the request URL and bearer are never folded into a message).
  */
 
-import { BaseHermesTransport, type TransportRequest } from './transport'
+import { BaseHermesTransport, type TransportRequest, type UploadFile } from './transport'
 
 export type HermesErrorCode = 'error' | 'forbidden' | 'network' | 'not_implemented' | 'unauthorized'
 
@@ -102,6 +102,11 @@ export async function rawRequest<T>(baseUrl: string, path: string, opts: RawRequ
     throw new HermesApiError(0, 'network', 'cannot reach the Hermes server')
   }
 
+  return parseResponse<T>(res)
+}
+
+/** Shared response handling: parse JSON, map non-2xx to a coded, redacted error. */
+async function parseResponse<T>(res: Response): Promise<T> {
   const text = await res.text()
   let data: unknown = null
 
@@ -138,5 +143,24 @@ export class FetchHermesTransport extends BaseHermesTransport {
 
   request<T>(path: string, opts: TransportRequest = {}): Promise<T> {
     return rawRequest<T>(this.#baseUrl, path, { ...opts, token: this.#token })
+  }
+
+  async upload<T>(path: string, file: UploadFile): Promise<T> {
+    const form = new FormData()
+    form.append('file', new Blob([file.bytes], { type: file.contentType }), file.filename)
+
+    let res: Response
+
+    try {
+      res = await fetch(`${this.#baseUrl}${path}`, {
+        body: form,
+        headers: { Accept: 'application/json', Authorization: `Bearer ${this.#token}` },
+        method: 'POST'
+      })
+    } catch {
+      throw new HermesApiError(0, 'network', 'cannot reach the Hermes server')
+    }
+
+    return parseResponse<T>(res)
   }
 }

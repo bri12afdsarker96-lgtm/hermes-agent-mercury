@@ -99,3 +99,26 @@ describe('FetchHermesTransport', () => {
     expect(String((transport as unknown as Record<string, unknown>).token)).not.toContain('secret-bearer')
   })
 })
+
+describe('FetchHermesTransport.upload', () => {
+  it('POSTs multipart/form-data with the bearer', async () => {
+    const fetchMock = vi.fn(async () => fakeResponse(200, { upload_id: 'u1' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const transport = new FetchHermesTransport('http://h:1', 'secret-bearer')
+    const bytes = new Uint8Array([1, 2, 3]).buffer
+
+    const data = await transport.upload('/api/knowledge-upload', {
+      bytes,
+      contentType: 'text/plain',
+      filename: 'x.txt'
+    })
+
+    expect(data).toEqual({ upload_id: 'u1' })
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('http://h:1/api/knowledge-upload')
+    expect(init.method).toBe('POST')
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer secret-bearer')
+    expect(init.body instanceof FormData).toBe(true)
+  })
+})

@@ -192,6 +192,13 @@ declare global {
           path: string
           sessionId: string
         }) => Promise<{ data: unknown; kind: 'ok' } | { code: string; kind: 'error'; message: string; status: number }>
+        upload: (req: {
+          bytes: ArrayBuffer
+          contentType: string
+          filename: string
+          path: string
+          sessionId: string
+        }) => Promise<{ data: unknown; kind: 'ok' } | { code: string; kind: 'error'; message: string; status: number }>
       }
       notify: (payload: HermesNotification) => Promise<boolean>
       requestMicrophoneAccess: () => Promise<boolean>

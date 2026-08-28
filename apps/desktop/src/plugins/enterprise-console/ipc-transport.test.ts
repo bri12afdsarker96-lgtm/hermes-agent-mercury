@@ -10,6 +10,13 @@ type WindowWithBridge = {
       connect: (baseUrl: string, token: string) => Promise<{ ok: boolean; sessionId: string }>
       disconnect: (sessionId: string) => Promise<{ ok: boolean }>
       request: (req: { body?: unknown; method?: string; path: string; sessionId: string }) => Promise<EnterpriseResult>
+      upload: (req: {
+        bytes: ArrayBuffer
+        contentType: string
+        filename: string
+        path: string
+        sessionId: string
+      }) => Promise<EnterpriseResult>
     }
   }
 }
@@ -18,7 +25,8 @@ function makeBridge(result: EnterpriseResult = { data: { ok: true }, kind: 'ok' 
   const bridge = {
     connect: vi.fn(async () => ({ ok: true, sessionId: 'sid-1' })),
     disconnect: vi.fn(async () => ({ ok: true })),
-    request: vi.fn(async () => result)
+    request: vi.fn(async () => result),
+    upload: vi.fn(async () => result)
   }
 
   ;(window as unknown as WindowWithBridge).hermesDesktop = { enterprise: bridge }
@@ -79,5 +87,25 @@ describe('IpcHermesTransport', () => {
 
   it('fails closed (throws) when the desktop bridge is absent', () => {
     expect(() => new IpcHermesTransport('http://h:1', 't')).toThrow()
+  })
+})
+
+describe('IpcHermesTransport.upload', () => {
+  it('sends the file to main fenced by sessionId, never holding it in the renderer', async () => {
+    const bridge = makeBridge({ data: { upload_id: 'u1' }, kind: 'ok' })
+    const transport = new IpcHermesTransport('http://h:1', 'secret-bearer')
+    const bytes = new Uint8Array([1, 2, 3]).buffer
+
+    await expect(
+      transport.upload('/api/knowledge-upload', { bytes, contentType: 'text/plain', filename: 'x.txt' })
+    ).resolves.toEqual({ upload_id: 'u1' })
+
+    expect(bridge.upload).toHaveBeenCalledWith({
+      bytes,
+      contentType: 'text/plain',
+      filename: 'x.txt',
+      path: '/api/knowledge-upload',
+      sessionId: 'sid-1'
+    })
   })
 })

@@ -83,7 +83,7 @@ export const CONSOLE_PAGES: ConsolePage[] = [
   },
   {
     capability: 'knowledge_rag',
-    controlStatus: 'partial',
+    controlStatus: 'ready',
     id: 'knowledge',
     labelKey: 'page.knowledge',
     permission: 'kb.author',
