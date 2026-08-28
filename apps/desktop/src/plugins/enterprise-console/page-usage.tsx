@@ -44,21 +44,22 @@ export function UsagePage() {
       />
 
       <QueryBody emptyText="no profile" query={query}>
-        {data => (
-          <div className="grid gap-(--ec-gutter) md:grid-cols-2" data-testid="console-budget">
-            <KpiCard
-              accent="knowledge"
-              icon={icons.CreditCard}
-              label="Daily token budget"
-              value={budgetLabel(data.fields?.llm?.daily_budget_tokens)}
-            />
-            <KpiCard accent="brand" icon={icons.BarChart3} label="Real-time usage" value={null} />
-          </div>
-        )}
+        {data => {
+          const budget = budgetLabel(data.fields?.llm?.daily_budget_tokens)
+
+          return (
+            <div className="grid gap-(--ec-gutter) md:grid-cols-2" data-testid="console-budget">
+              <div data-testid="console-budget-value">
+                <KpiCard accent="knowledge" icon={icons.CreditCard} label="Daily token budget" value={budget} />
+              </div>
+              <KpiCard accent="brand" icon={icons.BarChart3} label="Real-time usage" value={null} />
+            </div>
+          )
+        }}
       </QueryBody>
 
       <ConsolePanel className="mt-(--ec-gutter)" title="Availability">
-        <p className="text-(--ui-text-secondary)" data-testid="console-budget-value">
+        <p className="text-(--ui-text-secondary)">
           Budget configuration is authoritative from the tenant profile. Real-time token usage and spend have no server endpoint yet, so no figure or trend is inferred.
         </p>
       </ConsolePanel>
