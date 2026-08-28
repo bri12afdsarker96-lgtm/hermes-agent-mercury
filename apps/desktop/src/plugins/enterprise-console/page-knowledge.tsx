@@ -35,8 +35,8 @@ import { capabilityStatus, hasPermission } from './capabilities'
 import { ConsoleRows, fmtEpoch, QueryBody, useConsoleQuery } from './page-kit'
 import { $whoami } from './session'
 import { CapabilityBadge, PageStatusBadge } from './status-badge'
-import { PageHeader } from './ui'
 import { useTransport } from './transport'
+import { PageHeader } from './ui'
 
 const KB_GAPS_KEY = ['enterprise-console', 'kb-gaps'] as const
 const UPLOADS_KEY = ['enterprise-console', 'kb-uploads'] as const

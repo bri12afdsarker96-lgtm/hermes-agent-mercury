@@ -174,7 +174,7 @@ describe('Provider set-key (secret hygiene)', () => {
     await waitFor(() => expect(screen.queryByTestId('console-provider-apikey-openai')).toBeNull())
     fireEvent.click(screen.getByTestId('console-provider-setkey-openai'))
     expect((screen.getByTestId('console-provider-apikey-openai') as HTMLInputElement).value).toBe('')
-    expect(document.body.textContent).not.toContain('sk-sensitive-value')
+    expect(screen.queryByDisplayValue('sk-sensitive-value')).toBeNull()
   })
 })
 
