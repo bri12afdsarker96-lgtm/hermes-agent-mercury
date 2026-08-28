@@ -17,7 +17,7 @@
 
 import { BaseHermesTransport, type TransportRequest, type UploadFile } from './transport'
 
-export type HermesErrorCode = 'error' | 'forbidden' | 'network' | 'not_implemented' | 'unauthorized'
+export type HermesErrorCode = 'error' | 'forbidden' | 'network' | 'no_native_session' | 'not_implemented' | 'unauthorized'
 
 export class HermesApiError extends Error {
   readonly code: HermesErrorCode

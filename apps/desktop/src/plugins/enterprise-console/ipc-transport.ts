@@ -55,8 +55,13 @@ export class IpcHermesTransport extends BaseHermesTransport {
     this.#ready = handshake.then(result => {
       if (!result.ok) {
         // Structured, already-redacted connect error from main (bad base URL /
-        // not https / missing token / no native session). Coarse message; no secret.
-        throw new HermesApiError(0, 'error', result.message)
+        // not https / missing token / no native session). Coarse message; no
+        // secret. Forward ONLY the whitelisted non-secret `no_native_session`
+        // reason so the FSM can map it to UNKNOWN (not UNAVAILABLE); every other
+        // failure stays coarse 'error'. Never forward a bearer/sessionId/baseUrl.
+        const code = result.code === 'no_native_session' ? 'no_native_session' : 'error'
+
+        throw new HermesApiError(0, code, result.message)
       }
 
       return result.sessionId

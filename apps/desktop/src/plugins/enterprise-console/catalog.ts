@@ -19,6 +19,10 @@ export interface ConsolePage {
   controlStatus: ControlStatus
   /** For blocked/partial: what the server is missing, for the operator. */
   gap?: string
+  /** Hide the nav row entirely when the viewer lacks `permission` (for
+   *  tenant_admin-only surfaces where even the row should not appear). Default
+   *  behavior otherwise: the row shows and the content is a DeniedPage. */
+  hideWhenUnpermitted?: boolean
   id: string
   labelKey: string
   permission?: string
@@ -35,28 +39,32 @@ export const CONSOLE_PAGES: ConsolePage[] = [
     status: 'ready'
   },
   {
-    controlStatus: 'missing',
-    gap: 'server has only a static connector schema — no integration status, callback health, or secret-state authority',
+    // SC5 /api/wecom-status now supplies real tenant-scoped association +
+    // credential-state facts (read-only integration status).
+    controlStatus: 'ready',
     id: 'wecom',
     labelKey: 'page.wecom',
-    status: 'blocked'
+    permission: 'channel.binding.manage',
+    status: 'ready'
   },
   {
-    controlStatus: 'partial',
-    gap: 'ChannelBinding has no HTTP route (identity/principals is ready)',
+    // SC2 ChannelBinding list + create/revoke routes now exist (the binding
+    // section self-gates in-component on channel.binding.manage).
+    controlStatus: 'ready',
     id: 'identity',
     labelKey: 'page.identity',
     permission: 'principal.crud',
-    status: 'partial'
+    status: 'ready'
   },
   {
-    capability: 'delivery',
+    // SC3 /api/conversations-inbound|outbound|attempts (conversation.read — NOT
+    // delivery.read). Read-only by design: the server deliberately exposes no
+    // operator retry/held-release (unknown-delivery must not be blindly resent).
     controlStatus: 'missing',
-    gap: 'inbound / held / recovery have no server route; outbound delivery-outbox is read-only',
     id: 'conversations',
     labelKey: 'page.conversations',
-    permission: 'delivery.read',
-    status: 'partial'
+    permission: 'conversation.read',
+    status: 'ready'
   },
   {
     capability: 'biz_tasks',
@@ -67,11 +75,14 @@ export const CONSOLE_PAGES: ConsolePage[] = [
     status: 'ready'
   },
   {
+    // SC1 /api/followup-list|detail|history (followup.read; owner-scoped for
+    // managed roles inside the server model). Read-only: no followup-* write
+    // route exists in Phase-1 (transitions are actor-driven, not admin-driven).
     controlStatus: 'missing',
-    gap: 'domain exists (enterprise/followup.py) but no HTTP route — awaiting a server companion',
     id: 'followup',
     labelKey: 'page.followup',
-    status: 'blocked'
+    permission: 'followup.read',
+    status: 'ready'
   },
   {
     capability: 'reminders',
@@ -107,19 +118,26 @@ export const CONSOLE_PAGES: ConsolePage[] = [
   },
   { controlStatus: 'ready', id: 'provider', labelKey: 'page.provider', permission: 'provider.set', status: 'ready' },
   {
+    // Budget config reads via /api/tenant-profile (tenant.profile.read — NOT
+    // metrics.view, which operators also hold and would wrongly pass the gate).
+    // Real-time token usage/spend still has no server endpoint → honestly partial.
     controlStatus: 'partial',
     gap: 'budget config is ready; real-time token usage/spend has no server endpoint',
     id: 'usage',
     labelKey: 'page.usage',
-    permission: 'metrics.view',
+    permission: 'tenant.profile.read',
     status: 'partial'
   },
   {
+    // SC4 /api/audit-list|detail|correlate (audit.read; tenant_admin-only,
+    // undelegatable). Read-only evidence — NEVER re-execution/replay. Hidden
+    // from the nav entirely for non-admins.
     controlStatus: 'missing',
-    gap: 'audit is append-only write — no read/replay route',
+    hideWhenUnpermitted: true,
     id: 'audit',
     labelKey: 'page.audit',
-    status: 'blocked'
+    permission: 'audit.read',
+    status: 'ready'
   }
 ]
 

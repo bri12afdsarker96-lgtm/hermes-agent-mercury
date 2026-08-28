@@ -3,6 +3,72 @@
 > C8 process log for gate `P3-M4A-DESKTOP-ASSISTANT-CONSOLE-01`. Mercury-owned docs
 > only; no Hermes_AI docs are touched by this lane.
 
+## Entry 11 — WAVE-7 desktop SC1–SC6 consumption + one-login recovery/FSM
+
+**Context**: TOTAL-CONTROL B16 WAVE-7 (`READY=NO MERGE=NO C1-B=NO`). Server PR #131 (Hermes_AI,
+HEAD `b37099f`) shipped SC1–SC6 read/write routes; the desktop catalog still marked Follow-up /
+ChannelBinding / Conversations / Audit / WeCom as `blocked`/`partial` (stale PRODUCT code). This
+entry wires the console to consume the real routes and hardens one-login into a recoverable FSM.
+Six read-only DI-council agents mapped exact server shapes → desktop pages; an action census
+(cross-checking master-roadmap-v3 + the SC contract + webserver.py) found **0 hard Phase-1 write
+gaps** (SC2 closed the last one), so **no server-actions branch was opened**.
+
+**Track A — SC1–SC6 desktop consumption** (reuse-only: `useConsoleQuery`/`QueryBody`/`ConsoleRows`
+for reads, `ConfirmAction`/`FormAction` for writes, one `HermesTransport`, one router, one
+permission authority — no second engine/client/controller/authority introduced):
+- `page-followup.tsx` (new, SC1 `followup.read`): list + detail + history drill-in; READ-ONLY
+  (no `followup-*` write route exists — controlStatus stays `missing`). Owner-scope is
+  server-enforced; the client sends no filter.
+- `page-audit.tsx` (new, SC4 `audit.read`, tenant_admin-only): list/detail/correlate; READ-ONLY
+  evidence, NO replay/re-execute control; malformed-id→400 vs valid-id-outage→503 branch on
+  `err.status`; bare-super_admin-no-tenant shows a "pick a tenant" notice and fires no request.
+- `page-wecom.tsx` (new, SC5 `channel.binding.manage`): association + `runtime_credential_state`
+  (UNKNOWN/ABSENT/PARTIAL/PRESENT, never PRESENT-from-silence) + counts; `callback_health` shown
+  honestly as not-actively-probed; never a credential.
+- `page-conversations.tsx` (rewired, SC3): replaced the stale `/api/delivery-outbox`/`delivery.read`
+  surface with inbound/outbound/attempts on `conversation.read` (the stale-perm defect TC §6
+  named); outbound→attempts drill-in by `internal_message_id`.
+- `page-identity.tsx` (extended, SC2): added a ChannelBinding list + create/revoke section,
+  self-gated in-component on `channel.binding.manage` (page stays reachable with `principal.crud`);
+  reuses the principals query for the create picker.
+- `page-kit.tsx`: added shared `fmtIso` (SC timestamps are ISO-8601 strings, not epochs — `fmtEpoch`
+  would render "Invalid Date").
+- `catalog.ts`: truthful status pass — followup/audit/wecom `blocked→ready`, identity/conversations
+  `partial→ready`, conversations perm `delivery.read→conversation.read`, usage perm
+  `metrics.view→tenant.profile.read` (operators wrongly passed the gate), audit gains
+  `hideWhenUnpermitted`; usage stays honestly `partial` (no realtime-usage endpoint). Audit label
+  "Audit Replay"→"Audit Evidence" (never re-execution). `console.tsx`: registered the 3 new pages +
+  a nav-hide filter for `hideWhenUnpermitted`.
+
+**Track B — one-login recovery/FSM** (§10–13; reuse the existing `onConnectionApplied` seam, no new
+perpetual timer, no second OAuth state machine; bearer stays main-only):
+- §12 `refreshWhoami` transient failure now → `UNAVAILABLE` (was: silently kept AUTHENTICATED), so
+  `$enterpriseAvailable` flips false during an outage; the transport stays alive for recovery.
+- §13 `no_native_session` reason now survives the IPC adapter (`fetch-transport` code union +
+  `ipc-transport` forwards only that whitelisted non-secret code) → `session.stateForError` maps it
+  to `UNKNOWN` (not `UNAVAILABLE`); `no_enterprise_origin` stays coarse→`UNAVAILABLE`.
+- §10 `one-login.ts` no longer one-shot: subscribes `onConnectionApplied` to a bounded re-probe
+  (idempotent `autoConnect`), plus a strictly-bounded self-disarming backoff (3 attempts, only while
+  `UNAVAILABLE`) for an enterprise-only recovery the seam can't observe. `main.ts` rings the seam on
+  native login/logout and, in `_clearNativeTokens` (the single funnel for logout / expired-no-RT /
+  rejected-refresh), tears down all wired enterprise sessions so no stale bearer outlives the native
+  session that minted it (§10-C/D). Also fixed the break-glass `connect()` catch to `dispose()` the
+  transport (prior B-AUD4 LOW).
+
+**How verified** (Mercury @ this branch): `npm run typecheck` (tsc `.` + electron + e2e) = 0;
+`npm run lint` (eslint src/ electron/) = 0 errors; `vitest --project ui` enterprise-console = 85
+pass (incl. new SC page tests, FSM recovery, no_native_session→UNKNOWN, nav-hide); `vitest --project
+electron` = 1443 pass (incl. enterprise-transport 31). Exact-head natural CI to confirm on push.
+
+**Ambiguities returned to TOTAL-CONTROL** (§7, not silently demoted): (1) whether an admin
+Follow-up console WRITE is Phase-1 (server SC1 is deliberately read-only; reuse `enterprise/followup.py`
+if promoted); (2) Conversation retry/held-release — server explicitly refuses operator retry
+("unknown-delivery 不盲目重发") → reads NOT_PHASE1, confirm; (3) WeCom corp-secret/callback config
+write — console-write (new connector-config authority) vs deploy-time env. Built read-only for all
+three, matching the server; none faked.
+
+`READY = NO`, `MERGE = NO`, `C1-B = NO`.
+
 ## Entry 10 — B16-C L1 activation mechanism (WRAP existing plugin lifecycle)
 
 **Changed files**

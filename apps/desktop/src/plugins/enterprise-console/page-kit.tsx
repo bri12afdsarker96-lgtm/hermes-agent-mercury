@@ -21,6 +21,22 @@ export function fmtEpoch(seconds: null | number | undefined): string {
   return new Date(seconds * 1000).toLocaleString()
 }
 
+/**
+ * Format a server ISO-8601 timestamp (a TIMESTAMPTZ serialized via `.isoformat()`
+ * by the SC read models) for display. Distinct from `fmtEpoch`: the console read
+ * surfaces (follow-up, channel-binding, conversations, audit, wecom) return ISO
+ * strings, not epoch seconds — passing those to `fmtEpoch` yields "Invalid Date".
+ */
+export function fmtIso(iso: null | string | undefined): string {
+  if (iso == null || iso === '') {
+    return '—'
+  }
+
+  const date = new Date(iso)
+
+  return Number.isNaN(date.getTime()) ? String(iso) : date.toLocaleString()
+}
+
 export function useConsoleQuery<T>(queryKey: readonly unknown[], path: string, refetchInterval = 30_000) {
   const transport = useTransport()
 

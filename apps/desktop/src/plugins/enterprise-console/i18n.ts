@@ -21,7 +21,7 @@ const en = {
   nav: 'Enterprise',
   page: {
     alerts: 'Alerts',
-    audit: 'Audit Replay',
+    audit: 'Audit Evidence',
     conversations: 'Conversations',
     dashboard: 'Dashboard',
     followup: 'Business Follow-up',
@@ -74,7 +74,7 @@ const zh = {
   nav: '企业',
   page: {
     alerts: '告警',
-    audit: '审计回放',
+    audit: '审计证据',
     conversations: '会话',
     dashboard: '仪表盘',
     followup: '业务跟进',

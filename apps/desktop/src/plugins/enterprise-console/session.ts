@@ -52,6 +52,23 @@ function isRevocation(err: unknown): boolean {
 }
 
 /**
+ * Map a probe failure to the honest FSM state (frozen contract):
+ *   no authenticated native session (coarse non-secret reason) → UNKNOWN;
+ *   401/403 from a real whoami                                 → REVOKED;
+ *   network / 5xx / authority outage / no enterprise origin     → UNAVAILABLE.
+ * A missing native session is NOT an outage — the console is simply not yet
+ * eligible (the user has not completed native login), so it must read UNKNOWN,
+ * never UNAVAILABLE.
+ */
+function stateForError(err: unknown): EnterpriseSessionState {
+  if (err instanceof HermesApiError && err.code === 'no_native_session') {
+    return 'UNKNOWN'
+  }
+
+  return isRevocation(err) ? 'REVOKED' : 'UNAVAILABLE'
+}
+
+/**
  * How a session becomes a transport. Defaults to the DEV fetch adapter; the B-T
  * workstream installs the secure main-process/IPC transport via
  * `setTransportFactory` without touching any page or this module's flow.
@@ -128,10 +145,11 @@ export async function connect(baseUrl: string, token: string): Promise<void> {
     $whoami.set(who)
     $sessionState.set('AUTHENTICATED')
   } catch (err) {
+    transport.dispose?.()
     $transport.set(null)
     $whoami.set(null)
     $connectError.set(redactError(err))
-    $sessionState.set(isRevocation(err) ? 'REVOKED' : 'UNAVAILABLE')
+    $sessionState.set(stateForError(err))
     throw err
   } finally {
     $connecting.set(false)
@@ -162,7 +180,7 @@ export async function autoConnect(): Promise<boolean> {
     $transport.set(null)
     $whoami.set(null)
     $connectError.set(redactError(err))
-    $sessionState.set(isRevocation(err) ? 'REVOKED' : 'UNAVAILABLE')
+    $sessionState.set(stateForError(err))
 
     return false
   } finally {
@@ -190,8 +208,12 @@ export async function refreshWhoami(): Promise<void> {
       $whoami.set(null)
       $connectError.set(redactError(err))
       $sessionState.set('REVOKED')
+    } else {
+      // Transient outage: KEEP the live transport (recovery reuses it), but the
+      // state must go UNAVAILABLE so $enterpriseAvailable flips false — the
+      // console must not keep asserting AUTHENTICATED through an outage.
+      $sessionState.set('UNAVAILABLE')
     }
-    // else: transient outage — keep the live session; do not lie about state.
   }
 }
 

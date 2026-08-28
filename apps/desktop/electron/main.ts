@@ -6998,6 +6998,12 @@ function _storeNativeTokens(baseUrl: string, tokens: NativeTokenSet) {
 function _clearNativeTokens(baseUrl: string) {
   _nativeTokens.delete(baseUrl)
   _persistNativeTokens(baseUrl, null)
+  // WAVE-7 §10-C/§10-D: the native bearer just died (logout, expired with no
+  // refresh token, or a terminally-rejected refresh). Any enterprise session
+  // still holding a snapshot of it is now stale — tear them all down fail-closed
+  // so a stale bearer is never retained past the native session that minted it.
+  // A later re-probe rebuilds a fresh session from the current native token.
+  destroyAllEnterpriseSessions()
 }
 
 // True when we hold native bearer tokens for this gateway (the native-flow
@@ -12935,6 +12941,11 @@ ipcMain.handle('hermes:connection-config:oauth-login', async (_event, rawUrl) =>
       // Confirmed sign-in — release the reauth latch so the next
       // startHermes() re-dials instead of replaying the stale rejection.
       remoteReauthFailure = null
+      // WAVE-7 §10-A: a native session now exists. Ring the existing
+      // connection-applied seam so the enterprise console re-probes and can
+      // reach AUTHENTICATED without an app restart (reuses onConnectionApplied;
+      // no new channel).
+      sendConnectionApplied()
 
       return { ok: true, baseUrl, connected: true }
     } catch (error) {
@@ -12967,10 +12978,15 @@ ipcMain.handle('hermes:connection-config:oauth-logout', async (_event, rawUrl) =
   await clearOauthSession(baseUrl || undefined)
 
   // Also drop any native (RFC 8252) bearer tokens for this gateway so a
-  // logout clears BOTH auth shapes.
+  // logout clears BOTH auth shapes. _clearNativeTokens also tears down the
+  // enterprise sessions (WAVE-7 §10-C/§10-D).
   if (baseUrl) {
     _clearNativeTokens(baseUrl)
   }
+
+  // WAVE-7 §10-C: ring the seam so the enterprise console re-probes to UNKNOWN
+  // (no native session) instead of lingering AUTHENTICATED until an app restart.
+  sendConnectionApplied()
 
   // Report against the SAME liveness notion the Settings indicator uses
   // (AT-or-RT cookie, or a native token) so a logout that left any session
@@ -13465,6 +13481,17 @@ ipcMain.handle('hermes:api', async (_event, request) => {
 // posture stays intact). Consumed by the console plugin's IpcHermesTransport.
 const enterpriseSessions = new EnterpriseSessionStore()
 const enterpriseWiredSenders = new Set<number>()
+
+// WAVE-7 §10-C/§10-D: drop every wired enterprise session (and its main-held
+// bearer snapshot). Invoked when the native token dies so no stale enterprise
+// bearer outlives the native session that minted it; the next re-probe rebuilds.
+function destroyAllEnterpriseSessions(): void {
+  for (const senderId of enterpriseWiredSenders) {
+    enterpriseSessions.destroySender(senderId)
+  }
+
+  enterpriseWiredSenders.clear()
+}
 
 ipcMain.handle('hermes:enterprise:connect', (event, payload) => {
   const senderId = event.sender.id

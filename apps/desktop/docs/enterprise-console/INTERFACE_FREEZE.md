@@ -1,5 +1,13 @@
 # DESKTOP_PHASE1_INTERFACE_FREEZE — Enterprise Assistant Console (LANE-B)
 
+> **WAVE-7 currency note (see DEV_LOG Entry 11)**: pages this freeze marked `blocked`/`partial`
+> for a missing server route — Follow-up, ChannelBinding (under Identity), Conversations, Audit,
+> WeCom — are now wired to the real SC1–SC6 routes from server PR #131 and are `ready` in
+> `catalog.ts`. Conversations moved from `delivery.read` to the correct `conversation.read`.
+> The authoritative per-page status is now `catalog.ts`; this document is retained as the
+> originating freeze record. The consolidated B→C consumption contract will land as
+> `B_TO_C_INTERFACE_FREEZE V2` (Hermes_AI docs) after the WAVE-7 focused audit.
+
 > Gate: `P3-M4A-DESKTOP-ASSISTANT-CONSOLE-01` · Repo: `hermes-agent-mercury` · Branch:
 > `claude/p3-m4a-desktop-assistant-console-01` (cut from Mercury `main` `60c2ed5`).
 > Server authority source (read-only): `Hermes_AI` `hermes_devices/webserver.py`

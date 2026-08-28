@@ -90,6 +90,42 @@ describe('IpcHermesTransport', () => {
   })
 })
 
+describe('IpcHermesTransport one-login handshake (§13 reason preservation)', () => {
+  function makeAutoBridge(result: { code: string; message: string; ok: false } | { ok: true; sessionId: string }) {
+    const bridge = {
+      autoConnect: vi.fn(async () => result),
+      connect: vi.fn(),
+      disconnect: vi.fn(async () => ({ ok: true })),
+      request: vi.fn(async () => ({ data: {}, kind: 'ok' })),
+      upload: vi.fn()
+    }
+
+    ;(window as unknown as { hermesDesktop?: unknown }).hermesDesktop = { enterprise: bridge }
+
+    return bridge
+  }
+
+  it('forwards the coarse no_native_session reason (not a generic error), carrying no secret', async () => {
+    makeAutoBridge({ code: 'no_native_session', message: 'no authenticated native session', ok: false })
+    const transport = IpcHermesTransport.autoConnecting()
+
+    await expect(transport.get('/api/whoami')).rejects.toMatchObject({ code: 'no_native_session', status: 0 })
+
+    try {
+      await transport.get('/api/whoami')
+    } catch (err) {
+      expect(String((err as Error).message)).not.toMatch(/bearer|token|secret/i)
+    }
+  })
+
+  it('collapses any OTHER handshake failure to a coarse error (no reason leak)', async () => {
+    makeAutoBridge({ code: 'no_enterprise_origin', message: 'enterprise API origin is not configured', ok: false })
+    const transport = IpcHermesTransport.autoConnecting()
+
+    await expect(transport.get('/api/whoami')).rejects.toMatchObject({ code: 'error', status: 0 })
+  })
+})
+
 describe('IpcHermesTransport.upload', () => {
   it('sends the file to main fenced by sessionId, never holding it in the renderer', async () => {
     const bridge = makeBridge({ data: { upload_id: 'u1' }, kind: 'ok' })
