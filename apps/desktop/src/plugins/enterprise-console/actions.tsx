@@ -22,8 +22,8 @@ import {
 } from '@hermes/plugin-sdk'
 import { type FormEvent, type ReactNode, useState } from 'react'
 
-import { HermesApiError } from './fetch-transport'
 import { hasPermission } from './capabilities'
+import { HermesApiError } from './fetch-transport'
 import { $whoami } from './session'
 
 export function actionError(err: unknown): string {
