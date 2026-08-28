@@ -128,7 +128,7 @@ export function ConsoleShell() {
       <div className="flex min-h-0 flex-1">
         <nav
           aria-label="Enterprise console"
-          className="w-52 shrink-0 overflow-y-auto border-r border-border p-2"
+          className="w-(--ec-sidebar-w) shrink-0 overflow-y-auto border-r border-border p-2"
           data-testid="console-nav"
         >
           {navPages.map(page => (
