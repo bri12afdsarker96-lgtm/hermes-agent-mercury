@@ -100,25 +100,24 @@ design. Porting any of them was rejected.
 | `_ds_bundle.js`, `_ds_manifest.json`, `window.HermesEnterpriseDesktopDesignSystem_89ae01` | Design-tool preview runtime and global namespace |
 | `_adherence.oxlintrc.json` | An **oxlint** config; this repo runs ESLint |
 | `ui_kits/**/data.js` | Fabricated business data (王琳 / 4031群 / ¥500). `DESIGN_PREVIEW_ONLY` — fixtures and visual harness only, never a runtime path |
-| `fonts/` — RTWS ShangGo G0 | 13 MB of TTFs for a commercial CJK family with **no licence file anywhere in the package**. Rejected for distribution. Replaced by Source Han Sans SC under OFL-1.1 — see below |
+| `fonts/` — RTWS ShangGo G0 | 13 MB of TTFs for a commercial CJK family with **no licence file anywhere in the package**. Rejected for distribution. Replaced by exact Adobe Source Han Sans CN under OFL-1.1 — see below |
 | `assets/brand/*.png` | Brand marks traced from AI renders, no vector master. The app ships a real logo |
 
 ## Typography
 
 The design's brand face is rejected for licensing. The approved replacement is
-**Source Han Sans CN (思源黑体)**, bundled as Google's OFL-1.1 release of the
-same typeface, "Noto Sans SC" — `src/fonts/noto-sans-sc-*.woff2`, licence at
-`src/fonts/LICENSE-NotoSansSC.txt`.
+**Source Han Sans CN (思源黑体)** from Adobe's official `adobe-fonts/source-han-sans`
+release **2.005R**. The bundled file is the official CN region-specific variable
+WOFF2 at `Variable/WOFF2/OTF/Subset/SourceHanSansCN-VF.otf.woff2`, stored locally
+as `src/fonts/SourceHanSansCN-VF.woff2`; the upstream Git blob SHA is
+`f87772cec1747734cbea16204ae99e4f2cc06713`. The accompanying Adobe OFL-1.1
+license is `src/fonts/LICENSE-SourceHanSansCN.txt` (upstream blob
+`3ff0ccaba06857bf292ade9a50f16a0f02b3b8d4`). No runtime CDN is used.
 
-Four subsets, 2.3 MB total: CJK and Latin at 400 and 700. Only two weights are
-bundled because the approved design uses two, and CSS weight matching already
-resolves 500 → 400 and 600 → 700. `@font-face` sits in `styles.css` beside the
-other bundled faces; **only the console opts in**, via `ui/console.css`, so core
-typography is unchanged. Nothing is fetched at runtime.
-
-This is a net improvement independent of the design: the app's default
-`--dt-font-sans` stack contains no CJK face at all, so Chinese product copy was
-landing on a per-platform OS fallback.
+One variable file covers the approved UI's 400–700 weights and avoids shipping
+duplicate static CJK font binaries. Only the Enterprise Console opts in through
+`ui/console.css`; core Mercury typography remains unchanged. No substitute font
+is renamed or aliased to the Source Han family.
 
 ## Function truth is unchanged by this layer
 

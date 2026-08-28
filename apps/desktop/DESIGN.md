@@ -241,12 +241,11 @@ Notes:
   `@font-face` rules live at the top of `src/styles.css`, the files in
   `src/fonts/`, and each face carries its licence.
 - **JetBrains Mono** (Apache-2.0) is the bundled terminal/code face.
-- **Noto Sans SC** (SIL OFL-1.1, `src/fonts/LICENSE-NotoSansSC.txt`) is the
-  bundled CJK face — Google's release of Adobe's Source Han Sans SC (思源黑体).
-  Four subsets, CJK and Latin at 400/700; the Latin subset declares a
-  `unicode-range` so Latin text renders from the 13 KB file rather than the
-  1.1 MB one. Only two weights ship because CSS weight matching already
-  resolves 500 → 400 and 600 → 700.
+- **Source Han Sans CN / 思源黑体** (SIL OFL-1.1,
+  `src/fonts/LICENSE-SourceHanSansCN.txt`) is the bundled CJK face, taken from
+  Adobe's official `adobe-fonts/source-han-sans` 2.005R release. The exact CN
+  region-specific variable WOFF2 is stored as `src/fonts/SourceHanSansCN-VF.woff2`
+  and covers the approved UI's 400–700 weights in one file.
 - The face is declared globally but **opted into per surface** — today only the
   Enterprise Console (`plugins/enterprise-console/ui/console.css`), whose
   product copy is Simplified Chinese. `--dt-font-sans` is unchanged, so core
