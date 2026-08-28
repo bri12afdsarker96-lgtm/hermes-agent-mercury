@@ -4,8 +4,16 @@
  * fabricated by the presentation layer. Row visibility remains server-owned.
  */
 
-import { StatusDot, type StatusTone } from '@hermes/plugin-sdk'
-import { useState } from 'react'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  StatusDot,
+  type StatusTone
+} from '@hermes/plugin-sdk'
+import { useEffect, useState } from 'react'
 
 import { ConsoleRows, fmtIso, QueryBody, useConsoleQuery } from './page-kit'
 import { PageStatusBadge } from './status-badge'
@@ -79,6 +87,28 @@ const STATUS_TONE: Record<string, StatusTone> = {
   open: 'good',
   pending_confirmation: 'warn',
   waiting_update: 'warn'
+}
+
+function useCompactDetail(): boolean {
+  const [compact, setCompact] = useState(
+    () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 1439px)').matches
+  )
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return
+    }
+
+    const query = window.matchMedia('(max-width: 1439px)')
+    const update = () => setCompact(query.matches)
+
+    update()
+    query.addEventListener('change', update)
+
+    return () => query.removeEventListener('change', update)
+  }, [])
+
+  return compact
 }
 
 function FollowupDetail({ followupId }: { followupId: string }) {
@@ -165,6 +195,7 @@ function FollowupDetail({ followupId }: { followupId: string }) {
 export function FollowupPage() {
   const [status, setStatus] = useState<'' | FollowupStatus>('')
   const [selectedId, setSelectedId] = useState<null | string>(null)
+  const compactDetail = useCompactDetail()
   const listPath = status ? `/api/followup-list?status=${status}` : '/api/followup-list'
   const query = useConsoleQuery<FollowupListResp>([...FOLLOWUP_KEY, status], listPath)
 
@@ -198,7 +229,7 @@ export function FollowupPage() {
         title="Business follow-up"
       />
 
-      <div className="grid min-h-0 items-start gap-(--ec-gutter) xl:grid-cols-[minmax(22rem,0.9fr)_minmax(28rem,1.1fr)]">
+      <div className="grid min-h-0 items-start gap-(--ec-gutter) min-[1440px]:grid-cols-[minmax(var(--ec-list-w),0.9fr)_minmax(var(--ec-detail-w),1.1fr)]">
         <ConsolePanel divided title="Follow-ups">
           <QueryBody emptyText="no follow-ups" isEmpty={data => data.followups.length === 0} query={query}>
             {data => (
@@ -206,6 +237,7 @@ export function FollowupPage() {
                 {data.followups.map(row => (
                   <li key={row.followup_id}>
                     <button
+                      aria-expanded={row.followup_id === selectedId}
                       className={
                         row.followup_id === selectedId
                           ? 'flex w-full items-center justify-between gap-3 rounded-md bg-(--ui-fill-secondary) px-3 py-2.5 text-left outline-none ring-1 ring-(--ui-stroke-secondary) focus-visible:ring-2 focus-visible:ring-(--ui-accent)'
@@ -233,16 +265,33 @@ export function FollowupPage() {
           </QueryBody>
         </ConsolePanel>
 
-        {selectedId ? (
+        {!compactDetail && selectedId ? (
           <FollowupDetail followupId={selectedId} />
-        ) : (
+        ) : !compactDetail ? (
           <ConsolePanel>
             <div className="flex min-h-44 items-center justify-center text-center text-(--ui-text-tertiary)">
               Select a follow-up to inspect its authoritative detail and history.
             </div>
           </ConsolePanel>
-        )}
+        ) : null}
       </div>
+
+      <Sheet
+        onOpenChange={open => {
+          if (!open) {
+            setSelectedId(null)
+          }
+        }}
+        open={compactDetail && selectedId !== null}
+      >
+        <SheetContent className="w-[min(90vw,var(--ec-detail-w))] overflow-y-auto sm:max-w-(--ec-detail-w)" side="right">
+          <SheetHeader>
+            <SheetTitle>Follow-up detail</SheetTitle>
+            <SheetDescription>Authoritative record detail and server-authored history.</SheetDescription>
+          </SheetHeader>
+          <div className="p-3 pt-0">{selectedId ? <FollowupDetail followupId={selectedId} /> : null}</div>
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }
