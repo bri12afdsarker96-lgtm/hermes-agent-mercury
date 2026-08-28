@@ -184,7 +184,10 @@ declare global {
        * dev/browser/tests fall back to the direct-fetch adapter.
        */
       enterprise?: {
-        connect: (baseUrl: string, token: string) => Promise<{ ok: boolean; sessionId: string }>
+        connect: (
+          baseUrl: string,
+          token: string
+        ) => Promise<{ ok: true; sessionId: string } | { code: string; message: string; ok: false }>
         disconnect: (sessionId: string) => Promise<{ ok: boolean }>
         request: (req: {
           body?: unknown

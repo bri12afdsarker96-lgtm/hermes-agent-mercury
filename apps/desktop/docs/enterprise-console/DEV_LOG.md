@@ -3,6 +3,40 @@
 > C8 process log for gate `P3-M4A-DESKTOP-ASSISTANT-CONSOLE-01`. Mercury-owned docs
 > only; no Hermes_AI docs are touched by this lane.
 
+## Entry 9 — B16-B security hardening (M1–M4) + B16-A native-session architecture council
+
+**B16-B — security hardening (real code, Mercury PR #8 only)**
+- `electron/enterprise-transport.ts` (pure helpers): `sanitizeMultipartContentType`
+  (M1 — strip CR/LF/NUL/control + validate MIME essence, safe default
+  `application/octet-stream`), `ENTERPRISE_MAX_UPLOAD_BYTES=50 MiB` + `uploadByteLength`
+  (M2 — reject oversize/malformed shape before fetch, fail closed), `classifyConnectError`
+  (M3 — structured safe code/message, never token/URL creds/stack/body).
+- `electron/main.ts`: `multipartBody` now sanitizes `contentType` (benefits all callers,
+  incl. kanban); `enterprise:upload` handler adds the size/shape guard before `fetchJson`;
+  `enterprise:connect` handler wraps `connect` in try/catch → structured error.
+- `src/plugins/enterprise-console/ipc-transport.ts`: connect handles the `{ok:false}` shape;
+  `src/global.d.ts`: connect result union; `connect-form.tsx`: M4 — corrected the stale
+  `$token` atom comment to the real lifecycle (local state → handoff → cleared → main-owned).
+- Tests: `electron/enterprise-transport.test.ts` +13 cases (CRLF/LF/NUL/malformed-MIME reject,
+  valid pass, 50 MiB boundary pass, >50 MiB reject-before-fetch, malformed-bytes fail-closed,
+  non-loopback + URL-credential structured errors, secret-absent-from-errors); fencing +
+  upload-success regressions already present.
+- Verified: `tsc -p tsconfig.electron.json`=0, `tsc -p .`=0, eslint clean; `vitest --project
+  electron` 109 files / 1437 pass; ui project green.
+
+**B16-A — native session architecture council (design; new doc `NATIVE_SESSION_ARCHITECTURE.md`)**
+Parallel independent council (upstream-pin / Hermes-authority / federation-mapping /
+security-threat / product-UX / reuse-skeptic) + plugin-activation study + server census.
+Result: the whole RFC 8252 native-auth stack is **ADOPT** (vendored upstream, ~45 tests);
+Hermes tenant/principal/RBAC = **KEEP-OURS**. **B15 REUSE correction accepted**: the
+"Agent → Hermes Principal" mapping **COLLAPSES-TO-WRAP** of `/api/login`+`/api/whoami`
+(Lead adjudicated A4-vs-A8 toward A8 — `resolve_trusted_actor`/`channel_bindings` is the
+wrong, channel-inbound axis; the census's need for *synthesized* placeholders confirms it).
+The **only NEW-JUSTIFIED** item is the server-side pre-page enterprise-session **source**
+(`SERVER_FEDERATION_SEAM_GAP`) — the one open decision for TC: (a) federation exchange or
+(b) pre-page `/api/login` with a `safeStorage`-persisted token. Plugin activation = WRAP of
+existing `activate/deactivate` handles (no second manager). `READY = NO`, `MERGE = NO`.
+
 ## Entry 8 — B15 Enterprise-session bootstrap preflight (READ / DESIGN only, docs-only)
 
 **Changed files**

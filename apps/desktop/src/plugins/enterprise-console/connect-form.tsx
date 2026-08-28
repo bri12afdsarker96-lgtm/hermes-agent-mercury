@@ -1,8 +1,10 @@
 /**
  * Connect form — points the console at a Hermes server and authenticates with a
- * principal bearer. The bearer lives only in this component's local state and
- * the in-memory `$token` atom; it is never persisted or logged. The base URL
- * (not a secret) is remembered.
+ * principal bearer. The bearer lives only in this component's local React state;
+ * on submit it is handed to the transport (owned by the main process in the
+ * production IPC adapter) and the local state is cleared immediately. It is never
+ * kept in a renderer atom, persisted, or logged. The base URL (not a secret) is
+ * remembered.
  */
 
 import { Button, Input, usePluginI18n, useValue } from '@hermes/plugin-sdk'

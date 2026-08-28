@@ -128,7 +128,15 @@ import {
 } from './desktop-uninstall'
 import { describeDevCdpDecision, resolveDevCdpPort } from './dev-cdp'
 import { installEmbedReferer } from './embed-referer'
-import { EnterpriseSessionStore, isAllowedEnterpriseMethod, resolveEnterpriseUrl } from './enterprise-transport'
+import {
+  classifyConnectError,
+  ENTERPRISE_MAX_UPLOAD_BYTES,
+  EnterpriseSessionStore,
+  isAllowedEnterpriseMethod,
+  resolveEnterpriseUrl,
+  sanitizeMultipartContentType,
+  uploadByteLength
+} from './enterprise-transport'
 import { createEventDeduper } from './event-dedupe'
 import {
   buildTerminalScript,
@@ -4747,11 +4755,16 @@ function multipartBody(upload) {
   const boundary = `----hermes-${crypto.randomBytes(12).toString('hex')}`
   const filename = String(upload.filename || 'file').replace(/["\r\n]/g, '_')
 
+  // Sanitize the renderer-supplied Content-Type: strip CR/LF/NUL/control chars
+  // and validate the MIME essence, so it can never inject extra multipart
+  // headers or parts. `filename` is already CRLF/quote-stripped above.
+  const contentType = sanitizeMultipartContentType(upload.contentType)
+
   const body = Buffer.concat([
     Buffer.from(
       `--${boundary}\r\n` +
         `Content-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
-        `Content-Type: ${upload.contentType || 'application/octet-stream'}\r\n\r\n`
+        `Content-Type: ${contentType}\r\n\r\n`
     ),
     Buffer.from(upload.bytes),
     Buffer.from(`\r\n--${boundary}--\r\n`)
@@ -13453,7 +13466,17 @@ const enterpriseWiredSenders = new Set<number>()
 
 ipcMain.handle('hermes:enterprise:connect', (event, payload) => {
   const senderId = event.sender.id
-  const sessionId = enterpriseSessions.connect(senderId, payload?.baseUrl, payload?.token)
+
+  let sessionId: string
+
+  try {
+    sessionId = enterpriseSessions.connect(senderId, payload?.baseUrl, payload?.token)
+  } catch (err) {
+    // Base-URL / https / missing-token validation failed. Return a safe,
+    // structured code + message — never the raw URL, credentials, stack, or a
+    // server response body.
+    return { ok: false, ...classifyConnectError(err) }
+  }
 
   // Drop the session when the renderer is destroyed, so no orphan bearer
   // survives a closed window. Wire the listener once per sender.
@@ -13528,6 +13551,20 @@ ipcMain.handle('hermes:enterprise:upload', async (event, req) => {
     return { code: 'network', kind: 'error', message: 'not connected', status: 0 }
   }
 
+  // Reject a malformed or oversize payload in main BEFORE the network fetch, so
+  // a compromised renderer can neither make main buffer an unbounded body nor
+  // pass a non-buffer shape into `Buffer.from`. The server stays the final
+  // authority on size; this is a cheap defence-in-depth guard.
+  const byteLength = uploadByteLength(req?.bytes)
+
+  if (byteLength === null) {
+    return { code: 'error', kind: 'error', message: 'invalid upload', status: 0 }
+  }
+
+  if (byteLength > ENTERPRISE_MAX_UPLOAD_BYTES) {
+    return { code: 'too_large', kind: 'error', message: 'file exceeds the 50 MiB limit', status: 0 }
+  }
+
   let url: string
 
   try {
@@ -13542,7 +13579,7 @@ ipcMain.handle('hermes:enterprise:upload', async (event, req) => {
       method: 'POST',
       upload: {
         bytes: req?.bytes,
-        contentType: String(req?.contentType || 'application/octet-stream'),
+        contentType: req?.contentType,
         filename: String(req?.filename || 'file')
       }
     })

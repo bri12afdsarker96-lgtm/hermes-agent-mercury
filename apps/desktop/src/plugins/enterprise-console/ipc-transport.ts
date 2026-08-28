@@ -42,7 +42,15 @@ export class IpcHermesTransport extends BaseHermesTransport {
     super()
     this.#ready = bridge()
       .connect(baseUrl, token)
-      .then(result => result.sessionId)
+      .then(result => {
+        if (!result.ok) {
+          // Structured, already-redacted connect error from main (bad base URL /
+          // not https / missing token). Surface the coarse message; no secret.
+          throw new HermesApiError(0, 'error', result.message)
+        }
+
+        return result.sessionId
+      })
   }
 
   async request<T>(path: string, opts: TransportRequest = {}): Promise<T> {

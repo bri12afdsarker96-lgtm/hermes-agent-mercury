@@ -96,6 +96,75 @@ export function isAllowedEnterpriseMethod(method: unknown): boolean {
   return typeof method === 'string' && ENTERPRISE_ALLOWED_METHODS.has(method.toUpperCase())
 }
 
+/**
+ * Cap for a single main-process upload, in bytes. The Hermes server remains the
+ * final authority on size; this is a cheap client-side guard so a compromised
+ * renderer cannot make the main process buffer an unbounded payload before the
+ * network fetch. Aligned to the Phase-1 server contract (50 MiB).
+ */
+export const ENTERPRISE_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+/** Byte length of an upload payload, or null if the shape is not a real buffer
+ *  (fail closed — a malformed shape must never reach `Buffer.from`). */
+export function uploadByteLength(bytes: unknown): null | number {
+  if (bytes instanceof ArrayBuffer) {
+    return bytes.byteLength
+  }
+
+  if (ArrayBuffer.isView(bytes)) {
+    return (bytes as ArrayBufferView).byteLength
+  }
+
+  return null
+}
+
+/** A conservative MIME essence (`type/subtype`) using RFC 6838 restricted-name
+ *  characters only. Parameters (`; charset=…`) are intentionally dropped. */
+const MIME_ESSENCE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/
+
+/**
+ * Sanitize a renderer-supplied multipart part Content-Type. Any CR/LF/NUL/other
+ * control character (via `hasControlChars`), or a value that is not a
+ * well-formed `type/subtype`, is rejected and replaced by the safe default — so
+ * a compromised renderer can never inject extra multipart headers or parts
+ * through the Content-Type line. Returns a normalized (lower-cased, parameterless)
+ * MIME essence, or `application/octet-stream`.
+ */
+export function sanitizeMultipartContentType(raw: unknown): string {
+  const fallback = 'application/octet-stream'
+
+  if (typeof raw !== 'string' || hasControlChars(raw)) {
+    return fallback
+  }
+
+  const essence = raw.split(';', 1)[0].trim().toLowerCase()
+
+  return MIME_ESSENCE.test(essence) ? essence : fallback
+}
+
+/**
+ * Map a connect-time validation error to a safe, structured code + message.
+ * Never echoes the raw input, URL credentials, server body, or a stack — only a
+ * fixed operator-facing string keyed off the known validation failures.
+ */
+export function classifyConnectError(err: unknown): { code: string; message: string } {
+  const raw = err instanceof Error ? err.message : ''
+
+  if (raw === 'missing token') {
+    return { code: 'missing_token', message: 'a token is required' }
+  }
+
+  if (raw === 'non-loopback base URL must use https') {
+    return { code: 'insecure_base_url', message: 'a non-loopback server must use https' }
+  }
+
+  if (raw === 'base URL must not contain credentials') {
+    return { code: 'invalid_base_url', message: 'the server URL must not contain credentials' }
+  }
+
+  return { code: 'invalid_base_url', message: 'enter a valid https server URL' }
+}
+
 /** Validate + resolve the absolute request URL, asserting it stays on the
  *  session's origin (defence in depth against host injection via the path). */
 export function resolveEnterpriseUrl(baseUrl: string, path: unknown): string {

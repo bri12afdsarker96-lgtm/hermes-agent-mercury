@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  classifyConnectError,
+  ENTERPRISE_MAX_UPLOAD_BYTES,
   EnterpriseSessionStore,
   isAllowedEnterpriseMethod,
   isValidEnterprisePath,
   normalizeEnterpriseBaseUrl,
-  resolveEnterpriseUrl
+  resolveEnterpriseUrl,
+  sanitizeMultipartContentType,
+  uploadByteLength
 } from './enterprise-transport'
 
 describe('normalizeEnterpriseBaseUrl', () => {
@@ -122,5 +126,128 @@ describe('EnterpriseSessionStore — per-renderer fencing', () => {
 
     expect(() => store.connect(1, BASE, '')).toThrow()
     expect(() => store.connect(1, 'http://remote.example.com', 'tok')).toThrow()
+  })
+})
+
+// --- B16-B security hardening -------------------------------------------------
+
+describe('sanitizeMultipartContentType (M1 — multipart header injection)', () => {
+  const CR = String.fromCharCode(13)
+  const LF = String.fromCharCode(10)
+  const NUL = String.fromCharCode(0)
+
+  it('rejects a CRLF-injection attempt (falls back to the safe default)', () => {
+    const injected = `text/plain${CR}${LF}X-Injected: 1${CR}${LF}Content-Disposition: form-data; name="collection"`
+    expect(sanitizeMultipartContentType(injected)).toBe('application/octet-stream')
+  })
+
+  it('rejects a bare CR, a bare LF, and a NUL byte', () => {
+    expect(sanitizeMultipartContentType(`text/plain${CR}`)).toBe('application/octet-stream')
+    expect(sanitizeMultipartContentType(`text/plain${LF}evil`)).toBe('application/octet-stream')
+    expect(sanitizeMultipartContentType(`text/plain${NUL}`)).toBe('application/octet-stream')
+  })
+
+  it('rejects a malformed MIME essence and non-string input', () => {
+    expect(sanitizeMultipartContentType('not a mime type')).toBe('application/octet-stream')
+    expect(sanitizeMultipartContentType('../../evil')).toBe('application/octet-stream')
+    expect(sanitizeMultipartContentType('text/')).toBe('application/octet-stream')
+    expect(sanitizeMultipartContentType(42)).toBe('application/octet-stream')
+    expect(sanitizeMultipartContentType(null)).toBe('application/octet-stream')
+  })
+
+  it('passes a well-formed MIME essence (dropping parameters, normalising case)', () => {
+    expect(sanitizeMultipartContentType('text/plain')).toBe('text/plain')
+    expect(sanitizeMultipartContentType('application/pdf')).toBe('application/pdf')
+    expect(sanitizeMultipartContentType('image/svg+xml')).toBe('image/svg+xml')
+    expect(sanitizeMultipartContentType('Text/Plain; charset=utf-8')).toBe('text/plain')
+  })
+})
+
+describe('uploadByteLength + ENTERPRISE_MAX_UPLOAD_BYTES (M2 — upload size/shape guard)', () => {
+  it('reports the byte length of real buffer shapes', () => {
+    expect(uploadByteLength(new ArrayBuffer(10))).toBe(10)
+    expect(uploadByteLength(new Uint8Array([1, 2, 3]))).toBe(3)
+    expect(uploadByteLength(new DataView(new ArrayBuffer(4)))).toBe(4)
+    expect(uploadByteLength(new Uint8Array(new ArrayBuffer(8), 2))).toBe(6) // offset view
+  })
+
+  it('returns null for a malformed (non-buffer) shape — fail closed before Buffer.from', () => {
+    expect(uploadByteLength(null)).toBeNull()
+    expect(uploadByteLength(undefined)).toBeNull()
+    expect(uploadByteLength(1024)).toBeNull()
+    expect(uploadByteLength('AAAA')).toBeNull()
+    expect(uploadByteLength({ byteLength: 5 })).toBeNull() // fake shape
+  })
+
+  it('is a 50 MiB cap; a payload at the boundary passes and one byte over is rejected', () => {
+    expect(ENTERPRISE_MAX_UPLOAD_BYTES).toBe(50 * 1024 * 1024)
+
+    const atCap = uploadByteLength(new ArrayBuffer(ENTERPRISE_MAX_UPLOAD_BYTES))
+    const overCap = uploadByteLength(new ArrayBuffer(ENTERPRISE_MAX_UPLOAD_BYTES + 1))
+
+    // The handler rejects when byteLength > cap, before any network fetch.
+    expect(atCap !== null && atCap > ENTERPRISE_MAX_UPLOAD_BYTES).toBe(false)
+    expect(overCap !== null && overCap > ENTERPRISE_MAX_UPLOAD_BYTES).toBe(true)
+  })
+})
+
+describe('classifyConnectError (M3 — connect error normalization)', () => {
+  it('maps a non-loopback-http base URL to a safe insecure_base_url error', () => {
+    // The exact error EnterpriseSessionStore.connect throws for http on a remote host.
+    let thrown: unknown
+
+    try {
+      new EnterpriseSessionStore().connect(1, 'http://remote.example.com', 'tok')
+    } catch (err) {
+      thrown = err
+    }
+
+    expect(classifyConnectError(thrown)).toEqual({
+      code: 'insecure_base_url',
+      message: 'a non-loopback server must use https'
+    })
+  })
+
+  it('maps a credentials-in-URL base to a safe invalid_base_url error', () => {
+    let thrown: unknown
+
+    try {
+      new EnterpriseSessionStore().connect(1, 'https://user:pass@h.example.com', 'tok')
+    } catch (err) {
+      thrown = err
+    }
+
+    expect(classifyConnectError(thrown)).toEqual({
+      code: 'invalid_base_url',
+      message: 'the server URL must not contain credentials'
+    })
+  })
+
+  it('maps a missing token, and defaults unknown errors to a generic message', () => {
+    expect(classifyConnectError(new Error('missing token'))).toEqual({
+      code: 'missing_token',
+      message: 'a token is required'
+    })
+    expect(classifyConnectError(new Error('some raw internal detail'))).toEqual({
+      code: 'invalid_base_url',
+      message: 'enter a valid https server URL'
+    })
+  })
+
+  it('never echoes the token, raw URL credentials, or a stack in the message', () => {
+    let thrown: unknown
+
+    try {
+      new EnterpriseSessionStore().connect(1, 'https://user:sup3rsecret@h.example.com', 'the-bearer-token')
+    } catch (err) {
+      thrown = err
+    }
+
+    const out = classifyConnectError(thrown)
+    const serialized = JSON.stringify(out)
+    expect(serialized).not.toContain('sup3rsecret')
+    expect(serialized).not.toContain('the-bearer-token')
+    expect(serialized).not.toContain('h.example.com')
+    expect(serialized).not.toMatch(/at .*\(/) // no stack frame
   })
 })
