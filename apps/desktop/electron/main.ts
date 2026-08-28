@@ -13511,6 +13511,7 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
   const enterpriseOrigin = normalizeEnterpriseApiOriginOrNull(
     process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN
   )
+
   if (!enterpriseOrigin) {
     // No trusted enterprise origin configured -> one-login unavailable (UNKNOWN);
     // the ConnectForm break-glass path remains. Never guess an origin.
@@ -13518,9 +13519,11 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
   }
 
   let bearer: string | null = null
+
   try {
     const remote = await resolveRemoteBackend(primaryProfileKey())
     const gatewayBaseUrl = remote?.baseUrl
+
     if (gatewayBaseUrl) {
       // Bearer is minted for (and refreshed against) the GATEWAY origin.
       bearer = await ensureNativeAccessToken(gatewayBaseUrl).catch(() => null)
@@ -13528,6 +13531,7 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
   } catch {
     bearer = null
   }
+
   if (!bearer) {
     // No authenticated native session -> cannot authenticate (UNKNOWN/unavailable),
     // never a fake AUTHENTICATED.
@@ -13535,6 +13539,7 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
   }
 
   let sessionId: string
+
   try {
     sessionId = enterpriseSessions.autoConnect(senderId, enterpriseOrigin, bearer)
   } catch (err) {
@@ -13550,9 +13555,11 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
   }
 
   const session = enterpriseSessions.resolve(senderId, sessionId)
+
   if (!session) {
     return { code: 'network', message: 'session unavailable', ok: false }
   }
+
   return buildAutoConnectResult(session)
 })
 

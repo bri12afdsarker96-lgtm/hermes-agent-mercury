@@ -155,6 +155,7 @@ export async function autoConnect(): Promise<boolean> {
     $transport.set(transport)
     $whoami.set(who)
     $sessionState.set('AUTHENTICATED')
+
     return true
   } catch (err) {
     transport.dispose?.()
@@ -162,6 +163,7 @@ export async function autoConnect(): Promise<boolean> {
     $whoami.set(null)
     $connectError.set(redactError(err))
     $sessionState.set(isRevocation(err) ? 'REVOKED' : 'UNAVAILABLE')
+
     return false
   } finally {
     $connecting.set(false)

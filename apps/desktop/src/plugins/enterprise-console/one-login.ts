@@ -1,44 +1,35 @@
 /**
- * B16-OL · One-login shell bootstrap.
+ * B16-OL · One-login session bootstrap (plugin-local).
  *
- * Runs at APP/SHELL boot, OUTSIDE plugin activation — the enterprise-console
- * plugin is gated on `$enterpriseAvailable`, so the signal that decides
- * activation must be produced from here, never from inside `plugin.register()`
- * (which only runs once already activated). This is the required separation that
- * breaks the chicken-and-egg.
+ * Installs the token-free auto transport (main holds the bearer) and probes the
+ * native session once. This is deliberately kept to plugin-local imports (the
+ * SDK boundary: a plugin depends only on `@hermes/plugin-sdk`, react, and its own
+ * modules — never on the shell's `@/contrib/*`). The SHELL (`controller.tsx`)
+ * owns the projection of `$sessionState` → `$enterpriseAvailable` and calls this
+ * AT BOOT, outside plugin activation — which is what breaks the chicken-and-egg:
+ * the enterprise-console plugin is gated on `$enterpriseAvailable`, so the signal
+ * that decides activation is produced from the shell, never from inside
+ * `plugin.register()`.
  *
- * It:
- *   1. installs the token-free auto transport (main holds the bearer),
- *   2. projects the session FSM onto the non-secret `$enterpriseAvailable`
- *      (`true` iff `AUTHENTICATED`), driving the EXISTING plugin manager, and
- *   3. probes once via the native session (never throws; a transient outage is
- *      UNAVAILABLE, not a fake AUTHENTICATED).
- *
- * No second plugin manager; no bearer in the renderer; `defaultEnabled:false`
- * and the user's manual decision still win (see `bindEligibility`).
+ * No bearer in the renderer; `defaultEnabled:false` and the user's manual
+ * decision still win (see `bindEligibility`). A transient outage is UNAVAILABLE,
+ * not a fake AUTHENTICATED (see the session FSM).
  */
 
-import { $enterpriseAvailable } from '@/contrib/enterprise-eligibility'
-
 import { hasIpcBridge, IpcHermesTransport } from './ipc-transport'
-import { autoConnect, $sessionState, setAutoTransportFactory } from './session'
+import { autoConnect, setAutoTransportFactory } from './session'
 
 let started = false
 
-export function bootstrapEnterpriseOneLogin(): void {
+export function bootstrapEnterpriseSession(): void {
   if (started) {
     return
   }
+
   started = true
 
-  // Availability is a one-way projection of the session FSM. Only a real
-  // `/api/whoami` (AUTHENTICATED) reveals the console; UNAVAILABLE / REVOKED /
-  // UNKNOWN all keep it hidden, and a later revocation flips it back to false.
-  $sessionState.subscribe(state => $enterpriseAvailable.set(state === 'AUTHENTICATED'))
-
   // Dev / browser / no desktop bridge: no native session to reuse. Leave the
-  // console hidden; the ConnectForm break-glass path stays available for
-  // dev/migration, not as the normal startup path.
+  // console hidden; ConnectForm stays as the dev/migration break-glass path.
   if (!hasIpcBridge()) {
     return
   }
