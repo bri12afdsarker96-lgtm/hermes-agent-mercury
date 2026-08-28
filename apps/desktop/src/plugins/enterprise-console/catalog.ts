@@ -1,41 +1,48 @@
 /**
  * The Phase-1 page catalog — the DESKTOP_PHASE1_INTERFACE_FREEZE encoded in
- * code. Each entry records the server-contract reality (B3 census) so the shell
- * renders honest status and never presents a server gap as a working feature.
+ * code. `status` is the READ status (drives the nav badge); `controlStatus` is
+ * the write/workflow status, kept separate so "the page has data" is never
+ * mistaken for "the workflow is complete" (per TOTAL-CONTROL). See
+ * docs/enterprise-console/WRITE_SURFACE_CENSUS.md.
  *
- * status:
- *   'ready'     — server authority complete; buildable now.
- *   'ready-dev' — routes exist but the backing capability is DEV/CONTRACT;
- *                 render with a maturity badge, never as production-live.
- *   'partial'   — only a read-only / partial slice has server authority.
- *   'blocked'   — SERVER_API_GAP: no server route/authority. The console must
- *                 NOT fabricate it; it shows the gap and defers to TOTAL-CONTROL.
+ * status (read):
+ *   'ready' | 'ready-dev' | 'partial' | 'blocked' (SERVER_API_GAP — never faked).
+ * controlStatus (write): 'ready' | 'partial' | 'missing'.
  */
 
+export type ControlStatus = 'missing' | 'partial' | 'ready'
 export type PageStatus = 'blocked' | 'partial' | 'ready' | 'ready-dev'
 
 export interface ConsolePage {
-  /** Capability key in whoami.product_capabilities (Capability Truth badge). */
   capability?: string
+  /** Write/workflow surface the server exposes (real HTTP routes only). */
+  controlStatus: ControlStatus
   /** For blocked/partial: what the server is missing, for the operator. */
   gap?: string
   id: string
-  /** i18n key for the nav label. */
   labelKey: string
-  /** Coarse UI-display permission hint; the server still enforces its own. */
   permission?: string
   status: PageStatus
 }
 
 export const CONSOLE_PAGES: ConsolePage[] = [
-  { capability: 'metrics', id: 'dashboard', labelKey: 'page.dashboard', permission: 'metrics.view', status: 'ready' },
   {
+    capability: 'metrics',
+    controlStatus: 'ready',
+    id: 'dashboard',
+    labelKey: 'page.dashboard',
+    permission: 'metrics.view',
+    status: 'ready'
+  },
+  {
+    controlStatus: 'missing',
     gap: 'server has only a static connector schema — no integration status, callback health, or secret-state authority',
     id: 'wecom',
     labelKey: 'page.wecom',
     status: 'blocked'
   },
   {
+    controlStatus: 'partial',
     gap: 'ChannelBinding has no HTTP route (identity/principals is ready)',
     id: 'identity',
     labelKey: 'page.identity',
@@ -44,14 +51,23 @@ export const CONSOLE_PAGES: ConsolePage[] = [
   },
   {
     capability: 'delivery',
+    controlStatus: 'missing',
     gap: 'inbound / held / recovery have no server route; outbound delivery-outbox is read-only',
     id: 'conversations',
     labelKey: 'page.conversations',
     permission: 'delivery.read',
     status: 'partial'
   },
-  { capability: 'biz_tasks', id: 'tasks', labelKey: 'page.tasks', permission: 'biztask.read', status: 'ready' },
   {
+    capability: 'biz_tasks',
+    controlStatus: 'ready',
+    id: 'tasks',
+    labelKey: 'page.tasks',
+    permission: 'biztask.read',
+    status: 'ready'
+  },
+  {
+    controlStatus: 'missing',
     gap: 'domain exists (enterprise/followup.py) but no HTTP route — awaiting a server companion',
     id: 'followup',
     labelKey: 'page.followup',
@@ -59,6 +75,7 @@ export const CONSOLE_PAGES: ConsolePage[] = [
   },
   {
     capability: 'reminders',
+    controlStatus: 'ready',
     id: 'reminders',
     labelKey: 'page.reminders',
     permission: 'reminder.read',
@@ -66,15 +83,31 @@ export const CONSOLE_PAGES: ConsolePage[] = [
   },
   {
     capability: 'knowledge_rag',
+    controlStatus: 'partial',
     id: 'knowledge',
     labelKey: 'page.knowledge',
     permission: 'kb.author',
     status: 'ready-dev'
   },
-  { capability: 'handoff', id: 'handoff', labelKey: 'page.handoff', permission: 'inbox.list', status: 'ready' },
-  { capability: 'metrics', id: 'alerts', labelKey: 'page.alerts', permission: 'metrics.view', status: 'ready' },
-  { id: 'provider', labelKey: 'page.provider', permission: 'provider.set', status: 'ready' },
   {
+    capability: 'handoff',
+    controlStatus: 'ready',
+    id: 'handoff',
+    labelKey: 'page.handoff',
+    permission: 'inbox.list',
+    status: 'ready'
+  },
+  {
+    capability: 'metrics',
+    controlStatus: 'ready',
+    id: 'alerts',
+    labelKey: 'page.alerts',
+    permission: 'metrics.view',
+    status: 'ready'
+  },
+  { controlStatus: 'ready', id: 'provider', labelKey: 'page.provider', permission: 'provider.set', status: 'ready' },
+  {
+    controlStatus: 'partial',
     gap: 'budget config is ready; real-time token usage/spend has no server endpoint',
     id: 'usage',
     labelKey: 'page.usage',
@@ -82,6 +115,7 @@ export const CONSOLE_PAGES: ConsolePage[] = [
     status: 'partial'
   },
   {
+    controlStatus: 'missing',
     gap: 'audit is append-only write — no read/replay route',
     id: 'audit',
     labelKey: 'page.audit',

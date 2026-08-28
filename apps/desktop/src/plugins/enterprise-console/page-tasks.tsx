@@ -1,11 +1,15 @@
 /**
- * Task page — real `/api/biz-tasks` data (read-only this slice). Fields mirror
- * the server's `biz_tasks_json` / `_row_to_dict`; state tones are honest.
+ * Task page — real `/api/biz-tasks` data + minimal control actions (retry /
+ * close / escalate) that post to the server and refetch the authoritative
+ * result. The server owns the state machine; the client never fabricates a
+ * transition or a success.
  */
 
 import { StatusDot, type StatusTone } from '@hermes/plugin-sdk'
 
+import { ConfirmAction } from './actions'
 import { ConsoleRows, fmtEpoch, QueryBody, useConsoleQuery } from './page-kit'
+import { useTransport } from './transport'
 
 interface BizTask {
   attempts: number
@@ -24,6 +28,8 @@ interface BizTasksResp {
   tasks: BizTask[]
 }
 
+const TASKS_KEY = ['enterprise-console', 'biz-tasks'] as const
+
 const TASK_TONE: Record<string, StatusTone> = {
   closed: 'muted',
   created: 'muted',
@@ -35,7 +41,8 @@ const TASK_TONE: Record<string, StatusTone> = {
 }
 
 export function TasksPage() {
-  const query = useConsoleQuery<BizTasksResp>(['enterprise-console', 'biz-tasks'], '/api/biz-tasks')
+  const transport = useTransport()
+  const query = useConsoleQuery<BizTasksResp>(TASKS_KEY, '/api/biz-tasks')
 
   return (
     <div data-page-status="ready" data-testid="console-page-tasks">
@@ -59,6 +66,36 @@ export function TasksPage() {
                     <StatusDot tone={TASK_TONE[task.state] ?? 'muted'} />
                     {task.state}
                   </span>
+                  {task.state !== 'closed' ? (
+                    <>
+                      <ConfirmAction
+                        invalidateKey={TASKS_KEY}
+                        run={() => transport.post('/api/biz-task-retry', { task_id: task.task_id })}
+                        testId={`console-task-retry-${task.task_id}`}
+                        title="Retry this task?"
+                      >
+                        retry
+                      </ConfirmAction>
+                      <ConfirmAction
+                        invalidateKey={TASKS_KEY}
+                        run={() => transport.post('/api/biz-task-escalate', { task_id: task.task_id })}
+                        testId={`console-task-escalate-${task.task_id}`}
+                        title="Escalate this task?"
+                      >
+                        escalate
+                      </ConfirmAction>
+                      <ConfirmAction
+                        description="This closes the task on the server."
+                        destructive
+                        invalidateKey={TASKS_KEY}
+                        run={() => transport.post('/api/biz-task-close', { task_id: task.task_id })}
+                        testId={`console-task-close-${task.task_id}`}
+                        title="Close this task?"
+                      >
+                        close
+                      </ConfirmAction>
+                    </>
+                  ) : null}
                 </div>
               </li>
             ))}

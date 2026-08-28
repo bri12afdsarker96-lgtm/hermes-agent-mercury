@@ -3,9 +3,13 @@
  * key; we show `configured` status only (never a secret value).
  */
 
-import { StatusDot } from '@hermes/plugin-sdk'
+import { StatusDot, useValue } from '@hermes/plugin-sdk'
 
+import { ConfirmAction } from './actions'
+import { isSuperAdmin } from './capabilities'
 import { ConsoleRows, QueryBody, useConsoleQuery } from './page-kit'
+import { $whoami } from './session'
+import { useTransport } from './transport'
 
 interface ProviderRow {
   api_key_env: null | string
@@ -21,8 +25,12 @@ interface ProvidersResp {
   providers: ProviderRow[]
 }
 
+const PROVIDERS_KEY = ['enterprise-console', 'providers'] as const
+
 export function ProviderPage() {
-  const query = useConsoleQuery<ProvidersResp>(['enterprise-console', 'providers'], '/api/providers')
+  const transport = useTransport()
+  const canManage = isSuperAdmin(useValue($whoami))
+  const query = useConsoleQuery<ProvidersResp>(PROVIDERS_KEY, '/api/providers')
 
   return (
     <div data-page-status="ready" data-testid="console-page-provider">
@@ -44,10 +52,22 @@ export function ProviderPage() {
                     {provider.kind} · {provider.default_model}
                   </div>
                 </div>
-                <span className="inline-flex shrink-0 items-center gap-1 text-xs">
-                  <StatusDot tone={provider.configured ? 'good' : 'muted'} />
-                  {provider.configured ? 'configured' : 'not configured'}
-                </span>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="inline-flex items-center gap-1 text-xs">
+                    <StatusDot tone={provider.configured ? 'good' : 'muted'} />
+                    {provider.configured ? 'configured' : 'not configured'}
+                  </span>
+                  {canManage && provider.key !== data.active ? (
+                    <ConfirmAction
+                      invalidateKey={PROVIDERS_KEY}
+                      run={() => transport.post('/api/select-provider', { key: provider.key })}
+                      testId={`console-provider-select-${provider.key}`}
+                      title={`Switch active provider to ${provider.label}?`}
+                    >
+                      set active
+                    </ConfirmAction>
+                  ) : null}
+                </div>
               </li>
             ))}
           </ConsoleRows>

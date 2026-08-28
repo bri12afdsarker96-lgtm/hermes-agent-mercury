@@ -3,6 +3,42 @@
 > C8 process log for gate `P3-M4A-DESKTOP-ASSISTANT-CONSOLE-01`. Mercury-owned docs
 > only; no Hermes_AI docs are touched by this lane.
 
+## Entry 5 — B13 control actions + write-surface census + activation contract
+
+**Changed files**
+- `WRITE_SURFACE_CENSUS.md` (STEP 1: real POST routes at live default `3bc2870`, READ vs
+  CONTROL status per page + PHASE1-SERVER-CONSOLE-API-GAPS ledger).
+- `actions.tsx` (`actionError` + `ConfirmAction` — reuse ConfirmDialog + React Query
+  invalidation; no new modal/form/toast/mutation framework).
+- Control actions wired: Task retry/close/escalate (`page-tasks`), Reminder cancel
+  (`page-reminders`), Handoff claim/requeue (`page-handoff`), Provider select-provider
+  (`page-provider`, super_admin-gated in UI). All POST to the server and invalidate the
+  query — no local optimistic success, no local state machine, tenant/permission decided
+  by the server.
+- `catalog.ts`: added `controlStatus` (READ vs CONTROL split) so "page has data" is never
+  read as "workflow complete".
+- `ACTIVATION_CONTRACT.md`; `actions.test.tsx` (success→invalidate, cancel→no-run,
+  403→error+no-refetch, actionError mapping); `pages.test.tsx` (+action buttons present).
+
+**Why / correctness**
+- STEP 1 census done against the exact live default TC named (`3bc2870`), using only real
+  webserver routes (not domain Python). Real write routes confirmed for Task/Reminder/
+  Handoff/Knowledge/Provider/Identity/Budget; WeCom/Follow-up/Audit/ChannelBinding/realtime-
+  usage remain write-MISSING → ledger, honest unavailable states.
+- STEP 2: implemented the confirm-style writes that are unambiguously READY. Form-style
+  writes (Task/Reminder create, Handoff reply, Knowledge gap author/reject, Provider
+  set-key) are the next slice; Knowledge publish(commit)/withdraw(delete) need the upload
+  surface. Control status split records this honestly (Knowledge/Identity/Usage = control
+  PARTIAL; Conversations/WeCom/Follow-up/Audit = MISSING).
+- **ENTERPRISE_CONSOLE_ACTIVATION_CONTRACT**: L2 in-page gating (connect + permission/
+  capability) is done and correct; L1 auto-appear is an **ACTIVATION_SEAM_GAP** (Mercury
+  enablement is localStorage vs static defaultEnabled, no capability-driven path, plus a
+  chicken-and-egg — whoami only exists after in-page connect). Returned to TC, not built
+  (no second plugin manager).
+
+**How verified**: `tsc -p .` 0, `eslint` clean, `vitest --project ui` **10 files / 48**
+pass (Radix ConfirmDialog flows included). `READY = NO`, `MERGE = NO`.
+
 ## Entry 4 — B6-B12 pages (real server data, read-only)
 
 **Changed files**

@@ -6,7 +6,9 @@
 
 import { StatusDot, type StatusTone } from '@hermes/plugin-sdk'
 
+import { ConfirmAction } from './actions'
 import { ConsoleRows, QueryBody, useConsoleQuery } from './page-kit'
+import { useTransport } from './transport'
 
 interface HandoffRow {
   agent_id: null | string
@@ -38,8 +40,11 @@ function ageTone(ageSeconds: null | number): StatusTone {
   return ageSeconds >= 30 ? 'warn' : 'good'
 }
 
+const HANDOFFS_KEY = ['enterprise-console', 'handoffs'] as const
+
 export function HandoffPage() {
-  const query = useConsoleQuery<HandoffsResp>(['enterprise-console', 'handoffs'], '/api/handoffs', 15_000)
+  const transport = useTransport()
+  const query = useConsoleQuery<HandoffsResp>(HANDOFFS_KEY, '/api/handoffs', 15_000)
 
   return (
     <div data-page-status="ready" data-testid="console-page-handoff">
@@ -69,6 +74,26 @@ export function HandoffPage() {
                     <StatusDot tone={STATE_TONE[handoff.state] ?? 'muted'} />
                     {handoff.state}
                   </span>
+                  {handoff.agent_id == null ? (
+                    <ConfirmAction
+                      invalidateKey={HANDOFFS_KEY}
+                      run={() => transport.post('/api/handoff-claim', { msg_id: handoff.msg_id })}
+                      testId={`console-handoff-claim-${handoff.msg_id}`}
+                      title="Claim this handoff?"
+                    >
+                      claim
+                    </ConfirmAction>
+                  ) : null}
+                  {handoff.state === 'parked' ? (
+                    <ConfirmAction
+                      invalidateKey={HANDOFFS_KEY}
+                      run={() => transport.post('/api/handoff-requeue', { msg_id: handoff.msg_id })}
+                      testId={`console-handoff-requeue-${handoff.msg_id}`}
+                      title="Requeue this handoff?"
+                    >
+                      requeue
+                    </ConfirmAction>
+                  ) : null}
                 </div>
               </li>
             ))}

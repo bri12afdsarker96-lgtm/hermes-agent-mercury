@@ -67,6 +67,9 @@ describe('TasksPage', () => {
     await waitFor(() => expect(screen.getByTestId('console-tasks')).toBeTruthy())
     expect(screen.getByText('Task One')).toBeTruthy()
     expect(screen.getByText('running')).toBeTruthy()
+    // Control actions present for a non-closed task.
+    expect(screen.getByTestId('console-task-retry-t1')).toBeTruthy()
+    expect(screen.getByTestId('console-task-close-t1')).toBeTruthy()
   })
 })
 

@@ -5,7 +5,9 @@
 
 import { StatusDot, type StatusTone } from '@hermes/plugin-sdk'
 
+import { ConfirmAction } from './actions'
 import { ConsoleRows, fmtEpoch, QueryBody, useConsoleQuery } from './page-kit'
+import { useTransport } from './transport'
 
 interface ReminderRow {
   generation: number
@@ -29,8 +31,11 @@ const REMINDER_TONE: Record<string, StatusTone> = {
   exhausted: 'warn'
 }
 
+const REMINDERS_KEY = ['enterprise-console', 'reminders'] as const
+
 export function RemindersPage() {
-  const query = useConsoleQuery<RemindersResp>(['enterprise-console', 'reminders'], '/api/reminders')
+  const transport = useTransport()
+  const query = useConsoleQuery<RemindersResp>(REMINDERS_KEY, '/api/reminders')
 
   return (
     <div data-page-status="ready" data-testid="console-page-reminders">
@@ -53,10 +58,23 @@ export function RemindersPage() {
                     {reminder.timezone}
                   </div>
                 </div>
-                <span className="inline-flex shrink-0 items-center gap-1 text-xs">
-                  <StatusDot tone={REMINDER_TONE[reminder.state] ?? 'muted'} />
-                  {reminder.state}
-                </span>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="inline-flex items-center gap-1 text-xs">
+                    <StatusDot tone={REMINDER_TONE[reminder.state] ?? 'muted'} />
+                    {reminder.state}
+                  </span>
+                  {reminder.state === 'active' ? (
+                    <ConfirmAction
+                      destructive
+                      invalidateKey={REMINDERS_KEY}
+                      run={() => transport.post('/api/reminder-cancel', { reminder_id: reminder.reminder_id })}
+                      testId={`console-reminder-cancel-${reminder.reminder_id}`}
+                      title="Cancel this reminder?"
+                    >
+                      cancel
+                    </ConfirmAction>
+                  ) : null}
+                </div>
               </li>
             ))}
           </ConsoleRows>
