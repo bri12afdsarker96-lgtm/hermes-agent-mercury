@@ -184,6 +184,9 @@ declare global {
        * dev/browser/tests fall back to the direct-fetch adapter.
        */
       enterprise?: {
+        autoConnect: () => Promise<
+          { baseUrl: string; ok: true; sessionId: string } | { code: string; message: string; ok: false }
+        >
         connect: (
           baseUrl: string,
           token: string

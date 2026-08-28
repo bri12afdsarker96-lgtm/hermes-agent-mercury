@@ -173,6 +173,10 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   // returns an opaque sessionId) and never comes back; requests carry only the
   // sessionId + { path, method, body }, fenced per renderer in main.
   enterprise: {
+    // B16-OL · one-login: main resolves the trusted enterprise origin + native
+    // bearer itself; the renderer passes NO url/token and gets back only
+    // { ok, sessionId, baseUrl } (or { ok:false, code, message }).
+    autoConnect: () => ipcRenderer.invoke('hermes:enterprise:auto-connect'),
     connect: (baseUrl, token) => ipcRenderer.invoke('hermes:enterprise:connect', { baseUrl, token }),
     disconnect: sessionId => ipcRenderer.invoke('hermes:enterprise:disconnect', { sessionId }),
     request: req => ipcRenderer.invoke('hermes:enterprise:request', req),

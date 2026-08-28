@@ -24,7 +24,7 @@ import {
 import { ConsoleShell } from './console'
 import { ENTERPRISE_CONSOLE_LOCALES } from './i18n'
 import { hasIpcBridge, IpcHermesTransport } from './ipc-transport'
-import { bindSession, setTransportFactory } from './session'
+import { bindSession, setAutoTransportFactory, setTransportFactory } from './session'
 
 const plugin: HermesPlugin = {
   id: 'enterprise-console',
@@ -40,6 +40,10 @@ const plugin: HermesPlugin = {
     // unaffected either way (they depend on the HermesTransport interface).
     if (hasIpcBridge()) {
       setTransportFactory((baseUrl, token) => new IpcHermesTransport(baseUrl, token))
+      // B16-OL · one-login: the token-free transport whose session main
+      // establishes from the native bearer. Installing the factory is not a
+      // probe — the console mount / shell bootstrap drives autoConnect.
+      setAutoTransportFactory(() => IpcHermesTransport.autoConnecting())
     }
 
     // Persist only the (non-secret) server URL; the disposer wipes the

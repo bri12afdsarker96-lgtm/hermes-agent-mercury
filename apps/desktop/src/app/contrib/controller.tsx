@@ -34,6 +34,7 @@ import {
 } from '@/components/pane-shell/tree/store'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { $enterpriseAvailable, registerEligibility } from '@/contrib/enterprise-eligibility'
+import { bootstrapEnterpriseOneLogin } from '@/plugins/enterprise-console/one-login'
 import { discoverBundledPlugins } from '@/contrib/plugins'
 import { Slot } from '@/contrib/react/slot'
 import { useContributions } from '@/contrib/react/use-contributions'
@@ -423,6 +424,12 @@ declareDefaultTree(DEFAULT_TREE)
 // `$enterpriseAvailable` it stays false → the console stays hidden, exactly as
 // its `defaultEnabled: false` floor does today.
 registerEligibility('enterprise-console', $enterpriseAvailable)
+
+// B16-OL · one-login: probe the native session and project AUTHENTICATED onto
+// `$enterpriseAvailable` from the SHELL (not from plugin.register, which would be
+// the chicken-and-egg — the plugin is gated on this very signal). No URL/token is
+// pasted; the bearer stays in main. Safe no-op without the desktop bridge.
+bootstrapEnterpriseOneLogin()
 
 // Bundled plugins load AFTER core, so a same-id contribution from a plugin
 // deliberately overrides the core default (last writer wins). Third-party

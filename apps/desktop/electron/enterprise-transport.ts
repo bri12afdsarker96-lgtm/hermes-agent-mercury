@@ -73,6 +73,45 @@ export function normalizeEnterpriseBaseUrl(raw: unknown): string {
   return base
 }
 
+/**
+ * B16-OL · The Enterprise API origin for one-login. The Agent-plane gateway and
+ * the Hermes_AI Enterprise `/api/*` plane are DISTINCT origins (proven by the
+ * OL-topology council: enterprise is loopback/tunnel-bound, not co-located with
+ * or reverse-proxied behind the public gateway), so main must NOT assume the
+ * gateway baseUrl is the enterprise origin. This resolves a TRUSTED, main-owned,
+ * non-secret origin from managed config (never a renderer value), applying the
+ * same enterprise base-URL policy (https for non-loopback, no credentials).
+ * Returns null (→ one-login unavailable, ConnectForm stays break-glass) when the
+ * config is absent or invalid — never throws, never guesses.
+ */
+export function normalizeEnterpriseApiOriginOrNull(raw: unknown): string | null {
+  const value = String(raw ?? '').trim()
+
+  if (value === '') {
+    return null
+  }
+
+  try {
+    return normalizeEnterpriseBaseUrl(value)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * B16-OL · The non-secret object main returns to the renderer after a one-login
+ * auto-connect. It carries ONLY the opaque sessionId and the (non-secret)
+ * enterprise baseUrl — the bearer stays in main and is stripped here by
+ * construction (a whitelist, so a future field can never smuggle the credential).
+ */
+export function buildAutoConnectResult(session: EnterpriseSession): {
+  ok: true
+  sessionId: string
+  baseUrl: string
+} {
+  return { ok: true, sessionId: session.sessionId, baseUrl: session.baseUrl }
+}
+
 /** Structural path guard: only the server's `/api/*` surface, no traversal in
  *  any form (dotdot, backslash, scheme-relative, or percent-encoded), no
  *  control characters. */
@@ -202,6 +241,30 @@ export class EnterpriseSessionStore {
     this.#bySender.set(senderId, { baseUrl: normalized, sessionId, token: bearer })
 
     return sessionId
+  }
+
+  /**
+   * B16-OL · Idempotent per-sender one-login connect. If a live session already
+   * exists for this sender, return its EXISTING opaque sessionId without minting
+   * a second session or rotating the bearer — so the shell probe and the plugin
+   * mount can both call it and converge on one session. Otherwise mint like
+   * ``connect``. Keys on senderId alone (one enterprise login per renderer).
+   */
+  autoConnect(senderId: number, baseUrl: unknown, token: unknown): string {
+    const existing = this.#bySender.get(senderId)
+
+    if (existing) {
+      return existing.sessionId
+    }
+
+    return this.connect(senderId, baseUrl, token)
+  }
+
+  /** B16-OL · The current opaque sessionId for a sender, or null (none / destroyed).
+   *  Lets an idempotent auto-connect reuse a live session instead of orphaning a
+   *  second one; carries no secret. */
+  currentSessionId(senderId: number): string | null {
+    return this.#bySender.get(senderId)?.sessionId ?? null
   }
 
   /** Resolve the session iff BOTH sender and sessionId match (else null). */

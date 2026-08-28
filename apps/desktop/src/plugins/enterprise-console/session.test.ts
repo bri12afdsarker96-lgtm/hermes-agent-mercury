@@ -2,7 +2,18 @@ import type { PluginStorage } from '@hermes/plugin-sdk'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { FetchHermesTransport } from './fetch-transport'
-import { $baseUrl, $connectError, $whoami, bindSession, connect, disconnect, setTransportFactory } from './session'
+import {
+  $baseUrl,
+  $connectError,
+  $sessionState,
+  $whoami,
+  autoConnect,
+  bindSession,
+  connect,
+  disconnect,
+  setAutoTransportFactory,
+  setTransportFactory
+} from './session'
 import { $transport, UnavailableHermesTransport } from './transport'
 import type { Whoami } from './types'
 
@@ -45,6 +56,7 @@ beforeEach(() => {
   $whoami.set(null)
   $connectError.set(null)
   $transport.set(null)
+  $sessionState.set('UNKNOWN')
   // The production default fails closed; tests inject a transport explicitly.
   setTransportFactory((baseUrl, token) => new FetchHermesTransport(baseUrl, token))
 })
@@ -122,5 +134,53 @@ describe('fail-closed default transport', () => {
     await expect(connect('http://h:1', 'secret-bearer')).rejects.toBeTruthy()
     expect($transport.get()).toBeNull()
     expect($whoami.get()).toBeNull()
+  })
+})
+
+describe('autoConnect — B16-OL one-login FSM', () => {
+  beforeEach(() => {
+    // token-free auto transport (main holds the bearer in production).
+    setAutoTransportFactory(() => new FetchHermesTransport('http://h:1', ''))
+  })
+
+  it('AUTHENTICATED on a real whoami; sets $whoami; returns true', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(200, WHO)))
+    const ok = await autoConnect()
+    expect(ok).toBe(true)
+    expect($sessionState.get()).toBe('AUTHENTICATED')
+    expect($whoami.get()).toEqual(WHO)
+    expect($transport.get()).not.toBeNull()
+  })
+
+  it('UNAVAILABLE (NOT REVOKED) on a 5xx outage; returns false; never throws', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(503, { error: 'down' })))
+    await expect(autoConnect()).resolves.toBe(false)
+    expect($sessionState.get()).toBe('UNAVAILABLE')
+    expect($sessionState.get()).not.toBe('REVOKED')
+    expect($whoami.get()).toBeNull()
+    expect($transport.get()).toBeNull()
+  })
+
+  it('UNAVAILABLE on a network error; never throws', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed') }))
+    await expect(autoConnect()).resolves.toBe(false)
+    expect($sessionState.get()).toBe('UNAVAILABLE')
+  })
+
+  it('REVOKED on 401/403 from the federated authority', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(403, { error: 'revoked' })))
+    const ok = await autoConnect()
+    expect(ok).toBe(false)
+    expect($sessionState.get()).toBe('REVOKED')
+    expect($whoami.get()).toBeNull()
+  })
+
+  it('a failed probe never transitions through AUTHENTICATED', async () => {
+    const seen: string[] = []
+    const unsub = $sessionState.subscribe(s => seen.push(s))
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(503, {})))
+    await autoConnect()
+    unsub()
+    expect(seen).not.toContain('AUTHENTICATED')
   })
 })

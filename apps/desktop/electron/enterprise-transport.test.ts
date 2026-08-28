@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildAutoConnectResult,
   classifyConnectError,
   ENTERPRISE_MAX_UPLOAD_BYTES,
   EnterpriseSessionStore,
   isAllowedEnterpriseMethod,
   isValidEnterprisePath,
+  normalizeEnterpriseApiOriginOrNull,
   normalizeEnterpriseBaseUrl,
   resolveEnterpriseUrl,
   sanitizeMultipartContentType,
@@ -249,5 +251,76 @@ describe('classifyConnectError (M3 — connect error normalization)', () => {
     expect(serialized).not.toContain('the-bearer-token')
     expect(serialized).not.toContain('h.example.com')
     expect(serialized).not.toMatch(/at .*\(/) // no stack frame
+  })
+})
+
+describe('B16-OL · one-login pure core (autoConnect / containment / origin)', () => {
+  const BASE = 'https://enterprise.example.com'
+  const SECRET = 'native-bearer-SECRET'
+
+  // OL-Q2 · idempotency + fencing
+  it('autoConnect is idempotent per sender: same id, one session, one bearer', () => {
+    const store = new EnterpriseSessionStore()
+    const sid1 = store.autoConnect(1, BASE, 'tok-a')
+    const sid2 = store.autoConnect(1, BASE, 'tok-a')
+    expect(sid2).toBe(sid1)
+    expect(store.size()).toBe(1)
+    expect(store.resolve(1, sid1)?.token).toBe('tok-a')
+  })
+
+  it('autoConnect keeps senders isolated', () => {
+    const store = new EnterpriseSessionStore()
+    const sidA = store.autoConnect(1, BASE, 'tok-a')
+    const sidB = store.autoConnect(2, BASE, 'tok-b')
+    expect(store.resolve(2, sidA)).toBeNull()
+    expect(store.resolve(1, sidB)).toBeNull()
+    expect(store.disconnect(2, sidA)).toBe(false)
+    expect(store.resolve(1, sidA)?.token).toBe('tok-a')
+  })
+
+  it('currentSessionId reflects live/destroyed state', () => {
+    const store = new EnterpriseSessionStore()
+    expect(store.currentSessionId(1)).toBeNull()
+    const sid = store.autoConnect(1, BASE, 'tok-a')
+    expect(store.currentSessionId(1)).toBe(sid)
+    expect(store.currentSessionId(2)).toBeNull()
+    store.destroySender(1)
+    expect(store.currentSessionId(1)).toBeNull()
+    expect(store.resolve(1, sid)).toBeNull()
+  })
+
+  it('a superseding connect makes the old sessionId fail closed; autoConnect returns the new id', () => {
+    const store = new EnterpriseSessionStore()
+    const sidOld = store.autoConnect(1, BASE, 'tok-a')
+    const sidNew = store.connect(1, BASE, 'tok-b')
+    expect(sidNew).not.toBe(sidOld)
+    expect(store.resolve(1, sidOld)).toBeNull()
+    expect(store.disconnect(1, sidOld)).toBe(false)
+    expect(store.autoConnect(1, BASE, 'tok-b')).toBe(sidNew)
+  })
+
+  // OL-Q1 · bearer containment
+  it('buildAutoConnectResult carries only {ok,sessionId,baseUrl} — never the bearer', () => {
+    const store = new EnterpriseSessionStore()
+    const sid = store.autoConnect(1, BASE, SECRET)
+    const result = buildAutoConnectResult(store.resolve(1, sid)!)
+    expect(result).toEqual({ ok: true, sessionId: sid, baseUrl: BASE })
+    expect(Object.keys(result).sort()).toEqual(['baseUrl', 'ok', 'sessionId'])
+    expect(JSON.stringify(result)).not.toContain(SECRET)
+    expect(JSON.stringify(result)).not.toMatch(/token|bearer|accessToken/i)
+  })
+
+  // OL-Q6 · enterprise origin provenance (main-owned, trusted, distinct from gateway)
+  it('normalizeEnterpriseApiOriginOrNull enforces the enterprise base-URL policy, null on absent/invalid', () => {
+    expect(normalizeEnterpriseApiOriginOrNull('https://enterprise.example.com/')).toBe('https://enterprise.example.com')
+    expect(normalizeEnterpriseApiOriginOrNull('http://127.0.0.1:8080')).toBe('http://127.0.0.1:8080')
+    // absent / blank -> null (one-login unavailable, never guess)
+    expect(normalizeEnterpriseApiOriginOrNull('')).toBeNull()
+    expect(normalizeEnterpriseApiOriginOrNull(undefined)).toBeNull()
+    expect(normalizeEnterpriseApiOriginOrNull(null)).toBeNull()
+    // non-loopback http, credentials-in-URL, junk -> null (never a bearer-leaking origin)
+    expect(normalizeEnterpriseApiOriginOrNull('http://enterprise.example.com')).toBeNull()
+    expect(normalizeEnterpriseApiOriginOrNull('https://user:pass@enterprise.example.com')).toBeNull()
+    expect(normalizeEnterpriseApiOriginOrNull('not-a-url')).toBeNull()
   })
 })

@@ -32,7 +32,24 @@ export const $connecting = atom<boolean>(false)
 
 export const $connected = computed($whoami, who => who !== null)
 
+/**
+ * B16-OL · one-login session FSM. The shell projects `$enterpriseAvailable` from
+ * `AUTHENTICATED`, so the states must never lie:
+ *   UNKNOWN       — not yet probed, or no authenticated native session to use;
+ *   AUTHENTICATED — a real `/api/whoami` resolved;
+ *   UNAVAILABLE   — gateway/Hermes outage (retryable) — NOT a revocation;
+ *   REVOKED       — the federated authority rejected the session (401/403).
+ * A failed probe never transitions to AUTHENTICATED.
+ */
+export type EnterpriseSessionState = 'UNKNOWN' | 'AUTHENTICATED' | 'UNAVAILABLE' | 'REVOKED'
+export const $sessionState = atom<EnterpriseSessionState>('UNKNOWN')
+
 const BASE_URL_KEY = 'hermesBaseUrl'
+
+/** A federated-authority rejection (revocation) vs a transient outage. */
+function isRevocation(err: unknown): boolean {
+  return err instanceof HermesApiError && (err.code === 'unauthorized' || err.code === 'forbidden')
+}
 
 /**
  * How a session becomes a transport. Defaults to the DEV fetch adapter; the B-T
@@ -47,6 +64,15 @@ let transportFactory: TransportFactory = () => new UnavailableHermesTransport()
 
 export function setTransportFactory(factory: TransportFactory): void {
   transportFactory = factory
+}
+
+// B16-OL · one-login transport: no baseUrl/token — main holds both. Fail closed
+// until the desktop bridge installs the auto factory.
+type AutoTransportFactory = () => HermesTransport
+let autoTransportFactory: AutoTransportFactory = () => new UnavailableHermesTransport()
+
+export function setAutoTransportFactory(factory: AutoTransportFactory): void {
+  autoTransportFactory = factory
 }
 
 /**
@@ -64,6 +90,7 @@ export function bindSession(storage: PluginStorage): () => void {
     $transport.set(null)
     $whoami.set(null)
     $connectError.set(null)
+    $sessionState.set('UNKNOWN')
   }
 }
 
@@ -99,17 +126,51 @@ export async function connect(baseUrl: string, token: string): Promise<void> {
     const who = await transport.request<Whoami>('/api/whoami')
     $transport.set(transport)
     $whoami.set(who)
+    $sessionState.set('AUTHENTICATED')
   } catch (err) {
     $transport.set(null)
     $whoami.set(null)
     $connectError.set(redactError(err))
+    $sessionState.set(isRevocation(err) ? 'REVOKED' : 'UNAVAILABLE')
     throw err
   } finally {
     $connecting.set(false)
   }
 }
 
-/** Re-fetch whoami on the live session (e.g. after a capability_revision bump). */
+/**
+ * B16-OL · One-login. Establish the session using the native bearer main already
+ * holds — the renderer passes no URL and no token. Used as the boot/mount probe:
+ * it NEVER throws, so a transient outage (UNAVAILABLE) is not confused with a hard
+ * revocation (REVOKED) and the shell can decide availability from `$sessionState`.
+ * Returns true iff it reached AUTHENTICATED.
+ */
+export async function autoConnect(): Promise<boolean> {
+  $connecting.set(true)
+  $connectError.set(null)
+  const transport = autoTransportFactory()
+
+  try {
+    const who = await transport.request<Whoami>('/api/whoami')
+    $transport.set(transport)
+    $whoami.set(who)
+    $sessionState.set('AUTHENTICATED')
+    return true
+  } catch (err) {
+    transport.dispose?.()
+    $transport.set(null)
+    $whoami.set(null)
+    $connectError.set(redactError(err))
+    $sessionState.set(isRevocation(err) ? 'REVOKED' : 'UNAVAILABLE')
+    return false
+  } finally {
+    $connecting.set(false)
+  }
+}
+
+/** Re-fetch whoami on the live session (e.g. after a capability_revision bump).
+ *  A 401/403 here is a revocation: drop identity and mark REVOKED (the shell then
+ *  deactivates the console). A transient outage leaves the session intact. */
 export async function refreshWhoami(): Promise<void> {
   const transport = $transport.get()
 
@@ -117,7 +178,19 @@ export async function refreshWhoami(): Promise<void> {
     return
   }
 
-  $whoami.set(await transport.request<Whoami>('/api/whoami'))
+  try {
+    $whoami.set(await transport.request<Whoami>('/api/whoami'))
+    $sessionState.set('AUTHENTICATED')
+  } catch (err) {
+    if (isRevocation(err)) {
+      transport.dispose?.()
+      $transport.set(null)
+      $whoami.set(null)
+      $connectError.set(redactError(err))
+      $sessionState.set('REVOKED')
+    }
+    // else: transient outage — keep the live session; do not lie about state.
+  }
 }
 
 /** Drop the session — clears the transport (and its in-memory credential) + identity. */
@@ -126,4 +199,5 @@ export function disconnect(): void {
   $transport.set(null)
   $whoami.set(null)
   $connectError.set(null)
+  $sessionState.set('UNKNOWN')
 }

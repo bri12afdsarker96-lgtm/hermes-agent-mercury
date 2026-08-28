@@ -129,10 +129,12 @@ import {
 import { describeDevCdpDecision, resolveDevCdpPort } from './dev-cdp'
 import { installEmbedReferer } from './embed-referer'
 import {
+  buildAutoConnectResult,
   classifyConnectError,
   ENTERPRISE_MAX_UPLOAD_BYTES,
   EnterpriseSessionStore,
   isAllowedEnterpriseMethod,
+  normalizeEnterpriseApiOriginOrNull,
   resolveEnterpriseUrl,
   sanitizeMultipartContentType,
   uploadByteLength
@@ -13489,6 +13491,69 @@ ipcMain.handle('hermes:enterprise:connect', (event, payload) => {
   }
 
   return { ok: true, sessionId }
+})
+
+// B16-OL · One-login. Establish the enterprise session ENTIRELY in main from the
+// existing native OAuth bearer — no URL/token pasted in the renderer, no bearer
+// crossing to the renderer. Topology is fixed (OL-council): the Agent gateway and
+// the Hermes_AI Enterprise `/api/*` plane are DISTINCT origins, so:
+//   * the enterprise origin comes from TRUSTED main-owned config
+//     (HERMES_DESKTOP_ENTERPRISE_ORIGIN), never the renderer, never assumed equal
+//     to the gateway;
+//   * the native bearer is minted against the GATEWAY origin and deliberately
+//     federated to the enterprise origin, where the Hermes_AI server verifies it
+//     (upstream-native-bearer federated whoami, PR #130). Sending it anywhere but
+//     the configured trusted origin is forbidden.
+// Idempotent per sender; returns only {ok, sessionId, baseUrl} (bearer stripped).
+ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
+  const senderId = event.sender.id
+
+  const enterpriseOrigin = normalizeEnterpriseApiOriginOrNull(
+    process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN
+  )
+  if (!enterpriseOrigin) {
+    // No trusted enterprise origin configured -> one-login unavailable (UNKNOWN);
+    // the ConnectForm break-glass path remains. Never guess an origin.
+    return { code: 'no_enterprise_origin', message: 'enterprise API origin is not configured', ok: false }
+  }
+
+  let bearer: string | null = null
+  try {
+    const remote = await resolveRemoteBackend(primaryProfileKey())
+    const gatewayBaseUrl = remote?.baseUrl
+    if (gatewayBaseUrl) {
+      // Bearer is minted for (and refreshed against) the GATEWAY origin.
+      bearer = await ensureNativeAccessToken(gatewayBaseUrl).catch(() => null)
+    }
+  } catch {
+    bearer = null
+  }
+  if (!bearer) {
+    // No authenticated native session -> cannot authenticate (UNKNOWN/unavailable),
+    // never a fake AUTHENTICATED.
+    return { code: 'no_native_session', message: 'no authenticated native session', ok: false }
+  }
+
+  let sessionId: string
+  try {
+    sessionId = enterpriseSessions.autoConnect(senderId, enterpriseOrigin, bearer)
+  } catch (err) {
+    return { ok: false, ...classifyConnectError(err) }
+  }
+
+  if (!enterpriseWiredSenders.has(senderId)) {
+    enterpriseWiredSenders.add(senderId)
+    event.sender.once('destroyed', () => {
+      enterpriseSessions.destroySender(senderId)
+      enterpriseWiredSenders.delete(senderId)
+    })
+  }
+
+  const session = enterpriseSessions.resolve(senderId, sessionId)
+  if (!session) {
+    return { code: 'network', message: 'session unavailable', ok: false }
+  }
+  return buildAutoConnectResult(session)
 })
 
 ipcMain.handle('hermes:enterprise:disconnect', (event, payload) => {
