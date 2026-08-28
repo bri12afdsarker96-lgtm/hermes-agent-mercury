@@ -1,6 +1,7 @@
 /**
- * Provider page — real `/api/providers` (read-only). The server never returns a
- * key; we show `configured` status only (never a secret value).
+ * Provider page — real `/api/providers`. The server never returns a key; we show
+ * `configured` status only (never a secret value). Provider mutation authority
+ * remains server-owned. Secret form state is erased whenever its dialog closes.
  */
 
 import { Input, StatusDot, useValue } from '@hermes/plugin-sdk'
@@ -34,10 +35,21 @@ function SetKeyAction({ label, providerKey }: { label: string; providerKey: stri
   const [baseUrl, setBaseUrl] = useState('')
   const [model, setModel] = useState('')
 
+  const clearSensitiveState = () => {
+    setApiKey('')
+    setBaseUrl('')
+    setModel('')
+  }
+
   return (
     <FormAction
       canSubmit={apiKey.length > 0}
       invalidateKey={PROVIDERS_KEY}
+      onOpenChange={open => {
+        if (!open) {
+          clearSensitiveState()
+        }
+      }}
       permission="provider.set_key"
       submit={() =>
         transport.post('/api/set-provider-key', {
@@ -52,8 +64,9 @@ function SetKeyAction({ label, providerKey }: { label: string; providerKey: stri
       title={`Set key for ${label}`}
       trigger="set key"
     >
-      {/* Password field: the secret is never displayed and never logged. */}
+      {/* Password field: the secret is never displayed, persisted, or logged. */}
       <Input
+        autoComplete="off"
         data-testid={`console-provider-apikey-${providerKey}`}
         onChange={event => setApiKey(event.target.value)}
         placeholder="api key"
