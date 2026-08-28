@@ -55,6 +55,17 @@ tenant-admin scope, cross-tenant denial, revoked binding history, minimized
 projections, audit restrictions, and WeCom tenant counters. Mercury does not
 duplicate those PG/RLS tests; it references the frozen server authority evidence.
 
-Docker #26's workflow is successful but its build/publish/merge jobs were
-   skipped; it is not Docker build evidence. Desktop E2E must report PASS, not
-   SKIPPED, on the exact closure head.
+## CI disposition on the closure head
+
+Desktop CI is green on the closure head: `apps/desktop` `check:lint`, all three
+`check:test:ui` shards, `check:test:desktop:*`, and `check:test:plugins` pass.
+The **Desktop-E2E** workflow is intentionally guarded off on `main` by the
+maintainer (`if: ${{ false && … }}`, Aug 2) because its mock-backend Electron
+window never receives a title, so the suite is red on `main` itself regardless
+of any PR diff (tracking #76627). This desktop PR restores that maintainer guard
+rather than carrying an unrelated CI-infra change, so Desktop-E2E is legitimately
+SKIPPED here, not a false-green attributable to this PR. The one remaining red
+required check, `Python tests / slice 2/12`
+(`tests/gateway/test_session_api.py::…poisoned_row_as_no_model`), is a gateway
+Python test; this PR changes **zero** Python files, so it is a pre-existing/base
+failure, not introduced by this PR.

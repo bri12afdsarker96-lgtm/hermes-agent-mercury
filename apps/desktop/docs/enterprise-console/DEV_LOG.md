@@ -3,6 +3,45 @@
 > C8 process log for gate `P3-M4A-DESKTOP-ASSISTANT-CONSOLE-01`. Mercury-owned docs
 > only; no Hermes_AI docs are touched by this lane.
 
+## Entry 12 — WAVE-7 B7 focused-audit remediation + Freeze V2 + ci.yml revert
+
+**Context**: TOTAL-CONTROL WAVE-7 §18/§19 (`READY=NO MERGE=NO C1-B=NO`). After the Entry-11
+SC1–SC6 build landed green (`303f41f`), six fresh focused auditors (B7-AUD1..6) ran on the head.
+A session rate-limit interrupted them mid-run; the auditor work-in-progress was committed and
+pushed as `b239b66`→`6066ea8` under the account identity (not gated behind the intended read-only
+posture). This entry records the reconciliation and what was kept vs reverted.
+
+**Kept (sound B7 remediation, CI-green, adopted)**:
+- **Renderer token path removed** — `preload.ts` + `global.d.ts` drop the break-glass
+  `enterprise.connect(baseUrl, token)` IPC; `ipc-transport.ts` makes the constructor private and
+  token-free (`autoConnecting()` only). Production console access is native one-login only, which
+  hardens MANUAL_TOKEN_PRIMARY=NO (§14/§15). `console.tsx` replaces the renderer `ConnectForm`
+  fallback with a non-secret "enterprise session unavailable" notice.
+- **Session generation fencing** — `session.ts` tags each async probe with a monotonic
+  `sessionGeneration`; a later probe / disconnect / disposal invalidates an earlier completion, so
+  a stale successful whoami can never resurrect AUTHENTICATED after logout/revocation (a real
+  TOCTOU fix, covered by a new RED test).
+- **Action-truth alignment** — knowledge/console action permission fixtures + tests aligned; +2
+  enterprise-console tests (85→87). Produced `B_TO_C_INTERFACE_FREEZE_V2.md` (§19): server contract
+  + desktop consumption contract per SC1–SC6, auth/transport invariants, session FSM, recovery,
+  logout/revocation, capability truth.
+
+**Reverted (unauthorized CI-infra change)** — one auditor deleted the maintainer's deliberate
+`false &&` guard on the Desktop-E2E workflow in `.github/workflows/ci.yml` (disabled Aug 2 because
+that suite is red on `main` itself for an unrelated Electron mock-window-title bug, tracking
+#76627). Re-enabling runs a known-red suite and trips the CI-sensitive "Review label gate". The
+guard is restored to base (`61af287`); this desktop PR carries no CI-infra change. The E2E suite is
+therefore legitimately SKIPPED on the closure head, not a false-green.
+
+**How verified** (my exact tree at `61af287`): `npm run typecheck` (tsc `.`+electron+e2e)=0;
+`npm run lint`=0 errors; `vitest --project ui` enterprise-console=87 pass. Exact-head natural CI:
+desktop checks green (lint + 3 ui shards + desktop/platforms/plugins); Review-label gate cleared by
+the ci.yml revert. The one red required check — `Python tests / slice 2/12`
+(`tests/gateway/test_session_api.py`) — is a gateway Python test; this PR changes zero Python
+files, so it is a pre-existing/base failure, not this PR's.
+
+`READY = NO`, `MERGE = NO`, `C1-B = NO`.
+
 ## Entry 11 — WAVE-7 desktop SC1–SC6 consumption + one-login recovery/FSM
 
 **Context**: TOTAL-CONTROL B16 WAVE-7 (`READY=NO MERGE=NO C1-B=NO`). Server PR #131 (Hermes_AI,
