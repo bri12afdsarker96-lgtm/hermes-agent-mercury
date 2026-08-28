@@ -1,6 +1,9 @@
 /**
- * Reminder page — real `/api/reminders` data (read-only). Fields are the
- * server's explicit list projection (not the full dataclass).
+ * Reminder page — real `/api/reminders` data plus create/cancel controls that
+ * post to server authority and refetch the authoritative result. The server
+ * expects `scheduled_for` as UTC epoch seconds plus an IANA timezone. A native
+ * `datetime-local` is interpreted in the browser's local zone, so we send that
+ * same resolved IANA zone instead of allowing contradictory free-text metadata.
  */
 
 import { Input, StatusDot, type StatusTone } from '@hermes/plugin-sdk'
@@ -34,19 +37,23 @@ const REMINDER_TONE: Record<string, StatusTone> = {
 
 const REMINDERS_KEY = ['enterprise-console', 'reminders'] as const
 
+function browserTimezone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+}
+
 function CreateReminder() {
   const transport = useTransport()
   const [subjectType, setSubjectType] = useState('biz_task')
   const [subjectId, setSubjectId] = useState('')
-  const [timezone, setTimezone] = useState('Asia/Shanghai')
   const [when, setWhen] = useState('')
   const [title, setTitle] = useState('')
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
+  const timezone = browserTimezone()
   const scheduledFor = when ? Math.floor(new Date(when).getTime() / 1000) : Number.NaN
 
   return (
     <FormAction
-      canSubmit={subjectId.trim().length > 0 && !Number.isNaN(scheduledFor)}
+      canSubmit={subjectId.trim().length > 0 && Number.isFinite(scheduledFor)}
       invalidateKey={REMINDERS_KEY}
       onSuccess={() => setIdempotencyKey(crypto.randomUUID())}
       permission="reminder.write"
@@ -54,8 +61,8 @@ function CreateReminder() {
         transport.post('/api/reminder-create', {
           scheduled_for: scheduledFor,
           idempotency_key: idempotencyKey,
-          subject_id: subjectId,
-          subject_type: subjectType,
+          subject_id: subjectId.trim(),
+          subject_type: subjectType.trim(),
           timezone,
           title: title || undefined
         })
@@ -72,7 +79,9 @@ function CreateReminder() {
         value={subjectId}
       />
       <Input onChange={event => setSubjectType(event.target.value)} placeholder="subject type" value={subjectType} />
-      <Input onChange={event => setTimezone(event.target.value)} placeholder="timezone (IANA)" value={timezone} />
+      <div className="text-xs text-muted-foreground" data-testid="console-reminder-timezone">
+        timezone: {timezone}
+      </div>
       <input
         className="rounded-md border border-border bg-transparent px-2 py-1 text-sm"
         data-testid="console-reminder-when"
