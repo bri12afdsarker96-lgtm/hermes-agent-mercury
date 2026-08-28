@@ -1,0 +1,214 @@
+/**
+ * Enterprise Console visual layer — "Hermes Enterprise Desktop, Visual Baseline v1".
+ *
+ * SCOPED, NOT GLOBAL. Every declaration here lives under `.hermes-enterprise`
+ * (or the console root's existing `data-testid`). Nothing is declared on
+ * `:root`, and no `--ui-*`, `--dt-*`, `--theme-*`, `--z-*` or `--font-*` token
+ * is ever redefined. The approved design ships a `:root` token file that would
+ * override those names app-wide — unlayered CSS beats `@layer base`
+ * unconditionally — which would silently kill dark mode and every user theme.
+ * That file is consumed here as a SPECIFICATION only.
+ *
+ * Consequence of scoping: this layer FOLLOWS the theme instead of freezing it.
+ * Every colour below derives from a Mercury token that the theme engine already
+ * rewrites per skin and that already has dark-mode overrides in styles.css, so
+ * the console tracks light/dark and user themes for free. The approved design is
+ * light-only; deriving rather than hardcoding is what lets it survive a theme
+ * switch without a second palette.
+ *
+ * Soft fills use color-mix against `transparent` rather than the design's baked
+ * 50/100 tints: a fixed pale tint is only legible on a light canvas, whereas a
+ * low-alpha mix of the same hue reads correctly on both grounds.
+ */
+
+.hermes-enterprise,
+[data-testid='enterprise-console'] {
+  /* -- Brand + module accents -------------------------------------------
+     The design assigns one hue per product area, used at full strength in
+     KPI/icon tiles and as soft fills elsewhere. Mapped onto the semantic
+     colours the theme already defines (styles.css `--ui-red … --ui-purple`). */
+  --ec-brand: var(--ui-accent);
+  --ec-module-assistant: var(--ui-accent);
+  --ec-module-conversation: var(--ui-accent);
+  --ec-module-followup: var(--ui-cyan);
+  --ec-module-takeover: var(--ui-orange);
+  --ec-module-knowledge: var(--ui-purple);
+
+  /* -- Status ------------------------------------------------------------
+     Business state. Paired ALWAYS with text (and a dot or icon) at the call
+     site — colour alone never carries the meaning. */
+  --ec-status-success: var(--ui-green);
+  --ec-status-warning: var(--ui-orange);
+  --ec-status-danger: var(--ui-red);
+  --ec-status-info: var(--ui-blue);
+  --ec-status-progress: var(--ui-cyan);
+  --ec-status-review: var(--ui-purple);
+  --ec-status-neutral: var(--ui-text-tertiary);
+
+  /* -- Capability honesty ------------------------------------------------
+     Server authority, not decoration. These mirror the real
+     `CapabilityStatus` union in types.ts (LIVE/DEV/CONTRACT/PLANNED) plus the
+     page-level read states from catalog.ts. Only LIVE is allowed to read as
+     "good"; DEV/CONTRACT/PLANNED must never render green. */
+  --ec-capability-live: var(--ui-green);
+  --ec-capability-dev: var(--ui-blue);
+  --ec-capability-contract: var(--ui-text-tertiary);
+  --ec-capability-planned: var(--ui-text-tertiary);
+  --ec-capability-partial: var(--ui-orange);
+  --ec-capability-blocked: var(--ui-red);
+
+  /* -- Priority ---------------------------------------------------------- */
+  --ec-priority-high: var(--ui-red);
+  --ec-priority-medium: var(--ui-orange);
+  --ec-priority-low: var(--ui-text-tertiary);
+
+  /* -- KPI delta ---------------------------------------------------------
+     Deliberately inverted against the usual finance convention: in a worklist,
+     MORE arriving work is pressure, not success. Preserved from the approved
+     design, which is explicit about it. */
+  --ec-delta-up: var(--ui-red);
+  --ec-delta-down: var(--ui-green);
+  --ec-delta-flat: var(--ui-text-tertiary);
+
+  /* -- Soft fills --------------------------------------------------------
+     One knob for every tinted chip/tile so the whole console moves together. */
+  --ec-fill-strength: 12%;
+  --ec-fill-strength-strong: 18%;
+
+  /* -- Geometry ----------------------------------------------------------
+     From the approved design's handoff table. The titlebar is deliberately
+     absent: that is app chrome owned by the host shell, and the console must
+     not restate it. */
+  --ec-sidebar-w: 15.625rem; /* 250px */
+  --ec-header-h: 3.5rem; /* 56px  */
+  --ec-list-w: 18.125rem; /* 290px */
+  --ec-detail-w: 25rem; /* 400px */
+  --ec-page-inset-x: 1.75rem; /* 28px  */
+  --ec-page-inset-y: 1.5rem; /* 24px  */
+  --ec-gutter: 1rem; /* 16px  */
+  --ec-panel-pad: 1.25rem; /* 20px  */
+  --ec-panel-radius: 0.625rem; /* 10px  */
+  --ec-row-h: 2.5rem; /* 40px, table rows */
+  --ec-row-h-list: 3.5rem; /* 56px, worklist rows */
+  --ec-tile: 2.75rem; /* 44px, KPI icon tile */
+  --ec-tile-sm: 2rem; /* 32px, list-row icon tile */
+
+  /* -- Focus -------------------------------------------------------------
+     The approved design specifies a 3px brand ring. See the focus block below
+     for why this is an `outline` rather than a ring box-shadow. */
+  --ec-focus-ring: color-mix(in srgb, var(--ui-accent) 55%, transparent);
+
+  /* -- Typography --------------------------------------------------------
+     Source Han Sans SC, shipped as Google's OFL build (Noto Sans SC). Scoped
+     to the console so core surfaces keep the host's own sans. The system stack
+     stays behind it for any glyph the subset misses. */
+  font-family: 'Noto Sans SC', var(--dt-font-sans);
+}
+
+/* Bundled CJK metrics differ from the design's original commercial face, so the
+   approved 13px body is pinned here rather than inherited: the design's density
+   depends on it, and Source Han's larger x-height would otherwise read heavier
+   at the host's default size. Line-height is set with it — 13/20 is the
+   approved rhythm and the two must move together or rows drift off the 40px
+   grid. */
+.hermes-enterprise,
+[data-testid='enterprise-console'] {
+  font-size: 0.8125rem; /* 13px */
+  line-height: 1.25rem; /* 20px */
+}
+
+/* Mono is for machine facts only — ids, versions, ChannelBinding, timestamps.
+   Inherits the host's bundled mono; the console adds no second mono face. */
+.hermes-enterprise :is([data-ec-mono], code, kbd, samp) {
+  font-family: var(--dt-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Figures that sit in a column (KPI values, table numerics, deltas) must not
+   jitter as digits change. */
+.hermes-enterprise [data-ec-figure] {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* -- Module accent tiles ---------------------------------------------------
+   The approved design leads each KPI card and worklist row with a rounded tile
+   carrying the product area's hue: a soft fill of that hue behind a solid glyph
+   in the same hue. Driven by `data-ec-accent` rather than an inline style so
+   theming stays in CSS and the tint follows the theme's own colour.
+
+   `--ec-accent` is resolved once per tile and both the fill and the glyph read
+   from it, so a hue is never stated twice and the two can never drift apart. */
+[data-ec-accent='brand'] {
+  --ec-accent: var(--ec-module-conversation);
+}
+[data-ec-accent='followup'] {
+  --ec-accent: var(--ec-module-followup);
+}
+[data-ec-accent='takeover'] {
+  --ec-accent: var(--ec-module-takeover);
+}
+[data-ec-accent='knowledge'] {
+  --ec-accent: var(--ec-module-knowledge);
+}
+
+[data-slot='ec-kpi-tile'],
+[data-slot='ec-row-tile'] {
+  background: color-mix(in srgb, var(--ec-accent) var(--ec-fill-strength), transparent);
+  color: var(--ec-accent);
+}
+
+/* -- Focus visibility ------------------------------------------------------
+   styles.css kills focus rings app-wide (`*:focus-visible { outline: none }`
+   plus a reset of Tailwind's --tw-ring-* vars), unlayered. Repairing that
+   globally is a desktop-architecture decision and is NOT taken here; this
+   restores visible focus for the Enterprise Console only, which is the bounded
+   scope the directive asks for.
+
+   Mechanism: the selector below is more specific than `*`, and both rules are
+   unlayered, so specificity decides and this wins without !important.
+
+   `outline` rather than a ring box-shadow on purpose — a box-shadow ring is
+   clipped by every `overflow: hidden` ancestor (ScrollArea, table cells, the
+   sidebar rail), which is exactly where console focus lands. The visual result
+   is the approved 3px brand ring; the mechanism is the one that survives. */
+.hermes-enterprise :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible,
+[data-testid='enterprise-console'] :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 3px solid var(--ec-focus-ring);
+  outline-offset: 1px;
+  border-radius: inherit;
+}
+
+/* -- Responsive ------------------------------------------------------------
+   The four approved desktop targets. Width-based rather than container-based
+   because these are whole-workspace layout changes, and the console owns the
+   full content column. 1672x941 is the design baseline; the others adjust the
+   three-column geometry rather than reflowing it. Below 1440 the detail column
+   stops being inline and becomes an overlay — the approved rule is explicit
+   that three columns must never be crushed into an unreadable width. */
+@media (width < 1440px) {
+  .hermes-enterprise,
+  [data-testid='enterprise-console'] {
+    --ec-sidebar-w: 13.5rem; /* 216px */
+    --ec-list-w: 15.625rem; /* 250px */
+    --ec-page-inset-x: 1.25rem; /* 20px  */
+    --ec-page-inset-y: 1.25rem;
+    --ec-detail-inline: 0; /* detail becomes an overlay; see DetailPanel */
+  }
+}
+
+@media (1440px <= width < 1672px) {
+  .hermes-enterprise,
+  [data-testid='enterprise-console'] {
+    --ec-list-w: 16.375rem; /* 262px */
+    --ec-detail-w: 22.5rem; /* 360px */
+  }
+}
+
+@media (width >= 1920px) {
+  .hermes-enterprise,
+  [data-testid='enterprise-console'] {
+    --ec-detail-w: 30rem; /* 480px */
+    --ec-page-inset-x: 2rem; /* 32px  */
+  }
+}

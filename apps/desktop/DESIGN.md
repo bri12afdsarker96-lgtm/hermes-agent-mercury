@@ -235,6 +235,27 @@ Notes:
   It replaced scattered Sparkles glyphs in updates / onboarding / about. Use it
   for hero/brand moments; don't reintroduce decorative star/sparkle icons.
 
+## Bundled typefaces
+
+- Fonts ship with the app; nothing is fetched from a font CDN at runtime. The
+  `@font-face` rules live at the top of `src/styles.css`, the files in
+  `src/fonts/`, and each face carries its licence.
+- **JetBrains Mono** (Apache-2.0) is the bundled terminal/code face.
+- **Noto Sans SC** (SIL OFL-1.1, `src/fonts/LICENSE-NotoSansSC.txt`) is the
+  bundled CJK face — Google's release of Adobe's Source Han Sans SC (思源黑体).
+  Four subsets, CJK and Latin at 400/700; the Latin subset declares a
+  `unicode-range` so Latin text renders from the 13 KB file rather than the
+  1.1 MB one. Only two weights ship because CSS weight matching already
+  resolves 500 → 400 and 600 → 700.
+- The face is declared globally but **opted into per surface** — today only the
+  Enterprise Console (`plugins/enterprise-console/ui/console.css`), whose
+  product copy is Simplified Chinese. `--dt-font-sans` is unchanged, so core
+  typography is unaffected; an unused `@font-face` costs nothing. If a second
+  surface needs CJK, opt it in the same way rather than changing the global
+  stack, which would restyle the whole app.
+- Adding a face means adding its licence file in the same change. A typeface
+  without a licence in-tree does not ship.
+
 ## Motion
 
 - Quick, functional transitions (~100ms on controls). Respect
