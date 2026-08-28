@@ -1,20 +1,21 @@
 /**
- * Plugin-local REST door to the Hermes_AI web server
- * (`hermes_devices/webserver.py`).
+ * FetchHermesTransport — a DEV/test `HermesTransport` that talks to a Hermes web
+ * server (`hermes_devices/webserver.py`) with a direct cross-origin `fetch`,
+ * carrying the bearer in renderer memory.
  *
- * WHY this exists instead of `ctx.rest`: the desktop's `ctx.rest` is
- * namespace-locked to `/api/plugins/<id>/*` on the desktop's OWN gateway
- * (see `src/hermes.ts`), so it cannot reach Hermes's core `/api/*` authority
- * endpoints (`/api/whoami`, `/api/biz-tasks`, `/api/delivery-outbox`, …). This
- * thin `fetch` client targets a configurable Hermes base URL and carries an
- * in-memory session bearer.
+ * ⚠️ NOT the production default. It holds the bearer in the renderer and issues
+ * cross-origin authenticated requests — exactly what the production transport
+ * (renderer → preload/IPC → main → HTTPS) exists to avoid. The gate replaces it
+ * via `setTransportFactory` (B-T workstream); pages never change because they
+ * depend on `HermesTransport`, not on this class.
  *
  * Authority boundary (hard): the server stays the single source of truth for
- * identity / tenant / permission / capability — this client only transports.
- * It never persists the token, never logs it, and never decides permission
- * locally. Errors carry status + a coarse code only; the request URL and bearer
- * are never folded into an error message (no secret leakage into DOM/console).
+ * identity / tenant / permission / capability — this adapter only transports.
+ * It never persists the token, never logs it; errors carry status + a coarse
+ * code only (the request URL and bearer are never folded into a message).
  */
+
+import { BaseHermesTransport, type TransportRequest } from './transport'
 
 export type HermesErrorCode = 'error' | 'forbidden' | 'network' | 'not_implemented' | 'unauthorized'
 
@@ -30,10 +31,7 @@ export class HermesApiError extends Error {
   }
 }
 
-export interface HermesRequestOptions {
-  body?: unknown
-  method?: string
-  signal?: AbortSignal
+export interface RawRequestOptions extends TransportRequest {
   /** In-memory session bearer; omitted for unauthenticated routes (`/api/health`). */
   token?: null | string
 }
@@ -71,9 +69,9 @@ function serverMessage(data: unknown, fallback: string): string {
 /**
  * Pure request primitive: given an explicit base URL, do one JSON round-trip.
  * Kept free of module state so it is trivially testable and never reaches for a
- * global token. Callers (`session.ts`) inject the current base URL + bearer.
+ * global token.
  */
-export async function rawRequest<T>(baseUrl: string, path: string, opts: HermesRequestOptions = {}): Promise<T> {
+export async function rawRequest<T>(baseUrl: string, path: string, opts: RawRequestOptions = {}): Promise<T> {
   const base = baseUrl.trim().replace(/\/+$/, '')
 
   if (!base) {
@@ -120,4 +118,21 @@ export async function rawRequest<T>(baseUrl: string, path: string, opts: HermesR
   }
 
   return data as T
+}
+
+export class FetchHermesTransport extends BaseHermesTransport {
+  readonly #baseUrl: string
+  // Private field: not enumerable, not serialized — the bearer never leaks via
+  // the transport object into the renderer's reach.
+  readonly #token: string
+
+  constructor(baseUrl: string, token: string) {
+    super()
+    this.#baseUrl = baseUrl.trim().replace(/\/+$/, '')
+    this.#token = token
+  }
+
+  request<T>(path: string, opts: TransportRequest = {}): Promise<T> {
+    return rawRequest<T>(this.#baseUrl, path, { ...opts, token: this.#token })
+  }
 }

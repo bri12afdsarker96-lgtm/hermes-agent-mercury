@@ -1,19 +1,13 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { FakeHermesTransport } from './fake-transport'
 import { DashboardPage } from './page-dashboard'
-import { $baseUrl, $token, $whoami } from './session'
+import { $whoami } from './session'
+import { $transport } from './transport'
 import type { Whoami } from './types'
-
-function fakeResponse(body: unknown): Response {
-  return {
-    ok: true,
-    status: 200,
-    text: async () => JSON.stringify(body)
-  } as unknown as Response
-}
 
 const WHO: Whoami = {
   capability_revision: 1,
@@ -35,31 +29,19 @@ function wrap(node: ReactNode) {
 }
 
 beforeEach(() => {
-  $baseUrl.set('http://h:1')
-  $token.set('t')
   $whoami.set(WHO)
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (url: string) => {
-      if (url.includes('/api/health')) {
-        return fakeResponse({ auth_mode: 'strict', ok: true })
-      }
-
-      if (url.includes('/api/metrics')) {
-        return fakeResponse({ alerts: [] })
-      }
-
-      return fakeResponse({})
+  $transport.set(
+    new FakeHermesTransport({
+      '/api/health': { auth_mode: 'strict', ok: true },
+      '/api/metrics': { alerts: [] }
     })
   )
 })
 
 afterEach(() => {
   cleanup()
-  vi.unstubAllGlobals()
-  $baseUrl.set('')
-  $token.set(null)
   $whoami.set(null)
+  $transport.set(null)
 })
 
 describe('DashboardPage', () => {

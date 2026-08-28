@@ -1,7 +1,8 @@
 import type { PluginStorage } from '@hermes/plugin-sdk'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { $baseUrl, $connectError, $token, $whoami, bindSession, connect, disconnect } from './session'
+import { $baseUrl, $connectError, $whoami, bindSession, connect, disconnect } from './session'
+import { $transport } from './transport'
 import type { Whoami } from './types'
 
 function fakeResponse(status: number, body: unknown): Response {
@@ -40,9 +41,9 @@ function makeStorage() {
 
 beforeEach(() => {
   $baseUrl.set('')
-  $token.set(null)
   $whoami.set(null)
   $connectError.set(null)
+  $transport.set(null)
 })
 
 afterEach(() => {
@@ -60,20 +61,19 @@ describe('bindSession', () => {
     )
     await connect('http://h:1', 'secret-bearer')
 
-    // Only the base URL is ever written to storage.
+    // Only the base URL is ever written to storage — the bearer never is.
     expect(sets.every(s => s.key === 'hermesBaseUrl')).toBe(true)
-    expect(sets.some(s => s.value === 'secret-bearer')).toBe(false)
     expect(JSON.stringify(sets)).not.toContain('secret-bearer')
 
     dispose()
-    // The disposer wipes the in-memory secret + identity.
-    expect($token.get()).toBeNull()
+    // The disposer drops the transport (its credential) + identity.
+    expect($transport.get()).toBeNull()
     expect($whoami.get()).toBeNull()
   })
 })
 
 describe('connect', () => {
-  it('lets the server establish the session (whoami) and holds the bearer in memory', async () => {
+  it('lets the server establish the session (whoami) and installs a transport', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => fakeResponse(200, WHO))
@@ -82,11 +82,13 @@ describe('connect', () => {
     await connect('http://h:1/', 'secret-bearer')
 
     expect($whoami.get()).toEqual(WHO)
-    expect($token.get()).toBe('secret-bearer')
+    expect($transport.get()).not.toBeNull()
     expect($baseUrl.get()).toBe('http://h:1')
+    // The token is not reachable through any exported session atom.
+    expect(JSON.stringify($transport.get())).not.toContain('secret-bearer')
   })
 
-  it('fails closed on auth failure — no token, no identity, redacted error', async () => {
+  it('fails closed on auth failure — no transport, no identity, redacted error', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => fakeResponse(401, { error: 'login failed' }))
@@ -94,7 +96,7 @@ describe('connect', () => {
 
     await expect(connect('http://h:1', 'secret-bearer')).rejects.toBeTruthy()
 
-    expect($token.get()).toBeNull()
+    expect($transport.get()).toBeNull()
     expect($whoami.get()).toBeNull()
     expect($connectError.get()).not.toBeNull()
     expect($connectError.get()).not.toContain('secret-bearer')
@@ -102,11 +104,10 @@ describe('connect', () => {
 })
 
 describe('disconnect', () => {
-  it('wipes the in-memory session', () => {
-    $token.set('t')
+  it('clears the transport and identity', () => {
     $whoami.set(WHO)
     disconnect()
-    expect($token.get()).toBeNull()
+    expect($transport.get()).toBeNull()
     expect($whoami.get()).toBeNull()
   })
 })

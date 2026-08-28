@@ -1,21 +1,25 @@
 /**
  * Dashboard / Service Health — the first fully-live page. Reads real server
- * authority: `/api/health` (liveness + auth posture) and `/api/metrics` (event
- * counters + surfaced alerts), plus the session's own whoami. Every capability
- * is shown with the server's maturity verdict, so nothing DEV reads as live.
+ * authority through the transport: `/api/health` (liveness + auth posture) and
+ * `/api/metrics` (event counters + surfaced alerts), plus the session's own
+ * whoami. Every capability is shown with the server's maturity verdict, so
+ * nothing DEV reads as live. The page never sees a token — it calls the
+ * transport, which owns the credential.
  */
 
 import { EmptyState, ErrorState, Loader, usePluginI18n, useQuery, useValue } from '@hermes/plugin-sdk'
 
-import { $whoami, apiRequest, publicRequest } from './session'
+import { $whoami } from './session'
 import { CapabilityBadge } from './status-badge'
+import { useTransport } from './transport'
 import type { Health, Metrics } from './types'
 
 function HealthCard() {
   const t = usePluginI18n('enterprise-console')
+  const transport = useTransport()
 
   const { data, error, isPending } = useQuery({
-    queryFn: () => publicRequest<Health>('/api/health'),
+    queryFn: () => transport.get<Health>('/api/health'),
     queryKey: ['enterprise-console', 'health'],
     refetchInterval: 30_000
   })
@@ -87,8 +91,10 @@ function CapabilitiesCard() {
 }
 
 function MetricsCard() {
+  const transport = useTransport()
+
   const { data, error, isPending } = useQuery({
-    queryFn: () => apiRequest<Metrics>('/api/metrics?window=24h'),
+    queryFn: () => transport.get<Metrics>('/api/metrics?window=24h'),
     queryKey: ['enterprise-console', 'metrics', '24h'],
     refetchInterval: 60_000
   })

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { HermesApiError, rawRequest } from './hermes-client'
+import { FetchHermesTransport, HermesApiError, rawRequest } from './fetch-transport'
 
 function fakeResponse(status: number, body: unknown): Response {
   return {
@@ -70,5 +70,32 @@ describe('rawRequest', () => {
 
   it('fails closed when no endpoint is configured', async () => {
     await expect(rawRequest('   ', '/api/x')).rejects.toBeInstanceOf(HermesApiError)
+  })
+})
+
+describe('FetchHermesTransport', () => {
+  it('attaches the bearer on every request via the transport contract', async () => {
+    const fetchMock = vi.fn(async () => fakeResponse(200, { ok: true }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const transport = new FetchHermesTransport('http://h:1', 'secret-bearer')
+    await transport.get('/api/whoami')
+    await transport.post('/api/x', { a: 1 })
+
+    for (const call of fetchMock.mock.calls) {
+      const [, init] = call as unknown as [string, RequestInit]
+      expect((init.headers as Record<string, string>).Authorization).toBe('Bearer secret-bearer')
+    }
+
+    const [, postInit] = fetchMock.mock.calls[1] as unknown as [string, RequestInit]
+    expect(postInit.method).toBe('POST')
+  })
+
+  it('never exposes the bearer as an enumerable/serialized property', () => {
+    const transport = new FetchHermesTransport('http://h:1', 'secret-bearer')
+
+    expect(Object.keys(transport)).not.toContain('token')
+    expect(JSON.stringify(transport)).not.toContain('secret-bearer')
+    expect(String((transport as unknown as Record<string, unknown>).token)).not.toContain('secret-bearer')
   })
 })
