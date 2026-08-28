@@ -7,19 +7,32 @@
  */
 
 import { EmptyState, usePluginI18n } from '@hermes/plugin-sdk'
+import type { ReactNode } from 'react'
 
 import type { ConsolePage } from './catalog'
+
+function PlaceholderFrame({ children, page, status }: { children: ReactNode; page: ConsolePage; status: string }) {
+  return (
+    <div
+      className="mx-auto flex w-full max-w-[96rem] flex-col px-(--ec-page-inset-x) py-(--ec-page-inset-y)"
+      data-page-status={status}
+      data-testid={`console-page-${page.id}`}
+    >
+      {children}
+    </div>
+  )
+}
 
 export function BlockedPage({ page }: { page: ConsolePage }) {
   const t = usePluginI18n('enterprise-console')
 
   return (
-    <div data-page-status={page.status} data-testid={`console-page-${page.id}`}>
+    <PlaceholderFrame page={page} status={page.status}>
       <EmptyState
         description={page.gap ? `${t('status.blockedBody')}\n\n${page.gap}` : t('status.blockedBody')}
         title={t('status.blocked')}
       />
-    </div>
+    </PlaceholderFrame>
   )
 }
 
@@ -27,9 +40,9 @@ export function DeniedPage({ page }: { page: ConsolePage }) {
   const t = usePluginI18n('enterprise-console')
 
   return (
-    <div data-page-status="denied" data-testid={`console-page-${page.id}`}>
+    <PlaceholderFrame page={page} status="denied">
       <EmptyState description={t('status.deniedBody')} title={t('status.denied')} />
-    </div>
+    </PlaceholderFrame>
   )
 }
 
@@ -38,9 +51,9 @@ export function PartialPlaceholder({ page }: { page: ConsolePage }) {
   const t = usePluginI18n('enterprise-console')
 
   return (
-    <div data-page-status={page.status} data-testid={`console-page-${page.id}`}>
+    <PlaceholderFrame page={page} status={page.status}>
       <EmptyState description={page.gap ?? t('status.partial')} title={t('status.partial')} />
-    </div>
+    </PlaceholderFrame>
   )
 }
 
@@ -50,8 +63,8 @@ export function PendingPage({ page }: { page: ConsolePage }) {
   const t = usePluginI18n('enterprise-console')
 
   return (
-    <div data-page-status={page.status} data-testid={`console-page-${page.id}`}>
+    <PlaceholderFrame page={page} status={page.status}>
       <EmptyState description={t('status.pendingBody')} title={t('status.pending')} />
-    </div>
+    </PlaceholderFrame>
   )
 }
