@@ -10,7 +10,7 @@ import { EmptyState, ErrorState, icons, Loader, usePluginI18n, useQuery, useValu
 import { $whoami } from './session'
 import { CapabilityBadge, PageStatusBadge } from './status-badge'
 import { useTransport } from './transport'
-import type { Health, Metrics } from './types'
+import type { Health, Metrics, Whoami } from './types'
 import { ConsolePanel, KpiCard, PageHeader } from './ui'
 
 function HealthCard() {
@@ -41,12 +41,7 @@ function HealthCard() {
 
   return (
     <div data-testid="console-health">
-      <KpiCard
-        accent="brand"
-        icon={icons.Activity}
-        label="Hermes service"
-        value={data.ok ? 'ok' : 'down'}
-      />
+      <KpiCard accent="brand" icon={icons.Activity} label="Hermes service" value={data.ok ? 'ok' : 'down'} />
       <span className="sr-only" data-testid="console-health-ok">
         {data.ok ? 'ok' : 'down'}
       </span>
@@ -166,18 +161,48 @@ function CapabilityKpi() {
   return <KpiCard accent="knowledge" icon={icons.Layers3} label="Live capabilities" value={live} />
 }
 
+interface WorkspaceCopy {
+  purpose: string
+  title: string
+}
+
+function workspaceCopy(who: Whoami | null): WorkspaceCopy {
+  switch (who?.role) {
+    case 'operator':
+      return {
+        purpose: 'Your authenticated operational workspace, current service health and capability truth.',
+        title: 'Operator Home'
+      }
+    case 'supervisor':
+      return {
+        purpose: 'Supervisory workspace for current service health, scoped operations and capability truth.',
+        title: 'Supervisor Workspace'
+      }
+    case 'tenant_admin':
+    case 'super_admin':
+      return {
+        purpose: 'Tenant administration overview for service health, authenticated scope and capability truth.',
+        title: 'Tenant Admin Overview'
+      }
+    default:
+      return {
+        purpose: 'Server health, authenticated workspace identity and current capability truth.',
+        title: 'Workspace'
+      }
+  }
+}
+
 export function DashboardPage() {
+  const who = useValue($whoami)
+  const copy = workspaceCopy(who)
+
   return (
     <div
       className="mx-auto flex w-full max-w-[96rem] flex-col px-(--ec-page-inset-x) py-(--ec-page-inset-y)"
       data-page-status="ready"
       data-testid="console-page-dashboard"
     >
-      <PageHeader
-        purpose="Server health, authenticated workspace identity and current capability truth."
-        status={<PageStatusBadge status="ready" />}
-        title="Workspace"
-      />
+      <PageHeader purpose={copy.purpose} status={<PageStatusBadge status="ready" />} title={copy.title} />
 
       <div className="grid gap-(--ec-gutter) md:grid-cols-2 xl:grid-cols-3">
         <HealthCard />
