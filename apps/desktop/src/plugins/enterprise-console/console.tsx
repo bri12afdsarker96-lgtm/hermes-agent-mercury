@@ -76,14 +76,20 @@ function SessionHeader({ who }: { who: Whoami }) {
   const t = usePluginI18n('enterprise-console')
 
   return (
-    <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-2">
-      <div className="text-sm font-semibold">{t('title')}</div>
-      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-        <span data-testid="console-header-principal">{who.name}</span>
-        <span>·</span>
-        <span>{who.tenant_id ?? '—'}</span>
-        <span>·</span>
-        <span>{who.role}</span>
+    <header className="flex min-w-0 items-center justify-between gap-3 border-b border-border px-4 py-2">
+      <div className="shrink-0 text-sm font-semibold">{t('title')}</div>
+      <div className="flex min-w-0 items-center justify-end gap-2 text-xs text-muted-foreground">
+        <span className="max-w-40 truncate" data-testid="console-header-principal" title={who.name}>
+          {who.name}
+        </span>
+        <span aria-hidden="true">·</span>
+        <span className="max-w-48 truncate" title={who.tenant_id ?? '—'}>
+          {who.tenant_id ?? '—'}
+        </span>
+        <span aria-hidden="true">·</span>
+        <span className="max-w-32 truncate" title={who.role}>
+          {who.role}
+        </span>
         <Button data-testid="console-disconnect" onClick={() => disconnect()} size="sm" variant="ghost">
           {t('session.disconnect')}
         </Button>
@@ -120,9 +126,14 @@ export function ConsoleShell() {
     <div className="flex h-full flex-col" data-testid="enterprise-console">
       <SessionHeader who={who} />
       <div className="flex min-h-0 flex-1">
-        <nav className="w-52 shrink-0 overflow-y-auto border-r border-border p-2" data-testid="console-nav">
+        <nav
+          aria-label="Enterprise console"
+          className="w-52 shrink-0 overflow-y-auto border-r border-border p-2"
+          data-testid="console-nav"
+        >
           {navPages.map(page => (
             <button
+              aria-current={page.id === active.id ? 'page' : undefined}
               className={
                 page.id === active.id
                   ? 'flex w-full flex-col items-start gap-0.5 rounded-md bg-accent px-2 py-1.5 text-left text-sm'
@@ -139,7 +150,7 @@ export function ConsoleShell() {
             </button>
           ))}
         </nav>
-        <section className="min-w-0 flex-1 overflow-y-auto p-4" data-testid="console-content">
+        <section className="min-w-0 flex-1 overflow-y-auto" data-testid="console-content">
           {renderPage(active, who)}
         </section>
       </div>
