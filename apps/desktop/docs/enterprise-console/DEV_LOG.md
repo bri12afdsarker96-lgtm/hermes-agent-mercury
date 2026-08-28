@@ -3,6 +3,34 @@
 > C8 process log for gate `P3-M4A-DESKTOP-ASSISTANT-CONSOLE-01`. Mercury-owned docs
 > only; no Hermes_AI docs are touched by this lane.
 
+## Entry 8 — B15 Enterprise-session bootstrap preflight (READ / DESIGN only, docs-only)
+
+**Changed files**
+- `docs/enterprise-console/BOOTSTRAP_SESSION_PREFLIGHT.md` (new) — the 13 `EXISTING_*` seam
+  survey (Mercury boot/session/credential + Hermes_AI auth/token/capability), `REUSE_DECISION`
+  with per-seam ADOPT/WRAP/BORROW + a `NEW-JUSTIFIED` for the bootstrap bridge with its
+  `REUSE-SKEPTIC`, the security assessment, and the server-gap ledger.
+- `docs/enterprise-console/DEV_LOG.md` (this entry).
+
+**Why**: TC gate `B15-ENTERPRISE-SESSION-BOOTSTRAP-PREFLIGHT-01`. The B14 activation preflight
+named `SERVER_CHANGE_REQUIRED` (a pre-page enterprise session) as the honest L1 blocker; B15 is
+the read-only survey that decides the *source* of that session so TC can freeze it before any
+client write.
+
+**Findings (headline)**: Cross-launch **secure credential storage already exists** (`safeStorage`
++ `native-token-store`, hard-fail default, `0600`) → **no `SECURE_CREDENTIAL_STORAGE_GAP`, no new
+keychain**. Main is already the **sole credential owner** (`ensureBackend`/`handleHermesApiRequest`)
+→ ADOPT. Boot lifecycle is the WRAP carrier. `host.state` is the BORROW channel but the
+enterprise-availability signal is a GAP (one new read-only atom). Three **server** gaps are the
+real blocker: `SERVER_TOKEN_REFRESH_GAP`, `SERVER_DESKTOP_CAPABILITY_GAP`,
+`SERVER_FEDERATION_SEAM_GAP`. Recommended session model = OAuth/native-bearer (main-held), **never
+token-mode** (token-mode leaks the plaintext bearer into the renderer — pre-existing desktop
+behavior to avoid).
+
+**Boundary**: no code; forbidden set untouched (`plugins-store.ts` / `plugins.ts` / SDK root / app
+auth stores / Hermes_AI webserver/auth / credential persistence). No activation construction.
+`READY = NO`, `MERGE = NO`. RETURN_TO_TOTAL_CONTROL.
+
 ## Entry 7 — B14 Knowledge full control (sources / upload / preview / publish / withdraw / rollback)
 
 **Changed files**
