@@ -51,11 +51,11 @@ afterEach(() => {
 })
 
 describe('ConsoleShell', () => {
-  it('shows the connect gate until the server session is established', () => {
+  it('shows the native-session unavailable gate until the server session is established', () => {
     $whoami.set(null)
     renderShell()
 
-    expect(screen.queryByTestId('console-connect')).not.toBeNull()
+    expect(screen.queryByTestId('console-session-unavailable')).not.toBeNull()
     expect(screen.queryByTestId('enterprise-console')).toBeNull()
   })
 

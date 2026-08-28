@@ -203,7 +203,7 @@ describe('autoConnect — B16-OL one-login FSM', () => {
   })
 
   it('cannot resurrect AUTHENTICATED when an older probe resolves after logout', async () => {
-    let resolveWhoami: ((who: Whoami) => void) | null = null
+    let resolveWhoami!: (who: Whoami) => void
 
     class DelayedTransport extends BaseHermesTransport {
       request<T>(): Promise<T> {
@@ -216,7 +216,7 @@ describe('autoConnect — B16-OL one-login FSM', () => {
     setAutoTransportFactory(() => new DelayedTransport())
     const pending = autoConnect()
     disconnect()
-    resolveWhoami?.(WHO)
+    resolveWhoami(WHO)
 
     await expect(pending).resolves.toBe(false)
     expect($sessionState.get()).toBe('UNKNOWN')
