@@ -1,18 +1,15 @@
 /**
- * Conversations page (SC3) — real `/api/conversations-inbound|outbound|attempts`
- * (permission `conversation.read`; NOT `delivery.read` — that is the delivery
- * outbox, a different authority). READ-ONLY observability: inbound + outbound
- * messages and, drilling from an outbound message, its delivery attempts. Row
- * visibility is owner-scoped for managed roles INSIDE the server model (the
- * client sends no principal/role/tenant filter and makes no authz decision).
- * Timestamps are ISO-8601 strings (fmtIso, never fmtEpoch). Only outbound rows
- * carry `internal_message_id`, so only outbound drills into attempts.
+ * Conversations page (SC3) — authoritative read-only observability over
+ * `/api/conversations-inbound|outbound|attempts`. This presentation never adds
+ * retry/release authority: unknown delivery must not be blindly resent.
  */
 
 import { StatusDot, type StatusTone } from '@hermes/plugin-sdk'
 import { useState } from 'react'
 
 import { ConsoleRows, fmtIso, QueryBody, useConsoleQuery } from './page-kit'
+import { PageStatusBadge } from './status-badge'
+import { ConsolePanel, PageHeader } from './ui'
 
 interface InboundRow {
   channel: string
@@ -81,16 +78,16 @@ function Attempts({ internalMessageId }: { internalMessageId: string }) {
   )
 
   return (
-    <div className="mt-1 border-l-2 border-border pl-2">
+    <div className="mt-2 border-l border-(--ui-stroke-tertiary) pl-3">
       <QueryBody emptyText="no attempts" isEmpty={data => data.attempts.length === 0} query={query}>
         {data => (
           <ConsoleRows testId="console-conv-attempts">
             {data.attempts.map(attempt => (
-              <li className="flex items-center justify-between gap-2 rounded-md px-2 py-1 text-xs" key={attempt.attempt_id}>
-                <span className="min-w-0 truncate">
+              <li className="flex items-center justify-between gap-3 py-2" key={attempt.attempt_id}>
+                <span className="min-w-0 truncate text-(--ui-text-secondary)" data-ec-mono="">
                   #{attempt.attempt_number} · {attempt.outcome_class} · {fmtIso(attempt.finished_ts)}
                 </span>
-                <span className="inline-flex shrink-0 items-center gap-1">
+                <span className="inline-flex shrink-0 items-center gap-1.5 text-(--ui-text-secondary)">
                   <StatusDot tone={OUTCOME_TONE[attempt.outcome_class] ?? STATE_TONE[attempt.state] ?? 'muted'} />
                   {attempt.state}
                 </span>
@@ -111,19 +108,16 @@ function InboundList() {
       {data => (
         <ConsoleRows testId="console-conv-inbound">
           {data.inbound.map(row => (
-            <li
-              className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
-              key={row.inbound_id}
-            >
+            <li className="flex items-center justify-between gap-4 rounded-md px-3 py-2.5 hover:bg-(--ui-fill-quaternary)" key={row.inbound_id}>
               <div className="min-w-0">
-                <div className="truncate">
+                <div className="truncate font-medium text-(--ui-text-primary)">
                   {row.channel} · {row.message_type}
                 </div>
-                <div className="text-xs text-muted-foreground">
+                <div className="mt-0.5 text-(--ui-text-secondary)" data-ec-mono="">
                   {row.external_chat_id ?? '—'} · {fmtIso(row.received_ts)}
                 </div>
               </div>
-              <span className="inline-flex shrink-0 items-center gap-1 text-xs">
+              <span className="inline-flex shrink-0 items-center gap-1.5 text-(--ui-text-secondary)">
                 <StatusDot tone={STATE_TONE[row.state] ?? 'muted'} />
                 {row.state}
               </span>
@@ -144,24 +138,26 @@ function OutboundList() {
       {data => (
         <ConsoleRows testId="console-conv-outbound">
           {data.outbound.map(row => (
-            <li key={row.internal_message_id}>
+            <li className="border-b border-(--ui-stroke-tertiary) last:border-b-0" key={row.internal_message_id}>
               <button
                 className={
                   row.internal_message_id === selected
-                    ? 'flex w-full items-center justify-between gap-2 rounded-md border border-border bg-accent px-2 py-1.5 text-left text-sm'
-                    : 'flex w-full items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-left text-sm hover:bg-accent/50'
+                    ? 'flex w-full items-center justify-between gap-4 rounded-md bg-(--ui-fill-secondary) px-3 py-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-(--ui-accent)'
+                    : 'flex w-full items-center justify-between gap-4 rounded-md px-3 py-2.5 text-left outline-none hover:bg-(--ui-fill-quaternary) focus-visible:ring-2 focus-visible:ring-(--ui-accent)'
                 }
                 data-testid={`console-outbound-${row.internal_message_id}`}
                 onClick={() => setSelected(id => (id === row.internal_message_id ? null : row.internal_message_id))}
                 type="button"
               >
                 <span className="min-w-0">
-                  <span className="block truncate">
+                  <span className="block truncate font-medium text-(--ui-text-primary)">
                     {row.channel} · {row.recipient_binding_id}
                   </span>
-                  <span className="block text-xs text-muted-foreground">{fmtIso(row.created_ts)}</span>
+                  <span className="mt-0.5 block text-(--ui-text-secondary)" data-ec-mono="">
+                    {fmtIso(row.created_ts)}
+                  </span>
                 </span>
-                <span className="inline-flex shrink-0 items-center gap-1 text-xs">
+                <span className="inline-flex shrink-0 items-center gap-1.5 text-(--ui-text-secondary)">
                   <StatusDot tone={STATE_TONE[row.state] ?? 'muted'} />
                   {row.state}
                 </span>
@@ -179,25 +175,48 @@ export function ConversationsPage() {
   const [tab, setTab] = useState<'inbound' | 'outbound'>('inbound')
 
   return (
-    <div className="flex flex-col gap-2" data-page-status="ready" data-testid="console-page-conversations">
-      <div className="flex gap-1">
-        {(['inbound', 'outbound'] as const).map(value => (
-          <button
-            className={
-              tab === value
-                ? 'rounded-md bg-accent px-2 py-1 text-sm'
-                : 'rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-accent/50'
-            }
-            data-testid={`console-conv-tab-${value}`}
-            key={value}
-            onClick={() => setTab(value)}
-            type="button"
-          >
-            {value}
-          </button>
-        ))}
-      </div>
-      {tab === 'inbound' ? <InboundList /> : <OutboundList />}
+    <div
+      className="mx-auto flex w-full max-w-[96rem] flex-col px-(--ec-page-inset-x) py-(--ec-page-inset-y)"
+      data-page-status="ready"
+      data-testid="console-page-conversations"
+    >
+      <PageHeader
+        purpose="Inspect tenant-scoped inbound and outbound message facts and delivery attempts. Read-only by design."
+        status={<PageStatusBadge status="ready" />}
+        title="WeCom conversations"
+      />
+
+      <ConsolePanel
+        action={
+          <div aria-label="Conversation direction" className="inline-flex rounded-lg bg-(--ui-fill-quaternary) p-1" role="tablist">
+            {(['inbound', 'outbound'] as const).map(value => (
+              <button
+                aria-selected={tab === value}
+                className={
+                  tab === value
+                    ? 'rounded-md bg-(--ui-bg-card) px-3 py-1.5 font-medium text-(--ui-text-primary) shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-(--ui-accent)'
+                    : 'rounded-md px-3 py-1.5 text-(--ui-text-secondary) outline-none hover:text-(--ui-text-primary) focus-visible:ring-2 focus-visible:ring-(--ui-accent)'
+                }
+                data-testid={`console-conv-tab-${value}`}
+                key={value}
+                onClick={() => setTab(value)}
+                role="tab"
+                type="button"
+              >
+                {value}
+              </button>
+            ))}
+          </div>
+        }
+        divided
+        title={tab === 'inbound' ? 'Inbound messages' : 'Outbound messages'}
+      >
+        {tab === 'inbound' ? <InboundList /> : <OutboundList />}
+      </ConsolePanel>
+
+      <p className="mt-3 text-(--ui-text-tertiary)">
+        Delivery attempts are evidence only. No retry or held-release action is exposed from this Phase-1 surface.
+      </p>
     </div>
   )
 }
