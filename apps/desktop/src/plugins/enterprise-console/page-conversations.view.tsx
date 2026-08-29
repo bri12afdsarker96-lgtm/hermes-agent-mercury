@@ -1,158 +1,197 @@
 /**
  * Conversations page (SC3) — Presentational View layer.
  *
- * Receives the resolved lists + tab + selection callbacks + an
- * `attemptsSlot` (a ReactNode) that the glue mounts for the selected
- * outbound row. The view does NOT call the controller hook directly;
- * the glue slots the per-row attempts block via the `attemptsSlot`
- * prop so the view stays free of transport.
+ * Receives fully-derived VMs (inbound list, outbound list, attempts
+ * detail) plus loading/error state from the controller and presentation
+ * callbacks. No transport, no useValue, no $whoami. Reuses
+ * `QueryBody` / `ConsoleRows` from `./page-kit` (per W1-B1-REMEDIATION-01
+ * §P12 ESLint refinement).
  *
- * No useValue, no $whoami, no transport. The ESLint W1-A boundary
- * rule naturally constrains any `*.view.tsx` file.
- *
- * Per Phase-1, this view deliberately exposes NO mutation control
- * (no resend / replay / retry buttons). Delivery attempts are
- * evidence-only. unknown_delivery stays evidence-only.
+ * Per W1-B1-REMEDIATION-01:
+ *   - §P17: rendering markup lives here, NOT in the glue. The glue is
+ *     thin composition only.
+ *   - §P18: attempts error semantics are preserved — the view handles
+ *     pending / error / not_implemented / empty / ready via `QueryBody`.
+ *   - §P20: NO extra `t('status.moduleBody')` paragraph is rendered —
+ *     that paragraph was not in the pre-split page.
+ *   - §P21: `ConsoleRows` is reused for inbound / outbound / attempts.
  */
 
-import {
-  EmptyState,
-  ErrorState,
-  Loader,
-  StatusDot,
-  usePluginI18n,
-} from '@hermes/plugin-sdk'
+import { StatusDot, type StatusTone } from '@hermes/plugin-sdk'
 import type { ReactNode } from 'react'
 
 import {
+  type AttemptView,
+  type ConversationsAttemptsView,
   type ConversationsInboundListView,
   type ConversationsOutboundListView,
   type ConversationsTab,
   type InboundView,
   type OutboundView,
+  OUTCOME_TONE,
+  STATE_TONE,
 } from './page-conversations.view-model'
+import {
+  ConsoleRows,
+  QueryBody,
+} from './page-kit'
 import { PageStatusBadge } from './status-badge'
 import { ConsolePanel, PageHeader } from './ui'
 
-interface InboundListViewProps {
+interface InboundListProps {
   list: ConversationsInboundListView
-  listPending: boolean
-  listError: unknown
+  isPending: boolean
+  error: unknown
 }
 
-function InboundListView({ list, listPending, listError }: InboundListViewProps) {
-  const t = usePluginI18n('enterprise-console')
-
-  if (listPending) {
-    return <Loader />
-  }
-
-  const errorText = listError instanceof Error ? listError.message : null
-
-  if (errorText) {
-    return <ErrorState description={errorText} title={t('status.error')} />
-  }
-
-  if (list.isEmpty) {
-    return <EmptyState title="no inbound" />
-  }
-
+export function InboundListView({ list, isPending, error }: InboundListProps) {
   return (
-    <ul className="divide-y divide-(--ui-stroke-tertiary)" data-testid="console-conv-inbound">
-      {list.rows.map((row: InboundView) => (
-        <li
-          className="flex items-center justify-between gap-4 rounded-md px-3 py-2.5 hover:bg-(--ui-fill-quaternary)"
-          key={row.inboundId}
-        >
-          <div className="min-w-0">
-            <div className="truncate font-medium text-(--ui-text-primary)">
-              {row.channel} · {row.messageType}
-            </div>
-            <div className="mt-0.5 text-(--ui-text-secondary)" data-ec-mono="">
-              {row.externalChatId ?? '—'} · {row.receivedTs}
-            </div>
-          </div>
-          <span className="inline-flex shrink-0 items-center gap-1.5 text-(--ui-text-secondary)">
-            <StatusDot tone={row.stateTone} />
-            {row.state}
-          </span>
-        </li>
-      ))}
-    </ul>
+    <QueryBody
+      emptyText="no inbound"
+      isEmpty={(data: { inbound: InboundView[] }) => data.inbound.length === 0}
+      query={{
+        data: { inbound: list.rows },
+        error: error ?? null,
+        isPending,
+      }}
+    >
+      {() => (
+        <ConsoleRows testId="console-conv-inbound">
+          {list.rows.map((row) => (
+            <li
+              className="flex items-center justify-between gap-4 rounded-md px-3 py-2.5 hover:bg-(--ui-fill-quaternary)"
+              key={row.inboundId}
+            >
+              <div className="min-w-0">
+                <div className="truncate font-medium text-(--ui-text-primary)">
+                  {row.channel} · {row.messageType}
+                </div>
+                <div className="mt-0.5 text-(--ui-text-secondary)" data-ec-mono="">
+                  {row.externalChatId ?? '—'} · {row.receivedTs}
+                </div>
+              </div>
+              <span className="inline-flex shrink-0 items-center gap-1.5 text-(--ui-text-secondary)">
+                <StatusDot tone={row.stateTone} />
+                {row.state}
+              </span>
+            </li>
+          ))}
+        </ConsoleRows>
+      )}
+    </QueryBody>
   )
 }
 
-interface OutboundListViewProps {
+interface AttemptsProps {
+  attempts: ConversationsAttemptsView
+  isPending: boolean
+  error: unknown
+}
+
+export function AttemptsView({ attempts, isPending, error }: AttemptsProps) {
+  return (
+    <div className="mt-2 border-l border-(--ui-stroke-tertiary) pl-3">
+      <QueryBody
+        emptyText="no attempts"
+        isEmpty={(data: { attempts: AttemptView[] }) => data.attempts.length === 0}
+        query={{
+          data: { attempts: attempts.rows },
+          error: error ?? null,
+          isPending,
+        }}
+      >
+        {() => (
+          <ConsoleRows testId="console-conv-attempts">
+            {attempts.rows.map((row) => {
+              const tone: StatusTone =
+                OUTCOME_TONE[row.outcomeClass] ?? STATE_TONE[row.state] ?? 'muted'
+
+              return (
+                <li className="flex items-center justify-between gap-3 py-2" key={row.attemptId}>
+                  <span className="min-w-0 truncate text-(--ui-text-secondary)" data-ec-mono="">
+                    #{row.attemptNumber} · {row.outcomeClass} · {row.finishedTs}
+                  </span>
+                  <span className="inline-flex shrink-0 items-center gap-1.5 text-(--ui-text-secondary)">
+                    <StatusDot tone={tone} />
+                    {row.state}
+                  </span>
+                </li>
+              )
+            })}
+          </ConsoleRows>
+        )}
+      </QueryBody>
+    </div>
+  )
+}
+
+interface OutboundListProps {
   list: ConversationsOutboundListView
-  listPending: boolean
-  listError: unknown
+  isPending: boolean
+  error: unknown
   selected: null | string
   onSelect: (id: string) => void
   attemptsSlot: ReactNode
 }
 
-function OutboundListView({
+export function OutboundListView({
   list,
-  listPending,
-  listError,
+  isPending,
+  error,
   selected,
   onSelect,
   attemptsSlot,
-}: OutboundListViewProps) {
-  const t = usePluginI18n('enterprise-console')
-
-  if (listPending) {
-    return <Loader />
-  }
-
-  const errorText = listError instanceof Error ? listError.message : null
-
-  if (errorText) {
-    return <ErrorState description={errorText} title={t('status.error')} />
-  }
-
-  if (list.isEmpty) {
-    return <EmptyState title="no outbound" />
-  }
-
+}: OutboundListProps) {
   return (
-    <ul className="divide-y divide-(--ui-stroke-tertiary)" data-testid="console-conv-outbound">
-      {list.rows.map((row: OutboundView) => {
-        const isSelected = row.internalMessageId === selected
+    <QueryBody
+      emptyText="no outbound"
+      isEmpty={(data: { outbound: OutboundView[] }) => data.outbound.length === 0}
+      query={{
+        data: { outbound: list.rows },
+        error: error ?? null,
+        isPending,
+      }}
+    >
+      {() => (
+        <ConsoleRows testId="console-conv-outbound">
+          {list.rows.map((row) => {
+            const isSelected = row.internalMessageId === selected
 
-        return (
-          <li
-            className="border-b border-(--ui-stroke-tertiary) last:border-b-0"
-            key={row.internalMessageId}
-          >
-            <button
-              className={
-                isSelected
-                  ? 'flex w-full items-center justify-between gap-4 rounded-md bg-(--ui-fill-secondary) px-3 py-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-(--ui-accent)'
-                  : 'flex w-full items-center justify-between gap-4 rounded-md px-3 py-2.5 text-left outline-none hover:bg-(--ui-fill-quaternary) focus-visible:ring-2 focus-visible:ring-(--ui-accent)'
-              }
-              data-testid={`console-outbound-${row.internalMessageId}`}
-              onClick={() => onSelect(row.internalMessageId)}
-              type="button"
-            >
-              <span className="min-w-0">
-                <span className="block truncate font-medium text-(--ui-text-primary)">
-                  {row.channel} · {row.recipientBindingId}
-                </span>
-                <span className="mt-0.5 block text-(--ui-text-secondary)" data-ec-mono="">
-                  {row.createdTs}
-                </span>
-              </span>
-              <span className="inline-flex shrink-0 items-center gap-1.5 text-(--ui-text-secondary)">
-                <StatusDot tone={row.stateTone} />
-                {row.state}
-              </span>
-            </button>
-            {isSelected && attemptsSlot ? attemptsSlot : null}
-          </li>
-        )
-      })}
-    </ul>
+            return (
+              <li
+                className="border-b border-(--ui-stroke-tertiary) last:border-b-0"
+                key={row.internalMessageId}
+              >
+                <button
+                  className={
+                    isSelected
+                      ? 'flex w-full items-center justify-between gap-4 rounded-md bg-(--ui-fill-secondary) px-3 py-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-(--ui-accent)'
+                      : 'flex w-full items-center justify-between gap-4 rounded-md px-3 py-2.5 text-left outline-none hover:bg-(--ui-fill-quaternary) focus-visible:ring-2 focus-visible:ring-(--ui-accent)'
+                  }
+                  data-testid={`console-outbound-${row.internalMessageId}`}
+                  onClick={() => onSelect(row.internalMessageId)}
+                  type="button"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-(--ui-text-primary)">
+                      {row.channel} · {row.recipientBindingId}
+                    </span>
+                    <span className="mt-0.5 block text-(--ui-text-secondary)" data-ec-mono="">
+                      {row.createdTs}
+                    </span>
+                  </span>
+                  <span className="inline-flex shrink-0 items-center gap-1.5 text-(--ui-text-secondary)">
+                    <StatusDot tone={row.stateTone} />
+                    {row.state}
+                  </span>
+                </button>
+                {isSelected && attemptsSlot ? attemptsSlot : null}
+              </li>
+            )
+          })}
+        </ConsoleRows>
+      )}
+    </QueryBody>
   )
 }
 
@@ -233,16 +272,16 @@ export function ConversationsView({
       >
         {tab === 'inbound' ? (
           <InboundListView
+            error={inboundError}
+            isPending={inboundPending}
             list={inbound}
-            listError={inboundError}
-            listPending={inboundPending}
           />
         ) : (
           <OutboundListView
             attemptsSlot={attemptsSlot}
+            error={outboundError}
+            isPending={outboundPending}
             list={outbound}
-            listError={outboundError}
-            listPending={outboundPending}
             onSelect={onSelect}
             selected={selected}
           />

@@ -6,9 +6,9 @@
  *   - /api/conversations-outbound  (outbound messages)
  *   - /api/conversations-attempts  (per-internal-message attempts)
  *
- * Wire-shape types (`InboundRow`, `OutboundRow`, `AttemptRow`,
- * response envelopes, state/outcome tone tables) live here so the
- * view-model and view can stay free of the raw server payload.
+ * Per W1-B1-REMEDIATION-01 §P22, the query keys are the EXACT pre-split
+ * identity so cache sharing / observers / functional parity are
+ * preserved.
  *
  * The controller MUST NOT introduce any mutation surface. Phase-1
  * Conversations is read-only — server declares delivery state, the
@@ -60,23 +60,28 @@ export interface AttemptsResp {
   attempts: AttemptRow[]
 }
 
+export const CONVERSATIONS_INBOUND_KEY = ['enterprise-console', 'conv-inbound'] as const
+export const CONVERSATIONS_OUTBOUND_KEY = ['enterprise-console', 'conv-outbound'] as const
+export const conversationsAttemptsKey = (internalMessageId: string) =>
+  ['enterprise-console', 'conv-attempts', internalMessageId] as const
+
 export function useInboundList() {
   return useConsoleQuery<InboundResp>(
-    ['enterprise-console', 'conv-inbound'],
+    CONVERSATIONS_INBOUND_KEY,
     '/api/conversations-inbound'
   )
 }
 
 export function useOutboundList() {
   return useConsoleQuery<OutboundResp>(
-    ['enterprise-console', 'conv-outbound'],
+    CONVERSATIONS_OUTBOUND_KEY,
     '/api/conversations-outbound'
   )
 }
 
 export function useAttemptsList(internalMessageId: string) {
   return useConsoleQuery<AttemptsResp>(
-    ['enterprise-console', 'conv-attempts', internalMessageId],
+    conversationsAttemptsKey(internalMessageId),
     `/api/conversations-attempts?internal_message_id=${encodeURIComponent(internalMessageId)}`,
     0
   )

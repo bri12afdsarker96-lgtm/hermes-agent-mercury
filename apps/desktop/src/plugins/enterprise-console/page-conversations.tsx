@@ -4,114 +4,116 @@
  * Composes:
  *   - controller (useInboundList / useOutboundList / useAttemptsList)
  *   - view-model (deriveInboundList / deriveOutboundList / deriveAttemptsList)
- *   - view (ConversationsView) — for inbound + tab + outbound list
- *   - glue-rendered AttemptsBlock for the selected outbound row
+ *   - view (ConversationsView)
  *
- * The glue owns the React Query hook for per-row attempts because the
- * view can't call hooks inline. The view renders the structural
- * shell and the list; the glue slots the attempts block into the
- * selected row's cell.
+ * Per W1-B1-REMEDIATION-01:
+ *   - §P17: this glue is THIN COMPOSITION ONLY. No presentation markup
+ *     (no Loader / EmptyState / StatusDot / `<ul>` / CSS classes / text).
+ *     All rendering lives in `page-conversations.view.tsx`.
+ *   - §P18: attempts error state flows to the view via the attemptsSlot
+ *     container which passes error through to the view's
+ *     `<AttemptsView>` via QueryBody. The view preserves loading /
+ *     error / not_implemented / empty / ready semantics.
+ *   - §P19: this glue owns the `fmtIso` import (existing formatter).
+ *   - §P20: NO extra `t('status.moduleBody')` paragraph is rendered.
  *
- * Visual output is identical to the pre-split page-conversations.tsx.
- * No data-testid values change. No new mutation surface. The delivery
- * attempts stay evidence-only — no resend/replay/retry button is
- * exposed.
+ * The per-row attempts detail block is mounted as an `attemptsSlot`
+ * ReactNode prop. The slot renders an `<AttemptsView>` (view) with
+ * data lifted up via state setters (so the view re-renders when the
+ * query resolves).
  */
 
-import {
-  EmptyState,
-  Loader,
-  StatusDot,
-  usePluginI18n,
-} from '@hermes/plugin-sdk'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
-import { useAttemptsList, useInboundList, useOutboundList } from './page-conversations.controller'
-import { ConversationsView } from './page-conversations.view'
 import {
+  useAttemptsList,
+  useInboundList,
+  useOutboundList,
+} from './page-conversations.controller'
+import {
+  AttemptsView,
+  ConversationsView,
+} from './page-conversations.view'
+import {
+  type ConversationsAttemptsView,
   type ConversationsTab,
   deriveAttemptsList,
   deriveInboundList,
   deriveOutboundList,
-  OUTCOME_TONE,
-  STATE_TONE,
 } from './page-conversations.view-model'
+import { fmtIso } from './page-kit'
 
 /**
- * Glue-local component that mounts the controller's `useAttemptsList`
- * hook for the selected outbound row. The view does not see this
- * component; the glue slots it into the list cell directly.
+ * Glue-local controller bridge for the selected outbound row. Calls
+ * `useAttemptsList` (controller hook), pushes the derived VM up to
+ * `ConversationsPage` state via `useEffect` → setState. The view's
+ * `<AttemptsView>` consumes the resolved VM. The container itself
+ * renders nothing (returns null).
  */
-function SelectedAttempts({
+function SelectedAttemptsContainer({
   internalMessageId,
+  onAttempts,
 }: {
   internalMessageId: string
+  onAttempts: (vm: { view: ConversationsAttemptsView; isPending: boolean; error: unknown }) => void
 }) {
-  const t = usePluginI18n('enterprise-console')
   const query = useAttemptsList(internalMessageId)
-  const attempts = deriveAttemptsList(query.data?.attempts ?? [])
+  useEffect(() => {
+    onAttempts({
+      view: deriveAttemptsList(query.data?.attempts ?? [], fmtIso),
+      isPending: query.isPending,
+      error: query.error ?? null,
+    })
+  }, [query.data, query.isPending, query.error, onAttempts])
 
-  if (query.isPending) {
-    return (
-      <div className="mt-2 border-l border-(--ui-stroke-tertiary) pl-3">
-        <Loader />
-      </div>
-    )
-  }
-
-  if (attempts.isEmpty) {
-    return (
-      <div className="mt-2 border-l border-(--ui-stroke-tertiary) pl-3">
-        <EmptyState title="no attempts" />
-      </div>
-    )
-  }
-
-  return (
-    <div className="mt-2 border-l border-(--ui-stroke-tertiary) pl-3">
-      <ul className="divide-y divide-(--ui-stroke-tertiary)" data-testid="console-conv-attempts">
-        {attempts.rows.map((row) => (
-          <li className="flex items-center justify-between gap-3 py-2" key={row.attemptId}>
-            <span className="min-w-0 truncate text-(--ui-text-secondary)" data-ec-mono="">
-              #{row.attemptNumber} · {row.outcomeClass} · {row.finishedTs ?? '—'}
-            </span>
-            <span className="inline-flex shrink-0 items-center gap-1.5 text-(--ui-text-secondary)">
-              <StatusDot
-                tone={OUTCOME_TONE[row.outcomeClass] ?? STATE_TONE[row.state] ?? 'muted'}
-              />
-              {row.state}
-            </span>
-          </li>
-        ))}
-      </ul>
-      <p className="mt-1 text-(--ui-text-tertiary)">{t('status.moduleBody')}</p>
-    </div>
-  )
+  return null
 }
 
 export function ConversationsPage() {
   const [tab, setTab] = useState<ConversationsTab>('inbound')
   const [selected, setSelected] = useState<null | string>(null)
 
+  const [attemptsState, setAttemptsState] = useState<{
+    view: ConversationsAttemptsView
+    isPending: boolean
+    error: unknown
+  }>({ view: { rows: [], isEmpty: true }, isPending: false, error: null })
+
   const inbound = useInboundList()
   const outbound = useOutboundList()
 
-  const inboundVm = deriveInboundList(inbound.data?.inbound ?? [])
-  const outboundVm = deriveOutboundList(outbound.data?.outbound ?? [])
+  const inboundVm = deriveInboundList(inbound.data?.inbound ?? [], fmtIso)
+  const outboundVm = deriveOutboundList(outbound.data?.outbound ?? [], fmtIso)
 
   return (
-    <ConversationsView
-      attemptsSlot={selected ? <SelectedAttempts internalMessageId={selected} /> : null}
-      inbound={inboundVm}
-      inboundError={inbound.error}
-      inboundPending={inbound.isPending}
-      onChangeTab={setTab}
-      onSelect={(id) => setSelected((prev) => (prev === id ? null : id))}
-      outbound={outboundVm}
-      outboundError={outbound.error}
-      outboundPending={outbound.isPending}
-      selected={selected}
-      tab={tab}
-    />
+    <>
+      {selected ? (
+        <SelectedAttemptsContainer
+          internalMessageId={selected}
+          onAttempts={setAttemptsState}
+        />
+      ) : null}
+      <ConversationsView
+        attemptsSlot={
+          selected ? (
+            <AttemptsView
+              attempts={attemptsState.view}
+              error={attemptsState.error}
+              isPending={attemptsState.isPending}
+            />
+          ) : null
+        }
+        inbound={inboundVm}
+        inboundError={inbound.error ?? null}
+        inboundPending={inbound.isPending}
+        onChangeTab={setTab}
+        onSelect={(id) => setSelected((prev) => (prev === id ? null : id))}
+        outbound={outboundVm}
+        outboundError={outbound.error ?? null}
+        outboundPending={outbound.isPending}
+        selected={selected}
+        tab={tab}
+      />
+    </>
   )
 }

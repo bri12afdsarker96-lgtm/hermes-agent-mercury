@@ -5,6 +5,14 @@
  * shapes the view consumes. Tone tables for state / outcome are
  * derived from server strings (no fabricated tones).
  *
+ * Per W1-B1-REMEDIATION-01:
+ *   - §P19: timestamps (received_ts / created_ts / finished_ts) are
+ *     pre-formatted via the existing `fmtIso` formatter (passed as
+ *     an arg so this file stays transport-free; the glue owns the
+ *     formatter import).
+ *   - §P20: no extra `t('status.moduleBody')` paragraph is added — the
+ *     pre-split page had no such paragraph.
+ *
  * No transport, no useValue, no session atoms — the controller has
  * already resolved the queries.
  */
@@ -55,7 +63,7 @@ export interface AttemptView {
   attemptId: string
   attemptNumber: number
   createdTs: string
-  finishedTs: null | string
+  finishedTs: string
   internalMessageId: string
   outcomeClass: string
   state: string
@@ -77,7 +85,16 @@ export interface ConversationsAttemptsView {
   isEmpty: boolean
 }
 
-export function deriveInboundList(rows: InboundRow[]): ConversationsInboundListView {
+/**
+ * Phase-1 read-only contract type alias — declared here so the view
+ * can stay free of the controller imports.
+ */
+export type ConversationsTab = 'inbound' | 'outbound'
+
+export function deriveInboundList(
+  rows: InboundRow[],
+  fmtIso: (iso: null | string | undefined) => string
+): ConversationsInboundListView {
   return {
     isEmpty: rows.length === 0,
     rows: rows.map((row) => ({
@@ -85,19 +102,22 @@ export function deriveInboundList(rows: InboundRow[]): ConversationsInboundListV
       externalChatId: row.external_chat_id,
       inboundId: row.inbound_id,
       messageType: row.message_type,
-      receivedTs: row.received_ts,
+      receivedTs: fmtIso(row.received_ts),
       state: row.state,
       stateTone: STATE_TONE[row.state] ?? 'muted',
     })),
   }
 }
 
-export function deriveOutboundList(rows: OutboundRow[]): ConversationsOutboundListView {
+export function deriveOutboundList(
+  rows: OutboundRow[],
+  fmtIso: (iso: null | string | undefined) => string
+): ConversationsOutboundListView {
   return {
     isEmpty: rows.length === 0,
     rows: rows.map((row) => ({
       channel: row.channel,
-      createdTs: row.created_ts,
+      createdTs: fmtIso(row.created_ts),
       internalMessageId: row.internal_message_id,
       recipientBindingId: row.recipient_binding_id,
       state: row.state,
@@ -106,14 +126,17 @@ export function deriveOutboundList(rows: OutboundRow[]): ConversationsOutboundLi
   }
 }
 
-export function deriveAttemptsList(rows: AttemptRow[]): ConversationsAttemptsView {
+export function deriveAttemptsList(
+  rows: AttemptRow[],
+  fmtIso: (iso: null | string | undefined) => string
+): ConversationsAttemptsView {
   return {
     isEmpty: rows.length === 0,
     rows: rows.map((row) => ({
       attemptId: row.attempt_id,
       attemptNumber: row.attempt_number,
-      createdTs: row.created_ts,
-      finishedTs: row.finished_ts,
+      createdTs: fmtIso(row.created_ts),
+      finishedTs: fmtIso(row.finished_ts),
       internalMessageId: row.internal_message_id,
       outcomeClass: row.outcome_class,
       state: row.state,
@@ -122,9 +145,3 @@ export function deriveAttemptsList(rows: AttemptRow[]): ConversationsAttemptsVie
     })),
   }
 }
-
-/**
- * Conversations tab direction — declared here (presentation-owned)
- * so the view doesn't need to type a union inline.
- */
-export type ConversationsTab = 'inbound' | 'outbound'

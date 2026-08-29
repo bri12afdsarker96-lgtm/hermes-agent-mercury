@@ -28,6 +28,9 @@ import {
   STATE_TONE,
 } from './page-conversations.view-model'
 
+const fmtIso = (iso: null | string | undefined): string =>
+  iso == null || iso === '' ? '—' : iso
+
 const baseInbound: InboundRow = {
   channel: 'wecom',
   external_chat_id: 'ext-chat-1',
@@ -60,7 +63,7 @@ const baseAttempt: AttemptRow = {
 
 describe('deriveInboundList', () => {
   it('preserves every server field and derives stateTone', () => {
-    const vm = deriveInboundList([baseInbound])
+    const vm = deriveInboundList([baseInbound], fmtIso)
     expect(vm.isEmpty).toBe(false)
     expect(vm.rows[0]).toEqual({
       channel: 'wecom',
@@ -73,21 +76,26 @@ describe('deriveInboundList', () => {
     })
   })
 
+  it('receivedTs is formatted via fmtIso', () => {
+    const vm = deriveInboundList([baseInbound], fmtIso)
+    expect(vm.rows[0].receivedTs).toBe('2026-08-29T10:24:00Z')
+  })
+
   it('empty server list → isEmpty true', () => {
-    const vm = deriveInboundList([])
+    const vm = deriveInboundList([], fmtIso)
     expect(vm.isEmpty).toBe(true)
     expect(vm.rows).toEqual([])
   })
 
   it('unknown server state falls back to muted tone', () => {
-    const vm = deriveInboundList([{ ...baseInbound, state: 'mystery_state' }])
+    const vm = deriveInboundList([{ ...baseInbound, state: 'mystery_state' }], fmtIso)
     expect(vm.rows[0].stateTone).toBe('muted')
   })
 })
 
 describe('deriveOutboundList', () => {
   it('preserves every server field and derives stateTone', () => {
-    const vm = deriveOutboundList([baseOutbound])
+    const vm = deriveOutboundList([baseOutbound], fmtIso)
     expect(vm.isEmpty).toBe(false)
     expect(vm.rows[0]).toEqual({
       channel: 'wecom',
@@ -99,14 +107,19 @@ describe('deriveOutboundList', () => {
     })
   })
 
+  it('createdTs is formatted via fmtIso', () => {
+    const vm = deriveOutboundList([baseOutbound], fmtIso)
+    expect(vm.rows[0].createdTs).toBe('2026-08-29T10:25:00Z')
+  })
+
   it('empty server list → isEmpty true', () => {
-    expect(deriveOutboundList([]).isEmpty).toBe(true)
+    expect(deriveOutboundList([], fmtIso).isEmpty).toBe(true)
   })
 })
 
 describe('deriveAttemptsList', () => {
   it('preserves every server field; outcomeClass tone preferred', () => {
-    const vm = deriveAttemptsList([baseAttempt])
+    const vm = deriveAttemptsList([baseAttempt], fmtIso)
     expect(vm.isEmpty).toBe(false)
     expect(vm.rows[0]).toEqual({
       attemptId: 'a-1',
@@ -120,21 +133,27 @@ describe('deriveAttemptsList', () => {
     })
   })
 
+  it('finishedTs is formatted via fmtIso', () => {
+    const vm = deriveAttemptsList([baseAttempt], fmtIso)
+    expect(vm.rows[0].finishedTs).toBe('2026-08-29T10:25:01Z')
+  })
+
   it('falls back to STATE_TONE when outcomeClass is unknown', () => {
-    const vm = deriveAttemptsList([{ ...baseAttempt, outcome_class: 'unknown_outcome' }])
+    const vm = deriveAttemptsList([{ ...baseAttempt, outcome_class: 'unknown_outcome' }], fmtIso)
     expect(vm.rows[0].stateTone).toBe(STATE_TONE[baseAttempt.state])
   })
 
   it('falls back to muted when both outcomeClass and state are unknown', () => {
-    const vm = deriveAttemptsList([
-      { ...baseAttempt, outcome_class: 'unknown_outcome', state: 'unknown_state' },
-    ])
+    const vm = deriveAttemptsList(
+      [{ ...baseAttempt, outcome_class: 'unknown_outcome', state: 'unknown_state' }],
+      fmtIso
+    )
 
     expect(vm.rows[0].stateTone).toBe('muted')
   })
 
   it('empty server list → isEmpty true', () => {
-    expect(deriveAttemptsList([]).isEmpty).toBe(true)
+    expect(deriveAttemptsList([], fmtIso).isEmpty).toBe(true)
   })
 })
 
@@ -165,20 +184,10 @@ describe('STATE_TONE / OUTCOME_TONE tables', () => {
 
 describe('Phase-1 read-only contract', () => {
   it('exports only derivations and tables — no mutation helpers', () => {
-    // Sanity: the public surface of the view-model must not include
-    // anything that looks like a write endpoint or a retry / resend
-    // / replay action. Phase-1 Conversations is read-only.
-    // (We rely on this manual list because a structural check would
-    //  require reading the source; the controllers + view-model
-    //  surface here is the only stable consumer surface.)
     expect(typeof deriveInboundList).toBe('function')
     expect(typeof deriveOutboundList).toBe('function')
     expect(typeof deriveAttemptsList).toBe('function')
     expect(typeof STATE_TONE).toBe('object')
     expect(typeof OUTCOME_TONE).toBe('object')
-    // No mutation methods on the public types.
-    // (Structural check via type-level: not asserting at runtime;
-    //  this test exists to make a missing mutation helper a visible
-    //  failure when someone adds one.)
   })
 })
