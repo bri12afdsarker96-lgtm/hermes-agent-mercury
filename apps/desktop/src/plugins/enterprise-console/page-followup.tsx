@@ -5,30 +5,34 @@
  *   - controller (useFollowupList / conditionally-mounted detail+history)
  *   - view-model (deriveFollowupList / deriveFollowupPageViewModel /
  *     deriveFollowupDetail / deriveFollowupHistory)
- *   - view (FollowupView)
+ *   - view (FollowupView / FollowupSelectedDetailPanel)
  *
  * Per W1-B1-REMEDIATION-01:
- *   - §P6: this glue owns the status filter state and exposes
- *     `onStatusChange(next)` to the view. The view calls it; the glue
- *     applies `setStatus(next); setSelectedId(null);`.
+ *   - §P6: status filter state is owned here; the view calls
+ *     `onStatusChange(next)` and the glue applies
+ *     `setStatus(next); setSelectedId(null);`.
  *   - §P7: detail/history queries run ONLY when `selectedId !== null`.
- *     The conditional child component `FollowupSelectedDetailContainer`
- *     mounts the controller hooks for the selected id and unmounts
- *     them when nothing is selected. No empty-id request is fired.
- *   - §P8: that container lives in this glue file (not the view) so
- *     the view can stay free of transport.
- *   - §P10: this glue resolves `whoami` via `useValue($whoami)` (the
- *     established seam) and passes it to the page-VM derivation.
- *     `whoami: null` is NOT used.
+ *   - §P8: the conditional child component
+ *     `FollowupSelectedDetailContainer` lives in this glue file (not
+ *     the view) so the view can stay free of transport.
+ *   - §P10: whoami is resolved via `useValue($whoami)` (the
+ *     established seam) and passed to the page-VM derivation.
  *   - §P15: this glue owns the `fmtIso` import (existing formatter).
  *
- * The conditional detail/history mounting means the rendered FollowupView
- * receives either the initial empty VM, or a fully-resolved VM object
- * after the container's effects push state up via setState.
+ * Per W1-B1-REMEDIATION-02:
+ *   - §P6 + §P7: the selected-detail container returns the
+ *     `FollowupSelectedDetailPanel` directly — no useEffect relay,
+ *     no parent-cached VM state. Selection identity === render
+ *     identity via `key={selectedId}`. A switch from f1 → f2 tears
+ *     down the f1 container (and its React Query subscriptions)
+ *     immediately; there is no stale VM to leak across selections.
+ *   - §P8: the detail/history panel uses `QueryBody` for loading /
+ *     error / not_implemented / empty / ready semantics — matches
+ *     the pre-split page exactly.
  */
 
 import { useValue } from '@hermes/plugin-sdk'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 import { findPage } from './catalog'
 import {
@@ -38,7 +42,10 @@ import {
   useFollowupHistory,
   useFollowupList,
 } from './page-followup.controller'
-import { FollowupView } from './page-followup.view'
+import {
+  FollowupSelectedDetailPanel,
+  FollowupView,
+} from './page-followup.view'
 import {
   deriveFollowupDetail,
   deriveFollowupHistory,
@@ -52,45 +59,57 @@ import { fmtIso } from './page-kit'
 import { $whoami } from './session'
 
 /**
- * Per W1-B1-REMEDIATION-01 §P8: conditional child component mounting
- * for the detail/history hooks. Only mounts when an id is selected.
- * The container itself is glue-local; the view does not see it.
+ * Per W1-B1-REMEDIATION-02 §P6 + §P7:
+ * Container binds detail/history to the selected id via
+ * `key={selectedId}` (mounted by `FollowupPage`). On any selection
+ * change, React tears down the old container (and its React Query
+ * subscriptions) and mounts a fresh one for the new id. The container
+ * consumes the controller hooks synchronously on each render and
+ * passes pre-derived VMs to the presentational panel — there is no
+ * useEffect relay and no parent-cached VM state. The render identity
+ * === selection identity === query identity.
  *
- * Pushes resolved VMs to parent state via useEffect → setState so the
- * view re-renders when the queries resolve.
+ * The returned panel is the same component the view file exposes
+ * (also consumed by the inline-desktop detail path) so the
+ * presentational markup is centralised in the view file.
  */
 function FollowupSelectedDetailContainer({
   followupId,
-  onDetail,
-  onHistory,
 }: {
   followupId: string
-  onDetail: (vm: FollowupDetailViewModel) => void
-  onHistory: (vm: FollowupHistoryViewModel) => void
 }) {
   const detail = useFollowupDetail(followupId)
   const history = useFollowupHistory(followupId)
 
-  useEffect(() => {
-    onDetail(deriveFollowupDetail(detail.data?.followup ?? null, fmtIso))
-  }, [detail.data, onDetail])
+  const detailVm: FollowupDetailViewModel = {
+    detail: detail.data
+      ? deriveFollowupDetail(detail.data.followup, fmtIso).detail
+      : null,
+  }
 
-  useEffect(() => {
-    onHistory(deriveFollowupHistory(history.data?.history ?? []))
-  }, [history.data, onHistory])
+  // The view-model's history derivation is pure (no isPending / no
+  // error) so the container passes loading + error to the panel via
+  // props in addition to the VM events. The panel merges them with
+  // QueryBody to drive the loading / error / not_implemented / empty
+  // / ready semantics.
+  const baseHistory = deriveFollowupHistory(history.data?.history ?? [])
+  const historyVm: FollowupHistoryViewModel = baseHistory
 
-  return null
+  return (
+    <FollowupSelectedDetailPanel
+      detail={detailVm}
+      detailError={detail.error ?? null}
+      detailIsPending={detail.isPending}
+      history={historyVm}
+      historyError={history.error ?? null}
+      historyIsPending={history.isPending}
+    />
+  )
 }
 
 export function FollowupPage() {
   const [status, setStatus] = useState<'' | FollowupStatus>('')
   const [selectedId, setSelectedId] = useState<null | string>(null)
-  const [detailVm, setDetailVm] = useState<FollowupDetailViewModel>({ detail: null })
-
-  const [historyVm, setHistoryVm] = useState<FollowupHistoryViewModel>({
-    events: [],
-    isEmpty: true,
-  })
 
   const list = useFollowupList(status)
   const whoami = useValue($whoami)
@@ -120,29 +139,26 @@ export function FollowupPage() {
   }
 
   return (
-    <>
-      {selectedId ? (
-        <FollowupSelectedDetailContainer
-          followupId={selectedId}
-          onDetail={setDetailVm}
-          onHistory={setHistoryVm}
-        />
-      ) : null}
-      <FollowupView
-        detail={detailVm}
-        history={historyVm}
-        isReady={!list.isPending}
-        list={vm.list}
-        listError={list.error ?? null}
-        listPending={list.isPending}
-        onClearSelection={handleClearSelection}
-        onSelect={handleSelect}
-        onStatusChange={handleStatusChange}
-        selectedId={selectedId}
-        status={status}
-        statusOptions={FOLLOWUP_STATUSES}
-        title="Business follow-up"
-      />
-    </>
+    <FollowupView
+      isReady={!list.isPending}
+      list={vm.list}
+      listError={list.error ?? null}
+      listPending={list.isPending}
+      onClearSelection={handleClearSelection}
+      onSelect={handleSelect}
+      onStatusChange={handleStatusChange}
+      rightPane={
+        selectedId ? (
+          <FollowupSelectedDetailContainer
+            followupId={selectedId}
+            key={selectedId}
+          />
+        ) : null
+      }
+      selectedId={selectedId}
+      status={status}
+      statusOptions={FOLLOWUP_STATUSES}
+      title="Business follow-up"
+    />
   )
 }

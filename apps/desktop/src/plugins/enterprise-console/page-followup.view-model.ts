@@ -26,13 +26,22 @@
 import type { StatusTone } from '@hermes/plugin-sdk'
 
 import type { ConsolePage } from './catalog'
-import type {
-  FollowupHistoryRow,
-  FollowupRow,
-  FollowupStatus,
+import {
+  FOLLOWUP_STATUSES,
+  type FollowupHistoryRow,
+  type FollowupRow,
+  type FollowupStatus,
 } from './page-followup.controller'
 import type { Whoami } from './types'
 import { type CommonViewModelArgs, deriveCommonViewModel } from './view-model'
+
+// Re-export the presentation status union + the canonical list so the
+// view layer (which is forbidden from importing the controller per the
+// W1-A boundary rule) can still type its filter / filter-options props.
+// The union and the constant list are the *exact* same types the
+// controller exports; they are not derived or invented here.
+export type { FollowupStatus }
+export const FOLLOWUP_STATUS_VALUES: readonly FollowupStatus[] = FOLLOWUP_STATUSES
 
 export const STATUS_TONE: Record<FollowupStatus, StatusTone> = {
   cancelled: 'muted',
