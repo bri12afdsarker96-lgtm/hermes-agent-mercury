@@ -1,0 +1,61 @@
+name: Bootstrap reviewed Enterprise visual baselines
+
+on:
+  push:
+    branches:
+      - claude/p3-m4a-ui-design-system-01
+    paths:
+      - .github/workflows/bootstrap-enterprise-visual-baselines.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: claude/p3-m4a-ui-design-system-01
+          fetch-depth: 0
+
+      - name: Download exact reviewed visual artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/enterprise-visual
+          mkdir -p /tmp/enterprise-visual
+          gh run download 33229598641 \
+            --repo bri12afdsarker96-lgtm/hermes-agent-mercury \
+            --name visual-diffs-5e37ff1205558f56074e3aa35e9f8a401ce61e40 \
+            --dir /tmp/enterprise-visual
+
+      - name: Verify exact reviewed PNGs and stage baselines
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/enterprise-visual/enterprise-visual-operator-f8bd3-all-four-evidence-viewports
+          test "$(sha256sum "$ROOT/enterprise-operator-home-1280x720-actual.png" | cut -d' ' -f1)" = c761533d613369d53aa74d1e9d55965e9af1e5cebca92ebe8a1183829953e980
+          test "$(sha256sum "$ROOT/enterprise-operator-home-1440x900-actual.png" | cut -d' ' -f1)" = 5053a9a224afd3f6e94828ccb2e610ec0b617d349916b7da1550448cbb88c109
+          test "$(sha256sum "$ROOT/enterprise-operator-home-1672x941-actual.png" | cut -d' ' -f1)" = 7fdee53dc497118342762dc514afdbc03cd2c6759dbd058e9c433b0291eb9078
+          test "$(sha256sum "$ROOT/enterprise-operator-home-1920x1080-actual.png" | cut -d' ' -f1)" = 733d3d4106fcec560c367028da14a9ca16f85bee86ec71ab5ac5b02585461796
+
+          SNAP=apps/desktop/e2e/enterprise-visual.spec.ts-snapshots
+          mkdir -p "$SNAP"
+          cp "$ROOT/enterprise-operator-home-1280x720-actual.png" "$SNAP/enterprise-operator-home-1280x720-linux.png"
+          cp "$ROOT/enterprise-operator-home-1440x900-actual.png" "$SNAP/enterprise-operator-home-1440x900-linux.png"
+          cp "$ROOT/enterprise-operator-home-1672x941-actual.png" "$SNAP/enterprise-operator-home-1672x941-linux.png"
+          cp "$ROOT/enterprise-operator-home-1920x1080-actual.png" "$SNAP/enterprise-operator-home-1920x1080-linux.png"
+
+      - name: Commit baselines and self-delete bootstrap workflow
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add apps/desktop/e2e/enterprise-visual.spec.ts-snapshots
+          git rm .github/workflows/bootstrap-enterprise-visual-baselines.yml
+          git diff --cached --stat
+          git commit -m "test(desktop): establish reviewed enterprise visual baselines"
+          git push origin HEAD:claude/p3-m4a-ui-design-system-01
