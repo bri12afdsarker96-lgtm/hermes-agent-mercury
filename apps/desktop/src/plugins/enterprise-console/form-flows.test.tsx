@@ -6,6 +6,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { HandoffPage } from './page-handoff'
 import { KnowledgePage } from './page-knowledge'
 import { ProviderPage } from './page-provider'
+import { RemindersPage } from './page-reminders'
 import { $whoami } from './session'
 import { $transport, BaseHermesTransport, type TransportRequest } from './transport'
 import type { Whoami } from './types'
@@ -122,8 +123,8 @@ describe('Human handoff flow (reply)', () => {
 })
 
 describe('Provider set-key (secret hygiene)', () => {
-  it('renders the api key as a password field (never displayed)', async () => {
-    const transport = new RecordingTransport({
+  function providerTransport() {
+    return new RecordingTransport({
       '/api/providers': {
         active: 'openai',
         providers: [
@@ -138,6 +139,10 @@ describe('Provider set-key (secret hygiene)', () => {
         ]
       }
     })
+  }
+
+  it('renders the api key as a password field (never displayed)', async () => {
+    const transport = providerTransport()
 
     $whoami.set(who({ role: 'super_admin' }))
     $transport.set(transport)
@@ -148,5 +153,52 @@ describe('Provider set-key (secret hygiene)', () => {
 
     const input = screen.getByTestId('console-provider-apikey-openai') as HTMLInputElement
     expect(input.type).toBe('password')
+  })
+
+  it('erases the provider secret from renderer state after the dialog closes on success', async () => {
+    const transport = providerTransport()
+
+    $whoami.set(who({ role: 'super_admin' }))
+    $transport.set(transport)
+    wrap(<ProviderPage />)
+
+    await waitFor(() => expect(screen.getByTestId('console-provider-setkey-openai')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('console-provider-setkey-openai'))
+    fireEvent.change(screen.getByTestId('console-provider-apikey-openai'), { target: { value: 'sk-sensitive-value' } })
+    fireEvent.click(screen.getByTestId('console-provider-setkey-openai-submit'))
+
+    await waitFor(() => expect(transport.requests.some(r => r.path === '/api/set-provider-key')).toBe(true))
+    const req = transport.requests.find(r => r.path === '/api/set-provider-key')
+    expect((req?.opts?.body as { api_key: string }).api_key).toBe('sk-sensitive-value')
+
+    await waitFor(() => expect(screen.queryByTestId('console-provider-apikey-openai')).toBeNull())
+    fireEvent.click(screen.getByTestId('console-provider-setkey-openai'))
+    expect((screen.getByTestId('console-provider-apikey-openai') as HTMLInputElement).value).toBe('')
+    expect(screen.queryByDisplayValue('sk-sensitive-value')).toBeNull()
+  })
+})
+
+describe('Reminder create flow (timezone coherence)', () => {
+  it('sends a UTC epoch derived from datetime-local with the matching browser IANA timezone', async () => {
+    const transport = new RecordingTransport({ '/api/reminders': { available: true, reminders: [] } })
+    const when = '2030-01-02T03:04'
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+
+    $whoami.set(who({ effective_permissions: ['reminder.read', 'reminder.write'] }))
+    $transport.set(transport)
+    wrap(<RemindersPage />)
+
+    fireEvent.click(screen.getByTestId('console-reminder-create'))
+    expect(screen.getByTestId('console-reminder-timezone').textContent).toContain(timezone)
+    fireEvent.change(screen.getByTestId('console-reminder-subject'), { target: { value: 'task-123' } })
+    fireEvent.change(screen.getByTestId('console-reminder-when'), { target: { value: when } })
+    fireEvent.click(screen.getByTestId('console-reminder-create-submit'))
+
+    await waitFor(() => expect(transport.requests.some(r => r.path === '/api/reminder-create')).toBe(true))
+    const req = transport.requests.find(r => r.path === '/api/reminder-create')
+    const body = req?.opts?.body as { scheduled_for: number; subject_id: string; timezone: string }
+    expect(body.subject_id).toBe('task-123')
+    expect(body.timezone).toBe(timezone)
+    expect(body.scheduled_for).toBe(Math.floor(new Date(when).getTime() / 1000))
   })
 })

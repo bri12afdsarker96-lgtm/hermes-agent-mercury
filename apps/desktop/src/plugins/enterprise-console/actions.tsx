@@ -128,11 +128,14 @@ export function ConfirmAction({
  * this owns open/busy/error, posts to the server, invalidates on success, and
  * closes. Errors surface inline and keep the dialog open (fail closed). Secrets
  * live only in the caller's field state and the request body — never logged.
+ * `onOpenChange` lets secret-bearing callers erase controlled state whenever the
+ * dialog closes, including cancel/Escape as well as successful submission.
  */
 export function FormAction({
   canSubmit = true,
   children,
   invalidateKey,
+  onOpenChange,
   onSuccess,
   permission,
   submit,
@@ -144,6 +147,7 @@ export function FormAction({
   canSubmit?: boolean
   children: ReactNode
   invalidateKey?: readonly unknown[]
+  onOpenChange?: (open: boolean) => void
   onSuccess?: () => void
   permission?: string
   submit: () => Promise<unknown>
@@ -161,6 +165,16 @@ export function FormAction({
 
   if (!allowed) {
     return null
+  }
+
+  const changeOpen = (nextOpen: boolean) => {
+    setOpen(nextOpen)
+
+    if (!nextOpen) {
+      setError(null)
+    }
+
+    onOpenChange?.(nextOpen)
   }
 
   const onSubmit = async (event: FormEvent) => {
@@ -181,7 +195,7 @@ export function FormAction({
       }
 
       onSuccess?.()
-      setOpen(false)
+      changeOpen(false)
     } catch (err) {
       setError(actionError(err))
     } finally {
@@ -191,10 +205,10 @@ export function FormAction({
 
   return (
     <>
-      <Button data-testid={testId} onClick={() => setOpen(true)} size="sm" variant="ghost">
+      <Button data-testid={testId} onClick={() => changeOpen(true)} size="sm" variant="ghost">
         {trigger}
       </Button>
-      <Dialog onOpenChange={setOpen} open={open}>
+      <Dialog onOpenChange={changeOpen} open={open}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>

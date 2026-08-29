@@ -235,6 +235,26 @@ Notes:
   It replaced scattered Sparkles glyphs in updates / onboarding / about. Use it
   for hero/brand moments; don't reintroduce decorative star/sparkle icons.
 
+## Bundled typefaces
+
+- Fonts ship with the app; nothing is fetched from a font CDN at runtime. The
+  `@font-face` rules live at the top of `src/styles.css`, the files in
+  `src/fonts/`, and each face carries its licence.
+- **JetBrains Mono** (Apache-2.0) is the bundled terminal/code face.
+- **Source Han Sans CN / 思源黑体** (SIL OFL-1.1,
+  `src/fonts/LICENSE-SourceHanSansCN.txt`) is the bundled CJK face, taken from
+  Adobe's official `adobe-fonts/source-han-sans` 2.005R release. The exact CN
+  region-specific variable WOFF2 is stored as `src/fonts/SourceHanSansCN-VF.woff2`
+  and covers the approved UI's 400–700 weights in one file.
+- The face is declared globally but **opted into per surface** — today only the
+  Enterprise Console (`plugins/enterprise-console/ui/console.css`), whose
+  product copy is Simplified Chinese. `--dt-font-sans` is unchanged, so core
+  typography is unaffected; an unused `@font-face` costs nothing. If a second
+  surface needs CJK, opt it in the same way rather than changing the global
+  stack, which would restyle the whole app.
+- Adding a face means adding its licence file in the same change. A typeface
+  without a licence in-tree does not ship.
+
 ## Motion
 
 - Quick, functional transitions (~100ms on controls). Respect

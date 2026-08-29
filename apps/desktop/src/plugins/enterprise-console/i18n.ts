@@ -8,16 +8,6 @@
 import type { PluginLocaleBundles } from '@hermes/plugin-sdk'
 
 const en = {
-  connect: {
-    baseUrl: 'Hermes server address',
-    baseUrlPlaceholder: 'http://127.0.0.1:8765',
-    connect: 'Connect',
-    connecting: 'Connecting…',
-    intro: 'Connect to a Hermes server to load the console. The server owns identity, tenant, and permissions.',
-    title: 'Connect to Hermes',
-    token: 'Access token',
-    tokenPlaceholder: 'principal bearer token'
-  },
   nav: 'Enterprise',
   page: {
     alerts: 'Alerts',
@@ -61,16 +51,6 @@ const en = {
 }
 
 const zh = {
-  connect: {
-    baseUrl: 'Hermes 服务器地址',
-    baseUrlPlaceholder: 'http://127.0.0.1:8765',
-    connect: '连接',
-    connecting: '连接中…',
-    intro: '连接到 Hermes 服务器以加载控制台。身份、租户与权限均由服务器掌控。',
-    title: '连接到 Hermes',
-    token: '访问令牌',
-    tokenPlaceholder: 'principal bearer 令牌'
-  },
   nav: '企业',
   page: {
     alerts: '告警',

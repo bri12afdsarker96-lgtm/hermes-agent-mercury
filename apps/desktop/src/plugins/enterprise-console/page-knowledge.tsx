@@ -34,8 +34,9 @@ import { actionError, ConfirmAction, FormAction } from './actions'
 import { capabilityStatus, hasPermission } from './capabilities'
 import { ConsoleRows, fmtEpoch, QueryBody, useConsoleQuery } from './page-kit'
 import { $whoami } from './session'
-import { CapabilityBadge } from './status-badge'
+import { CapabilityBadge, PageStatusBadge } from './status-badge'
 import { useTransport } from './transport'
+import { PageHeader } from './ui'
 
 const KB_GAPS_KEY = ['enterprise-console', 'kb-gaps'] as const
 const UPLOADS_KEY = ['enterprise-console', 'kb-uploads'] as const
@@ -447,19 +448,34 @@ export function KnowledgePage() {
   const status = capabilityStatus(useValue($whoami), 'knowledge_rag')
 
   return (
-    <div className="flex flex-col gap-4" data-page-status="ready-dev" data-testid="console-page-knowledge">
+    <div
+      className="mx-auto flex w-full max-w-[96rem] flex-col px-(--ec-page-inset-x) py-(--ec-page-inset-y)"
+      data-page-status="ready-dev"
+      data-testid="console-page-knowledge"
+    >
+      <PageHeader
+        purpose="Review knowledge gaps, stage sources, preview chunks and publish through authoritative server workflows."
+        status={<PageStatusBadge status="ready-dev" />}
+        title="Enterprise knowledge"
+      />
+
       {status && status !== 'LIVE' ? (
         <div
-          className="flex items-center gap-2 rounded-md border border-border p-2 text-xs"
+          className="mb-(--ec-gutter) flex items-center gap-2 rounded-(--ec-panel-radius) border border-(--ui-stroke-secondary) bg-(--ui-bg-card) px-3 py-2 text-(--ui-text-secondary)"
           data-testid="console-knowledge-dev"
         >
           <CapabilityBadge status={status} />
-          <span className="text-muted-foreground">knowledge RAG is not production-live on this server</span>
+          <span>knowledge RAG is not production-live on this server</span>
         </div>
       ) : null}
-      <UploadsSection />
-      <SourcesSection />
-      <CandidatesSection />
+
+      <div className="grid items-start gap-(--ec-gutter) xl:grid-cols-2">
+        <div className="flex min-w-0 flex-col gap-(--ec-gutter)">
+          <UploadsSection />
+          <SourcesSection />
+        </div>
+        <CandidatesSection />
+      </div>
     </div>
   )
 }

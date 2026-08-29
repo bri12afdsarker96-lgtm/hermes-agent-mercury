@@ -1,0 +1,20 @@
+name: Enterprise Visual Evidence
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/e2e-desktop.yml'
+      - '.github/workflows/enterprise-visual.yml'
+      - 'apps/desktop/e2e/enterprise-visual.spec.ts'
+      - 'apps/desktop/e2e/enterprise-visual.spec.ts-snapshots/**'
+      - 'apps/desktop/e2e/fixtures.ts'
+      - 'apps/desktop/src/plugins/enterprise-console/**'
+
+permissions:
+  contents: read
+
+jobs:
+  enterprise-visual:
+    uses: ./.github/workflows/e2e-desktop.yml
+    with:
+      test_path: e2e/enterprise-visual.spec.ts

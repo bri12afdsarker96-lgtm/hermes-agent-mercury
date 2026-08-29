@@ -17,6 +17,8 @@ import { useState } from 'react'
 import { HermesApiError } from './fetch-transport'
 import { ConsoleRows, fmtIso, useConsoleQuery } from './page-kit'
 import { $whoami } from './session'
+import { PageStatusBadge } from './status-badge'
+import { PageHeader } from './ui'
 
 export interface AuditEvent {
   action: string
@@ -86,7 +88,11 @@ function AuditEventFields({ event }: { event: AuditEvent }) {
 }
 
 function AuditDetail({ eventId }: { eventId: string }) {
-  const query = useConsoleQuery<AuditDetailResp>(['enterprise-console', 'audit-detail', eventId], `/api/audit-detail?event_id=${encodeURIComponent(eventId)}`, 0)
+  const query = useConsoleQuery<AuditDetailResp>(
+    ['enterprise-console', 'audit-detail', eventId],
+    `/api/audit-detail?event_id=${encodeURIComponent(eventId)}`,
+    0
+  )
 
   if (query.isPending) {
     return <Loader />
@@ -110,8 +116,6 @@ function AuditDetail({ eventId }: { eventId: string }) {
 }
 
 function AuditChain({ events }: { events: AuditEvent[] }) {
-  // Oldest-first, exactly as the server returns it — the ordering IS the
-  // evidence; never re-sort.
   return (
     <ConsoleRows testId="console-audit-correlate">
       {events.map(event => (
@@ -133,13 +137,25 @@ function AuditBody() {
   const [selectedId, setSelectedId] = useState<null | string>(null)
   const [correlateRef, setCorrelateRef] = useState<null | string>(null)
 
-  const listQuery = useConsoleQuery<AuditListResp>(['enterprise-console', 'audit-list', action, resourceRef], auditListPath(action, resourceRef))
-  const chainQuery = useConsoleQuery<AuditListResp>(['enterprise-console', 'audit-correlate', correlateRef ?? ''], `/api/audit-correlate?resource_ref=${encodeURIComponent(correlateRef ?? '')}`, 0)
+  const listQuery = useConsoleQuery<AuditListResp>(
+    ['enterprise-console', 'audit-list', action, resourceRef],
+    auditListPath(action, resourceRef)
+  )
+  const chainQuery = useConsoleQuery<AuditListResp>(
+    ['enterprise-console', 'audit-correlate', correlateRef ?? ''],
+    `/api/audit-correlate?resource_ref=${encodeURIComponent(correlateRef ?? '')}`,
+    0
+  )
 
   return (
     <div className="flex flex-col gap-2" data-page-status="ready" data-testid="console-page-audit">
       <div className="flex flex-wrap items-center gap-2">
-        <Input data-testid="console-audit-action" onChange={event => setAction(event.target.value)} placeholder="action (exact)" value={action} />
+        <Input
+          data-testid="console-audit-action"
+          onChange={event => setAction(event.target.value)}
+          placeholder="action (exact)"
+          value={action}
+        />
         <Input
           data-testid="console-audit-resource"
           onChange={event => setResourceRef(event.target.value)}
@@ -152,14 +168,21 @@ function AuditBody() {
         <div className="flex flex-col gap-1">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>evidence chain (oldest → newest) · {correlateRef}</span>
-            <button className="underline" data-testid="console-audit-correlate-close" onClick={() => setCorrelateRef(null)} type="button">
+            <button
+              className="underline"
+              data-testid="console-audit-correlate-close"
+              onClick={() => setCorrelateRef(null)}
+              type="button"
+            >
               back to list
             </button>
           </div>
           {chainQuery.isPending ? (
             <Loader />
           ) : chainQuery.error ? (
-            (auditErrorState(chainQuery.error) ?? <ErrorState description={String((chainQuery.error as Error).message)} title="error" />)
+            (auditErrorState(chainQuery.error) ?? (
+              <ErrorState description={String((chainQuery.error as Error).message)} title="error" />
+            ))
           ) : (chainQuery.data as AuditListResp).events.length === 0 ? (
             <EmptyState title="no correlated events" />
           ) : (
@@ -169,7 +192,9 @@ function AuditBody() {
       ) : listQuery.isPending ? (
         <Loader />
       ) : listQuery.error ? (
-        (auditErrorState(listQuery.error) ?? <ErrorState description={String((listQuery.error as Error).message)} title="error" />)
+        (auditErrorState(listQuery.error) ?? (
+          <ErrorState description={String((listQuery.error as Error).message)} title="error" />
+        ))
       ) : (listQuery.data as AuditListResp).events.length === 0 ? (
         <EmptyState title="no audit events" />
       ) : (
@@ -208,19 +233,35 @@ function AuditBody() {
   )
 }
 
+function AuditFrame({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mx-auto flex w-full max-w-[96rem] flex-col px-(--ec-page-inset-x) py-(--ec-page-inset-y)">
+      <PageHeader
+        purpose="Inspect immutable audit evidence and correlate server-authored events. No replay or mutation is available here."
+        status={<PageStatusBadge status="ready" />}
+        title="Audit evidence"
+      />
+      {children}
+    </div>
+  )
+}
+
 export function AuditPage() {
   const who = useValue($whoami)
 
-  // A bare super_admin (no tenant view) would 400 server-side. Guard in the
-  // PARENT so the query hooks in AuditBody never mount — no doomed request is
-  // fired — and surface an honest "pick a tenant" notice instead.
   if (who && who.role === 'super_admin' && !who.tenant_id) {
     return (
-      <div data-page-status="ready" data-testid="console-page-audit">
-        <EmptyState description="select a tenant view (?tenant=) to read audit evidence" title="pick a tenant" />
-      </div>
+      <AuditFrame>
+        <div data-page-status="ready" data-testid="console-page-audit">
+          <EmptyState description="select a tenant view (?tenant=) to read audit evidence" title="pick a tenant" />
+        </div>
+      </AuditFrame>
     )
   }
 
-  return <AuditBody />
+  return (
+    <AuditFrame>
+      <AuditBody />
+    </AuditFrame>
+  )
 }

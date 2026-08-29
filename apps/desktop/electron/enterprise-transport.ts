@@ -81,8 +81,9 @@ export function normalizeEnterpriseBaseUrl(raw: unknown): string {
  * gateway baseUrl is the enterprise origin. This resolves a TRUSTED, main-owned,
  * non-secret origin from managed config (never a renderer value), applying the
  * same enterprise base-URL policy (https for non-loopback, no credentials).
- * Returns null (→ one-login unavailable, ConnectForm stays break-glass) when the
- * config is absent or invalid — never throws, never guesses.
+ * Returns null (→ one-login unavailable and the console stays hidden) when the
+ * config is absent or invalid — never throws, never guesses and never falls back
+ * to renderer-supplied credentials.
  */
 export function normalizeEnterpriseApiOriginOrNull(raw: unknown): string | null {
   const value = String(raw ?? '').trim()

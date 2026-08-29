@@ -11,11 +11,11 @@ entry, no core edits, no shared-root files.
   permission decision. `PermissionGate` / `CapabilityGate` are UI display control only.
 - **Capability Truth.** Every capability shows the server's maturity verdict
   (`LIVE/DEV/CONTRACT/PLANNED`); DEV/CONTRACT/PLANNED never renders as production-live.
-- **Secret hygiene.** The bearer is entered transiently in the renderer at connect and
-  cleared from the input on handoff; thereafter **main owns the session credential** (per
-  window, fenced by an opaque `sessionId`) — never persisted (only the non-secret base URL
-  is), never logged. Without the desktop bridge the transport **fails closed** (no
-  renderer-direct-fetch fallback). Connector/provider secrets are never shown in plaintext.
+- **Secret hygiene.** Production session bootstrap is token-free in the renderer:
+  **main owns the session credential** (per window, fenced by an opaque `sessionId`) and
+  returns only non-secret session state. There is no routed bearer-input form. Without the
+  desktop bridge the transport **fails closed** (no renderer-direct-fetch fallback).
+  Connector/provider secrets are never shown in plaintext.
 - **No fabrication.** Pages with no server route render an honest "server API missing"
   state; they are not faked on the client. See `docs/enterprise-console/INTERFACE_FREEZE.md`.
 
@@ -30,7 +30,7 @@ entry, no core edits, no shared-root files.
 - `fetch-transport.ts` — DEV/test adapter (direct renderer fetch); swapped out for the IPC
   transport when the desktop bridge is present.
 - `fake-transport.ts` — a `HermesTransport` for tests (no network, no credential).
-- `session.ts` — connect / whoami; persists only the base URL (never the bearer).
+- `session.ts` — native-session bootstrap / whoami; persists no bearer.
 - `capabilities.ts` / `gate.tsx` — UI-only permission + capability gates.
 - `catalog.ts` — the 13-page interface freeze, encoded.
 - `console.tsx` — the shell (connect gate → sub-nav + content).
@@ -39,8 +39,9 @@ entry, no core edits, no shared-root files.
 
 ## Config
 
-Point the console at a running Hermes web server (base URL) and connect with a principal
-bearer. The server establishes the session via `/api/whoami`.
+The Electron main process resolves the trusted Enterprise API origin and reuses the
+desktop's native login to establish the session. The renderer receives only an opaque
+session id and server-authored `/api/whoami` state.
 
 ## Test
 

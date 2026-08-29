@@ -15,7 +15,9 @@ import { ConfirmAction, FormAction } from './actions'
 import { hasPermission } from './capabilities'
 import { ConsoleRows, fmtEpoch, fmtIso, QueryBody, useConsoleQuery } from './page-kit'
 import { $whoami } from './session'
+import { PageStatusBadge } from './status-badge'
 import { useTransport } from './transport'
+import { ConsolePanel, PageHeader } from './ui'
 
 interface Principal {
   created_ts: number
@@ -55,35 +57,36 @@ function PrincipalsSection() {
   const query = useConsoleQuery<PrincipalsResp>(PRINCIPALS_KEY, '/api/principals')
 
   return (
-    <QueryBody emptyText="no principals" isEmpty={data => data.principals.length === 0} query={query}>
-      {data => (
-        <ConsoleRows testId="console-principals">
-          {data.principals.map(principal => (
-            <li
-              className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
-              key={principal.principal_id}
-            >
-              <div className="min-w-0">
-                <div className="truncate">{principal.name}</div>
-                <div className="text-xs text-muted-foreground">
-                  {principal.role} · seen {fmtEpoch(principal.last_seen_ts)}
+    <ConsolePanel divided title="Principals">
+      <QueryBody emptyText="no principals" isEmpty={data => data.principals.length === 0} query={query}>
+        {data => (
+          <ConsoleRows testId="console-principals">
+            {data.principals.map(principal => (
+              <li
+                className="flex min-h-14 items-center justify-between gap-3 border-b border-(--ui-stroke-tertiary) py-2 last:border-b-0"
+                key={principal.principal_id}
+              >
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-(--ui-text-primary)">{principal.name}</div>
+                  <div className="text-(--ui-text-tertiary)">
+                    <span data-ec-mono="">{principal.role}</span> · seen {fmtEpoch(principal.last_seen_ts)}
+                  </div>
                 </div>
-              </div>
-              <span className="inline-flex shrink-0 items-center gap-1 text-xs">
-                <StatusDot tone={principal.status === 'active' ? 'good' : 'muted'} />
-                {principal.status}
-              </span>
-            </li>
-          ))}
-        </ConsoleRows>
-      )}
-    </QueryBody>
+                <span className="inline-flex shrink-0 items-center gap-1 text-(--ui-text-secondary)">
+                  <StatusDot tone={principal.status === 'active' ? 'good' : 'muted'} />
+                  {principal.status}
+                </span>
+              </li>
+            ))}
+          </ConsoleRows>
+        )}
+      </QueryBody>
+    </ConsolePanel>
   )
 }
 
 function CreateBinding() {
   const transport = useTransport()
-  // Reuses the principals cache (same query key) for the target picker.
   const principals = useConsoleQuery<PrincipalsResp>(PRINCIPALS_KEY, '/api/principals')
   const [channel, setChannel] = useState('')
   const [externalSubject, setExternalSubject] = useState('')
@@ -140,29 +143,25 @@ function ChannelBindingsSection() {
   const query = useConsoleQuery<ChannelBindingsListResp>(CHANNEL_BINDINGS_KEY, '/api/channel-bindings-list')
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <div className="text-xs font-medium text-muted-foreground">channel bindings</div>
-        <CreateBinding />
-      </div>
+    <ConsolePanel action={<CreateBinding />} divided title="Channel bindings">
       <QueryBody emptyText="no channel bindings" isEmpty={data => data.bindings.length === 0} query={query}>
         {data => (
           <ConsoleRows testId="console-channel-bindings">
             {data.bindings.map(binding => (
               <li
-                className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
+                className="flex min-h-14 items-center justify-between gap-3 border-b border-(--ui-stroke-tertiary) py-2 last:border-b-0"
                 key={binding.binding_id}
               >
                 <div className="min-w-0">
-                  <div className="truncate">
+                  <div className="truncate font-medium text-(--ui-text-primary)">
                     {binding.channel} · {binding.external_subject}
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    {binding.principal_id} · v{binding.version} · {fmtIso(binding.updated_ts)}
+                  <div className="text-(--ui-text-tertiary)">
+                    <span data-ec-mono="">{binding.principal_id}</span> · v{binding.version} · {fmtIso(binding.updated_ts)}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  <span className="inline-flex items-center gap-1 text-xs">
+                  <span className="inline-flex items-center gap-1 text-(--ui-text-secondary)">
                     <StatusDot tone={binding.status === 'active' ? 'good' : 'muted'} />
                     {binding.status}
                   </span>
@@ -185,7 +184,7 @@ function ChannelBindingsSection() {
           </ConsoleRows>
         )}
       </QueryBody>
-    </div>
+    </ConsolePanel>
   )
 }
 
@@ -194,9 +193,21 @@ export function IdentityPage() {
   const canManageBindings = who ? hasPermission(who, 'channel.binding.manage') : false
 
   return (
-    <div className="flex flex-col gap-4" data-page-status="ready" data-testid="console-page-identity">
-      <PrincipalsSection />
-      {canManageBindings ? <ChannelBindingsSection /> : null}
+    <div
+      className="mx-auto flex w-full max-w-[96rem] flex-col px-(--ec-page-inset-x) py-(--ec-page-inset-y)"
+      data-page-status="ready"
+      data-testid="console-page-identity"
+    >
+      <PageHeader
+        purpose="Principal visibility and tenant-scoped external channel bindings through server authority."
+        status={<PageStatusBadge status="ready" />}
+        title="Identity & channel bindings"
+      />
+
+      <div className="grid items-start gap-(--ec-gutter) xl:grid-cols-2">
+        <PrincipalsSection />
+        {canManageBindings ? <ChannelBindingsSection /> : null}
+      </div>
     </div>
   )
 }

@@ -28,9 +28,16 @@ export default defineConfig({
   /* Test files live under e2e/ so they never collide with the vitest suite
    * under src/ or the node:test files under electron/. */
   testDir: './e2e',
-  /* The desktop app can take a while to bootstrap on cold CI runners — 90 s
-   * per test gives us headroom without masking real hangs. */
-  timeout: 90_000,
+  /* The desktop app can take a while to bootstrap on cold CI runners. The
+   * enterprise visual evidence spec runs 4 viewports × `toHaveScreenshot`
+   * (which includes pixel diff vs the cached baseline) plus setup/teardown —
+   * measured ~7m13s on a cold runner when 180_000ms proved too tight (the
+   * per-action 5s default of `toHaveScreenshot` is overridden by the
+   * per-test timeout below, and the 4-viewport diff loop dominates the
+   * wall-clock). Allow 300s (5 min) per test so the spec has headroom
+   * while a true hang (many minutes) is still detected by the runner's
+   * own job-level timeout (20m on e2e-desktop.yml). */
+  timeout: 300_000,
   retries: process.env.CI ? 1 : 0,
   /* Each test gets its own worker so the Electron process is fully isolated. */
   fullyParallel: false,

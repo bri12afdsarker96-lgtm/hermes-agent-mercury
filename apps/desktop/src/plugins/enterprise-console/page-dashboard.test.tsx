@@ -61,4 +61,23 @@ describe('DashboardPage', () => {
     expect(caps.textContent).toContain('DEV')
     expect(caps.textContent).toContain('LIVE')
   })
+
+  it.each([
+    ['operator', 'Operator Home'],
+    ['supervisor', 'Supervisor Workspace'],
+    ['tenant_admin', 'Tenant Admin Overview'],
+    ['super_admin', 'Tenant Admin Overview']
+  ])('maps server role %s to frozen workspace title', (role, title) => {
+    $whoami.set({ ...WHO, role })
+    wrap(<DashboardPage />)
+
+    expect(screen.getByRole('heading', { level: 1, name: title })).toBeTruthy()
+  })
+
+  it('uses a neutral workspace title for an unknown server role', () => {
+    $whoami.set({ ...WHO, role: 'future_role' })
+    wrap(<DashboardPage />)
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Workspace' })).toBeTruthy()
+  })
 })
