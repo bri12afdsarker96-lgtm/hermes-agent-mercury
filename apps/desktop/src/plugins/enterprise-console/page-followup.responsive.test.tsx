@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { FollowupPage } from './page-followup'
-import { BaseHermesTransport, type TransportRequest, $transport } from './transport'
+import { $transport, BaseHermesTransport, type TransportRequest } from './transport'
 
 class FollowupTransport extends BaseHermesTransport {
   request<T>(path: string, _opts?: TransportRequest): Promise<T> {

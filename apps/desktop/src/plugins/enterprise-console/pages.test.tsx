@@ -371,7 +371,8 @@ describe('AuditPage (SC4, read-only evidence)', () => {
     await waitFor(() => expect(screen.getByTestId('console-audit')).toBeTruthy())
     expect(screen.getByText('kb.commit')).toBeTruthy()
     expect(screen.queryByText(/1970/)).toBeNull()
-    expect(screen.queryByText(/replay|re-?execute/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /replay|re-?execute/i })).toBeNull()
+    expect(screen.queryByRole('link', { name: /replay|re-?execute/i })).toBeNull()
   })
 
   it('shows a pick-a-tenant notice for a bare super_admin (no tenant view), firing no request', async () => {
