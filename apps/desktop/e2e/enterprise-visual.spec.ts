@@ -11,6 +11,8 @@
  * Unlike the legacy soft visual helper, these assertions are hard gates:
  * a missing baseline or a pixel diff fails the test. Refresh intentionally via
  * `npx playwright test e2e/enterprise-visual.spec.ts --update-snapshots`.
+ * The Linux baselines were committed only after the first hard missing-baseline
+ * run produced all four actuals and those exact actuals were manually reviewed.
  */
 
 import { type ElectronApplication } from '@playwright/test'
