@@ -54,7 +54,7 @@ jobs:
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add apps/desktop/e2e/enterprise-visual.spec.ts-snapshots
+          git add -f apps/desktop/e2e/enterprise-visual.spec.ts-snapshots/*.png
           git rm .github/workflows/bootstrap-enterprise-visual-baselines.yml
           git diff --cached --stat
           git commit -m "test(desktop): establish reviewed enterprise visual baselines"
