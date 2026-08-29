@@ -147,26 +147,10 @@ test.afterAll(async () => {
   fixture = null
 })
 
-// One test per evidence viewport. Originally these were a single
-// serialised test that ran all four viewports inside one test body, which
-// exceeded any single-test timeout on cold CI runners (each viewport
-// costs ~1 minute of real wall-clock — 4 viewports serialised ≈ 4
-// minutes, well past even 5-minute test timeouts). Splitting into four
-// independent tests means each one fits comfortably under the default
-// 90_000ms test timeout, and a single-viewport regression points at
-// the exact viewport that broke without a binary search through a
-// shared test body.
-//
-// The four baselines already exist (commit 8d39946903 / 2c07f6762
-// from W5 foundation work) and Playwright locates them by
-// `<test-title>-<snapshot-name>-<platform>.png`. Because every test
-// uses the same snapshot name (`enterprise-operator-home-${w}x${h}.png`),
-// each test gets a UNIQUE title so the four baselines are matched
-// 1:1 against the four tests.
-for (const { height, width } of EVIDENCE_VIEWPORTS) {
-  test(`operator home has hard visual baseline at ${width}x${height}`, async () => {
-    const { app, page } = fixture!
+test('operator home has hard visual baselines at all four evidence viewports', async () => {
+  const { app, page } = fixture!
 
+  for (const { height, width } of EVIDENCE_VIEWPORTS) {
     await setContentViewport(app, width, height)
     await expect
       .poll(() => page.evaluate(() => ({ height: window.innerHeight, width: window.innerWidth })))
@@ -183,5 +167,5 @@ for (const { height, width } of EVIDENCE_VIEWPORTS) {
       caret: 'hide',
       timeout: 30_000,
     })
-  })
-}
+  }
+})
