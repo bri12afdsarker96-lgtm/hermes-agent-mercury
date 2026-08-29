@@ -96,6 +96,10 @@ describe('FollowupPage responsive detail', () => {
     const row = await screen.findByTestId('console-followup-f1')
     fireEvent.click(row)
 
+    // Per W1-B1-REMEDIATION-02 §P4 + §P10: when the dialog opens
+    // the selection-bound detail surface MUST already exist
+    // (QueryBody mounts Loader inside the console-followup-detail
+    // wrapper immediately on mount — never blank).
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy())
     expect(screen.getByTestId('console-followup-detail')).toBeTruthy()
     expect(row.getAttribute('aria-expanded')).toBe('true')
@@ -109,7 +113,9 @@ describe('FollowupPage responsive detail', () => {
     const row = await screen.findByTestId('console-followup-f1')
     fireEvent.click(row)
 
-    await waitFor(() => expect(screen.getByTestId('console-followup-detail')).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByTestId('console-followup-detail')).toBeTruthy()
+    )
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(row.getAttribute('aria-expanded')).toBe('true')
   })
