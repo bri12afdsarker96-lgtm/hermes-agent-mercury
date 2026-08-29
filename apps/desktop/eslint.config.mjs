@@ -41,6 +41,35 @@ export default [
     }
   },
   {
+    // W5-B0 Contract/View Freeze (see .hermes/plans/2026-08-29_wave1-contract-freeze.md).
+    // page-*.view.tsx files are pure presentational renderers — they may
+    // not import transport, query hooks, or session/permission helpers
+    // (those belong in page-*.controller.ts). The blacklist lives in
+    // `lib/transport-boundary.ts` so adding a new transport helper only
+    // requires updating that one list.
+    files: ['src/plugins/enterprise-console/page-*.view.tsx', 'src/plugins/enterprise-console/page-*.view.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            { name: 'useTransport', message: 'View files may not import transport. Move this to a *.controller.ts file.' },
+            { name: 'IpcHermesTransport', message: 'View files may not import transport. Move this to a *.controller.ts file.' },
+            { name: 'FetchHermesTransport', message: 'View files may not import transport. Move this to a *.controller.ts file.' },
+            { name: 'FakeHermesTransport', message: 'View files may not import transport. Move this to a *.controller.ts file.' },
+            { name: 'useQuery', message: 'View files may not import query hooks. Move this to a *.controller.ts file.' },
+            { name: 'useMutation', message: 'View files may not import mutation hooks. Move this to a *.controller.ts file.' },
+            { name: 'useQueryClient', message: 'View files may not import query client. Move this to a *.controller.ts file.' },
+            { name: 'invalidateQueries', message: 'View files may not import query invalidation. Move this to a *.controller.ts file.' },
+            { name: 'useConsoleQuery', message: 'View files may not import the shared query hook. Move this to a *.controller.ts file.' },
+            { name: '$whoami', message: 'View files receive whoami via the ViewModel; do not read the atom directly.' },
+            { name: 'hasPermission', message: 'View files receive permission flags via the ViewModel; do not call helpers directly.' }
+          ]
+        }
+      ]
+    }
+  },
+  {
     // Ban mirroring reactive values into refs via useEffect — the "atom-mirrored
     // ref" antipattern. A ref synced from a nanostores atom via useEffect lags the
     // atom by one render, which creates stale-read bugs in callbacks that read the
