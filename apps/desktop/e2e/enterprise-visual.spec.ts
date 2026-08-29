@@ -1,0 +1,165 @@
+/**
+ * Enterprise Console visual evidence.
+ *
+ * This stays inside the real Electron shell and exercises the production
+ * preload → IPC transport → session FSM → eligibility → plugin route chain.
+ * Only the remote Enterprise server is deterministic: the test process owns
+ * the IPC replies, exactly like the existing mock inference server owns its
+ * provider replies. No bearer, renderer login, second shell, or production
+ * authority is introduced.
+ *
+ * Unlike the legacy soft visual helper, these assertions are hard gates:
+ * a missing baseline or a pixel diff fails the test. Refresh intentionally via
+ * `npx playwright test e2e/enterprise-visual.spec.ts --update-snapshots`.
+ */
+
+import { type ElectronApplication } from '@playwright/test'
+
+import { type MockBackendFixture, setupMockBackend, waitForAppReady } from './fixtures'
+import { expect, test } from './test'
+
+const ENTERPRISE_SESSION_ID = 'enterprise-visual-session'
+
+const ENTERPRISE_RESPONSES = {
+  '/api/health': { auth_mode: 'native_bearer', ok: true },
+  '/api/metrics?window=24h': {
+    alerts: [
+      {
+        code: 'QUEUE_LATENCY',
+        level: 'warning',
+        message: 'Queue latency above the review threshold',
+        threshold: 120,
+        value: 148,
+      },
+    ],
+  },
+  '/api/whoami': {
+    capability_revision: 42,
+    data_scope: { mode: 'tenant', scopes: ['tenant:acme-logistics'] },
+    effective_permissions: ['*'],
+    name: 'Lin Qiao',
+    principal_id: 'principal-operator-042',
+    product_capabilities: {
+      audit_export: { enabled: false, status: 'CONTRACT' },
+      enterprise_chat: { enabled: true, status: 'LIVE' },
+      knowledge_rag: { enabled: true, status: 'LIVE' },
+      wecom_delivery: { enabled: false, status: 'DEV' },
+    },
+    role: 'operator',
+    tenant_id: 'tenant-acme-logistics',
+  },
+} as const
+
+const EVIDENCE_VIEWPORTS = [
+  { height: 720, width: 1280 },
+  { height: 900, width: 1440 },
+  { height: 941, width: 1672 },
+  { height: 1080, width: 1920 },
+] as const
+
+async function installEnterpriseEvidenceServer(app: ElectronApplication): Promise<void> {
+  await app.evaluate(
+    ({ ipcMain }, fixture) => {
+      for (const channel of [
+        'hermes:enterprise:auto-connect',
+        'hermes:enterprise:disconnect',
+        'hermes:enterprise:request',
+        'hermes:enterprise:upload',
+      ]) {
+        ipcMain.removeHandler(channel)
+      }
+
+      ipcMain.handle('hermes:enterprise:auto-connect', () => ({
+        baseUrl: 'http://127.0.0.1:49152',
+        ok: true,
+        sessionId: fixture.sessionId,
+      }))
+      ipcMain.handle('hermes:enterprise:disconnect', () => ({ ok: true }))
+      ipcMain.handle(
+        'hermes:enterprise:request',
+        (_event: unknown, request: { path?: string; sessionId?: string }) => {
+          if (request?.sessionId !== fixture.sessionId) {
+            return { code: 'network', kind: 'error', message: 'not connected', status: 0 }
+          }
+
+          const data = fixture.responses[request?.path as keyof typeof fixture.responses]
+
+          return data === undefined
+            ? { code: 'http', kind: 'error', message: 'fixture endpoint not defined', status: 404 }
+            : { data, kind: 'ok' }
+        },
+      )
+      ipcMain.handle('hermes:enterprise:upload', () => ({
+        code: 'http',
+        kind: 'error',
+        message: 'uploads are outside visual evidence',
+        status: 405,
+      }))
+    },
+    { responses: ENTERPRISE_RESPONSES, sessionId: ENTERPRISE_SESSION_ID },
+  )
+}
+
+async function setContentViewport(
+  app: ElectronApplication,
+  width: number,
+  height: number,
+): Promise<void> {
+  await app.evaluate(
+    ({ BrowserWindow }, size) => {
+      const win = BrowserWindow.getAllWindows()[0]
+
+      if (!win) {
+        throw new Error('Enterprise visual evidence window is unavailable')
+      }
+
+      win.unmaximize()
+      win.setMinimumSize(640, 480)
+      win.setContentSize(size.width, size.height, false)
+    },
+    { height, width },
+  )
+}
+
+let fixture: MockBackendFixture | null = null
+
+test.beforeAll(async () => {
+  fixture = await setupMockBackend({
+    beforeFirstWindow: installEnterpriseEvidenceServer,
+    headless: true,
+  })
+  await waitForAppReady(fixture, 120_000)
+
+  const enterpriseNav = fixture.page.getByRole('button', { name: 'Enterprise Console' })
+  await expect(enterpriseNav).toBeVisible({ timeout: 15_000 })
+  await enterpriseNav.click()
+  await expect(fixture.page.getByTestId('console-page-dashboard')).toBeVisible({ timeout: 15_000 })
+})
+
+test.afterAll(async () => {
+  await fixture?.cleanup()
+  fixture = null
+})
+
+test('operator home has hard visual baselines at all four evidence viewports', async () => {
+  const { app, page } = fixture!
+
+  for (const { height, width } of EVIDENCE_VIEWPORTS) {
+    await setContentViewport(app, width, height)
+    await expect
+      .poll(() => page.evaluate(() => ({ height: window.innerHeight, width: window.innerWidth })))
+      .toEqual({ height, width })
+    await page.evaluate(async () => {
+      await document.fonts.ready
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      )
+    })
+
+    await expect(page).toHaveScreenshot(`enterprise-operator-home-${width}x${height}.png`, {
+      animations: 'disabled',
+      caret: 'hide',
+      timeout: 30_000,
+    })
+  }
+})

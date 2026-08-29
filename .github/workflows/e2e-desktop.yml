@@ -2,6 +2,12 @@ name: E2E Desktop
 
 on:
   workflow_call:
+    inputs:
+      test_path:
+        description: Optional Playwright path for a scoped evidence run.
+        required: false
+        type: string
+        default: ''
     outputs:
       review_status:
         description: Screenshot and visual-diff status for the CI review comment.
@@ -105,14 +111,15 @@ jobs:
       - name: Run Playwright E2E tests
         working-directory: apps/desktop
         run: |
+          TEST_PATH='${{ inputs.test_path }}'
           if [ "${{ github.ref_name }}" = "main" ]; then
             echo "On main — generating/updating baseline screenshots"
             npm run build && xvfb-run -a --server-args="-screen 0 1280x1024x24" \
-              npx playwright test --reporter=list --update-snapshots
+              npx playwright test ${TEST_PATH:+"$TEST_PATH"} --reporter=list --update-snapshots
           else
             echo "On PR — comparing against cached baselines"
             npm run build && xvfb-run -a --server-args="-screen 0 1280x1024x24" \
-              npx playwright test --reporter=list
+              npx playwright test ${TEST_PATH:+"$TEST_PATH"} --reporter=list
           fi
         env:
           CI: 'true'

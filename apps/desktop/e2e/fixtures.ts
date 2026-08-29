@@ -316,6 +316,10 @@ export function findElectron(): string {
  */
 export async function launchDesktop(
   env: Record<string, string>,
+  options: {
+    beforeFirstWindow?: (app: ElectronApplication) => Promise<void>
+    headless?: boolean
+  } = {},
 ): Promise<{ app: ElectronApplication; page: Page }> {
   assertDistBuilt()
 
@@ -329,10 +333,13 @@ export async function launchDesktop(
       DESKTOP_ROOT, // `electron .` — the `.` is the desktop package dir
       '--disable-gpu',
       '--no-sandbox',
+      ...(options.headless ? ['--headless'] : []),
     ],
     env,
     cwd: DESKTOP_ROOT,
   })
+
+  await options.beforeFirstWindow?.(app)
 
   const page = await app.firstWindow()
 
@@ -375,6 +382,10 @@ export interface MockBackendOptions {
  *   4. Return handles for test interaction
  */
 export interface MockBackendOptions {
+  /** Install test-only main-process seams before the renderer is observed. */
+  beforeFirstWindow?: (app: ElectronApplication) => Promise<void>
+  /** Run Electron with Chromium's headless compositor. */
+  headless?: boolean
   mockServer?: MockServerOptions
 }
 
@@ -395,7 +406,10 @@ export async function setupMockBackend(options: MockBackendOptions = {}): Promis
 
   // 3. Build env + launch
   const env = buildAppEnv(sandbox)
-  const { app, page } = await launchDesktop(env)
+  const { app, page } = await launchDesktop(env, {
+    beforeFirstWindow: options.beforeFirstWindow,
+    headless: options.headless,
+  })
 
   return {
     app,
