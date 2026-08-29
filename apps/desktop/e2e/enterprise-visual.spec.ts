@@ -17,7 +17,7 @@
 
 import { type ElectronApplication } from '@playwright/test'
 
-import { type MockBackendFixture, setupMockBackend, waitForAppReady } from './fixtures'
+import { type MockBackendFixture, setupMockBackend } from './fixtures'
 import { expect, test } from './test'
 
 const ENTERPRISE_SESSION_ID = 'enterprise-visual-session'
@@ -131,8 +131,11 @@ test.beforeAll(async () => {
     beforeFirstWindow: installEnterpriseEvidenceServer,
     headless: true,
   })
-  await waitForAppReady(fixture, 120_000)
 
+  // This evidence route is not the chat composer. Generic waitForAppReady waits
+  // for gateway-backed chat readiness and can time out after the Enterprise
+  // navigation is already usable. Gate on the exact real shell → Enterprise
+  // route → dashboard seam that this test actually exercises.
   const enterpriseNav = fixture.page.getByRole('button', { name: 'Enterprise', exact: true })
   await expect(enterpriseNav).toBeVisible({ timeout: 15_000 })
   await enterpriseNav.click()
