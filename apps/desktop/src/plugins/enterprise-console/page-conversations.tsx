@@ -4,26 +4,29 @@
  * Composes:
  *   - controller (useInboundList / useOutboundList / useAttemptsList)
  *   - view-model (deriveInboundList / deriveOutboundList / deriveAttemptsList)
- *   - view (ConversationsView)
+ *   - view (ConversationsView / AttemptsView / InboundListView /
+ *     OutboundListView)
  *
  * Per W1-B1-REMEDIATION-01:
- *   - §P17: this glue is THIN COMPOSITION ONLY. No presentation markup
- *     (no Loader / EmptyState / StatusDot / `<ul>` / CSS classes / text).
- *     All rendering lives in `page-conversations.view.tsx`.
- *   - §P18: attempts error state flows to the view via the attemptsSlot
- *     container which passes error through to the view's
- *     `<AttemptsView>` via QueryBody. The view preserves loading /
- *     error / not_implemented / empty / ready semantics.
- *   - §P19: this glue owns the `fmtIso` import (existing formatter).
- *   - §P20: NO extra `t('status.moduleBody')` paragraph is rendered.
+ *   - §P17: thin composition; no presentation markup.
+ *   - §P18: attempts error state flows through the attemptsSlot
+ *     container so the view's `<AttemptsView>` renders QueryBody
+ *     semantics (loading / error / not_implemented / empty / ready).
+ *   - §P19: fmtIso ownership lives here.
+ *   - §P20: no extra `t('status.moduleBody')` paragraph.
  *
- * The per-row attempts detail block is mounted as an `attemptsSlot`
- * ReactNode prop. The slot renders an `<AttemptsView>` (view) with
- * data lifted up via state setters (so the view re-renders when the
- * query resolves).
+ * Per W1-B1-REMEDIATION-02:
+ *   - §P14: the attempts container returns the view DIRECTLY (no
+ *     useEffect relay, no parent-cached attempts state). React Query
+ *     state is consumed inside the container synchronously on each
+ *     render. Selection identity === render identity ===
+ *     query identity via `key={selected}`.
+ *   - §P15: a switch from m1 → m2 tears down the m1 container
+ *     (and its React Query subscription) immediately; the
+ *     `attemptsSlot` slot never carries a stale m1 response.
  */
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 import {
   useAttemptsList,
@@ -35,7 +38,6 @@ import {
   ConversationsView,
 } from './page-conversations.view'
 import {
-  type ConversationsAttemptsView,
   type ConversationsTab,
   deriveAttemptsList,
   deriveInboundList,
@@ -44,40 +46,34 @@ import {
 import { fmtIso } from './page-kit'
 
 /**
- * Glue-local controller bridge for the selected outbound row. Calls
- * `useAttemptsList` (controller hook), pushes the derived VM up to
- * `ConversationsPage` state via `useEffect` → setState. The view's
- * `<AttemptsView>` consumes the resolved VM. The container itself
- * renders nothing (returns null).
+ * Per W1-B1-REMEDIATION-02 §P14:
+ * Container binds attempts to the selected id via `key={selected}`
+ * (mounted by `ConversationsPage`). On any selection change, React
+ * tears down the old container (and its React Query subscription)
+ * and mounts a fresh one for the new id. There is no useEffect
+ * relay and no parent-cached VM state. The container returns the
+ * rendered view directly.
  */
 function SelectedAttemptsContainer({
   internalMessageId,
-  onAttempts,
 }: {
   internalMessageId: string
-  onAttempts: (vm: { view: ConversationsAttemptsView; isPending: boolean; error: unknown }) => void
 }) {
   const query = useAttemptsList(internalMessageId)
-  useEffect(() => {
-    onAttempts({
-      view: deriveAttemptsList(query.data?.attempts ?? [], fmtIso),
-      isPending: query.isPending,
-      error: query.error ?? null,
-    })
-  }, [query.data, query.isPending, query.error, onAttempts])
+  const attempts = deriveAttemptsList(query.data?.attempts ?? [], fmtIso)
 
-  return null
+  return (
+    <AttemptsView
+      attempts={attempts}
+      error={query.error ?? null}
+      isPending={query.isPending}
+    />
+  )
 }
 
 export function ConversationsPage() {
   const [tab, setTab] = useState<ConversationsTab>('inbound')
   const [selected, setSelected] = useState<null | string>(null)
-
-  const [attemptsState, setAttemptsState] = useState<{
-    view: ConversationsAttemptsView
-    isPending: boolean
-    error: unknown
-  }>({ view: { rows: [], isEmpty: true }, isPending: false, error: null })
 
   const inbound = useInboundList()
   const outbound = useOutboundList()
@@ -87,19 +83,12 @@ export function ConversationsPage() {
 
   return (
     <>
-      {selected ? (
-        <SelectedAttemptsContainer
-          internalMessageId={selected}
-          onAttempts={setAttemptsState}
-        />
-      ) : null}
       <ConversationsView
         attemptsSlot={
           selected ? (
-            <AttemptsView
-              attempts={attemptsState.view}
-              error={attemptsState.error}
-              isPending={attemptsState.isPending}
+            <SelectedAttemptsContainer
+              internalMessageId={selected}
+              key={selected}
             />
           ) : null
         }
