@@ -20,8 +20,11 @@
 import { describe, expect, it } from 'vitest'
 
 import { type ConsolePage, findPage } from './catalog'
-import { workspaceCopy } from './page-dashboard.controller'
-import { dashboardPage, deriveDashboardViewModel } from './page-dashboard.view-model'
+import {
+  dashboardPage,
+  deriveDashboardViewModel,
+  workspaceCopy,
+} from './page-dashboard.view-model'
 import type { Health, Metrics, Whoami } from './types'
 
 const baseHealth: Health = {
@@ -220,7 +223,7 @@ describe('deriveDashboardViewModel', () => {
   })
 })
 
-describe('workspaceCopy (controller helper)', () => {
+describe('workspaceCopy (view-model helper)', () => {
   it('operator → Operator Home', () => {
     expect(workspaceCopy(operatorWhoami).title).toBe('Operator Home')
   })

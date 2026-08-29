@@ -9,14 +9,64 @@
  * The view-model delegates permission / capability authority to
  * `./capabilities.ts` and `./view-model.ts::deriveCommonViewModel`.
  * It does NOT maintain a parallel permission engine.
+ *
+ * Per W1-B1-REMEDIATION-01 §P5 (BLOCKER-2 layer direction), this file
+ * owns `workspaceCopy` (a pure presentation derivation over the
+ * resolved whoami) rather than importing it from the controller.
  */
 
 import { capabilityStatus } from './capabilities'
 import { type ConsolePage, findPage } from './catalog'
-import { workspaceCopy, type WorkspaceCopy } from './page-dashboard.controller'
 import type { CapabilityStatus, Health, Metrics, Whoami } from './types'
 import { deriveCommonViewModel } from './view-model'
 import type { CommonViewModelArgs } from './view-model'
+
+/**
+ * Role-derived workspace copy. Pure function over `whoami` (which is
+ * server-declared truth); the mapping itself is presentation-only and
+ * does NOT introduce role authority beyond what the server already
+ * declared.
+ *
+ * If a future role is added, the default branch handles it honestly.
+ */
+export interface WorkspaceCopy {
+  purpose: string
+  title: string
+}
+
+export function workspaceCopy(who: null | Whoami): WorkspaceCopy {
+  switch (who?.role) {
+    case 'operator':
+      return {
+        purpose:
+          'Your authenticated operational workspace, current service health and capability truth.',
+        title: 'Operator Home',
+      }
+
+    case 'supervisor':
+      return {
+        purpose:
+          'Supervisory workspace for current service health, scoped operations and capability truth.',
+        title: 'Supervisor Workspace',
+      }
+
+    case 'tenant_admin':
+
+    case 'super_admin':
+      return {
+        purpose:
+          'Tenant administration overview for service health, authenticated scope and capability truth.',
+        title: 'Tenant Admin Overview',
+      }
+
+    default:
+      return {
+        purpose:
+          'Server health, authenticated workspace identity and current capability truth.',
+        title: 'Workspace',
+      }
+  }
+}
 
 export interface DashboardViewModel {
   /** Page-level implementation status from the catalog (frozen contract). */

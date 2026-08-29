@@ -87,11 +87,14 @@ export default [
               message: 'View files must not import fetch transport.',
             },
             // ── Page-kit (controller-owned query helpers) ─────────────
+            // View MAY import QueryBody / ConsoleRows / fmtIso
+            // (presentational reusable primitives). The controller
+            // hook `useConsoleQuery` remains forbidden in views.
             {
               name: './page-kit',
-              importNames: ['useConsoleQuery', 'QueryBody', 'ConsoleRows'],
+              importNames: ['useConsoleQuery'],
               message:
-                'View files must not import console query helpers. The controller owns queries.',
+                'View files must not import the controller query hook. The controller owns queries.',
             },
             // ── Session atom (raw $whoami reads are controller-only) ─
             {
