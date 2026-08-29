@@ -152,7 +152,11 @@ describe('Knowledge — full control', () => {
     fireEvent.click(screen.getByTestId('kb-preview-u1'))
 
     await waitFor(() => expect(screen.getByTestId('kb-preview-body-u1')).toBeTruthy())
-    expect(screen.getByTestId('kb-preview-body-u1').textContent).toContain('42 tokens')
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('kb-preview-body-u1').textContent
+      ).toContain('42 tokens')
+    })
     expect(screen.getByText('hello world')).toBeTruthy()
   })
 

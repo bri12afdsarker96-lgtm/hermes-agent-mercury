@@ -1,18 +1,33 @@
 /**
- * Enterprise Knowledge — the full Phase-1 control surface, all on real Hermes P1
- * routes (no new knowledge API):
- *   - Candidates / review → /api/kb-gaps + kb-gap-author / kb-gap-reject
- *   - Upload             → /api/knowledge-upload (multipart, field "file")
- *   - Preview            → /api/knowledge-preview (chunks + stats + PII counts)
- *   - Publish            → /api/knowledge-commit (SYNCHRONOUS — the HTTP response
- *                          is the authoritative completion; status "committed")
- *   - Rollback           → /api/knowledge-rollback (staged uploads)
- *   - Sources            → /api/knowledge-committed
- *   - Withdraw           → /api/knowledge-delete (destructive)
+ * Knowledge page — Glue layer.
  *
- * The server owns all authority; every action posts and refetches the
- * authoritative state — no local optimistic success, no local state machine.
- * knowledge_rag is DEV, shown honestly (Capability Truth).
+ * Composes:
+ *   - controller (queries + mutations + capability / permission)
+ *   - view-model (pure derivations + validation helpers)
+ *   - view (KnowledgeView; selection-bound ReactNode slots)
+ *
+ * Per W1-B2 §P9, P10, P11, P14:
+ *   - The glue owns per-row local state (gap author text, gap reject
+ *     reason, publish collection, withdraw reason). Each piece of
+ *     state is bound to a specific row id, NOT a parent-cached
+ *     shared state, so selection identity === render identity.
+ *   - FormAction / ConfirmAction (./actions) live HERE because they
+ *     own permission + invalidation + server write orchestration. The
+ *     view file does NOT import them (per §P14).
+ *   - The glue owns the source-of-truth for selection state (which
+ *     collection, which uploadId's preview is open) and the React Query
+ *     transport hook for upload bytes.
+ *
+ * Per W1-B2 §P18 + §P19: Selection identity invariants
+ *   - Preview: the dialog is mounted with `open` prop. The preview
+ *     body is only mounted when `open === true && previewUploadId !==
+ *     null`. Closing the dialog unmounts the body and tears down the
+ *     React Query subscription — no stale preview can render under a
+ *     different upload id. The dialog is rendered via the view's
+ *     `previewSlot: ReactNode` so the view stays presentational.
+ *   - Collection: <EntriesList> is mounted only when
+ *     `selectedCollection !== ''`. Switching collections tears down
+ *     the old list and its subscription before mounting the new one.
  */
 
 import {
@@ -22,168 +37,116 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
-  StatusDot,
-  type StatusTone,
   Textarea,
   useQueryClient,
-  useValue
 } from '@hermes/plugin-sdk'
-import { type ChangeEvent, useState } from 'react'
+import { type ChangeEvent, type ReactNode, useState } from 'react'
 
-import { actionError, ConfirmAction, FormAction } from './actions'
-import { capabilityStatus, hasPermission } from './capabilities'
-import { ConsoleRows, fmtEpoch, QueryBody, useConsoleQuery } from './page-kit'
-import { $whoami } from './session'
-import { CapabilityBadge, PageStatusBadge } from './status-badge'
-import { useTransport } from './transport'
-import { PageHeader } from './ui'
+import { ConfirmAction, FormAction } from './actions'
+import { capabilityStatus } from './capabilities'
+import { fmtEpoch } from './page-kit'
+import {
+  KB_GAPS_KEY,
+  kbEntriesKey,
+  UPLOADS_KEY,
+} from './page-knowledge.controller'
+import {
+  useKbCollections,
+  useKbEntries,
+  useKbGaps,
+  useKbPreview,
+  useKbUploads,
+  useKnowledgeAuthority,
+  useKnowledgeMutations,
+} from './page-knowledge.controller'
+import {
+  KnowledgeView,
+  PreviewBody,
+} from './page-knowledge.view'
+import {
+  deriveCollections,
+  deriveEntries,
+  deriveKbGaps,
+  derivePreview,
+  deriveUploads,
+  isAuthorTextValid,
+  isPublishCollectionValid,
+  isRejectReasonValid,
+} from './page-knowledge.view-model'
 
-const KB_GAPS_KEY = ['enterprise-console', 'kb-gaps'] as const
-const UPLOADS_KEY = ['enterprise-console', 'kb-uploads'] as const
-const COLLECTIONS_KEY = ['enterprise-console', 'kb-collections'] as const
-
-interface KbGap {
-  gap_id: string
-  hits: number
-  query: string
-  signal: string
-  status: string
-  ts_last: number
-}
-interface KbGapsResp {
-  gaps: KbGap[]
-}
-
-interface UploadRow {
-  chunks_committed: number
-  chunks_total: number
-  collection: null | string
-  error_detail: null | string
-  filename: string
-  size_bytes: number
-  status: string
-  updated_ts: number
-  upload_id: string
-}
-interface UploadsResp {
-  uploads: UploadRow[]
-}
-
-interface PreviewResp {
-  chunks: { char_count: number; index: number; pii_forbidden: number; pii_warning: number; text: string }[]
-  stats: { est_cost_usd: number; pii_forbidden_count: number; pii_warning_count: number; total_tokens: number }
-  status: string
-  total: number
-}
-
-interface CollectionsResp {
-  collections: string[]
-}
-interface EntriesResp {
-  entries: { chunks: number; source: string }[]
-}
-
-const GAP_TONE: Record<string, StatusTone> = { authored: 'good', new: 'warn', rejected: 'muted' }
-
-const UPLOAD_TONE: Record<string, StatusTone> = {
-  commit_failed: 'bad',
-  committed: 'good',
-  committing: 'warn',
-  edited: 'warn',
-  rolled_back: 'muted',
-  staged: 'good',
-  uploading: 'muted'
-}
-
-// ── Candidates / review ────────────────────────────────────────────────────
-
-function GapReview({ gapId }: { gapId: string }) {
-  const transport = useTransport()
-  const [text, setText] = useState('')
-  const [reason, setReason] = useState('')
-
-  return (
-    <div className="flex shrink-0 items-center gap-1">
-      <FormAction
-        canSubmit={text.trim().length > 0}
-        invalidateKey={KB_GAPS_KEY}
-        permission="kb.author"
-        submit={() => transport.post('/api/kb-gap-author', { gap_id: gapId, text })}
-        submitLabel="Author"
-        testId={`kb-author-${gapId}`}
-        title="Author an answer"
-        trigger="author"
-      >
-        <Textarea
-          data-testid={`kb-author-text-${gapId}`}
-          onChange={event => setText(event.target.value)}
-          placeholder="answer text"
-          value={text}
-        />
-      </FormAction>
-      <FormAction
-        canSubmit={reason.trim().length >= 3}
-        invalidateKey={KB_GAPS_KEY}
-        permission="kb.author"
-        submit={() => transport.post('/api/kb-gap-reject', { gap_id: gapId, reason })}
-        submitLabel="Reject"
-        testId={`kb-reject-${gapId}`}
-        title="Reject this gap"
-        trigger="reject"
-      >
-        <Input onChange={event => setReason(event.target.value)} placeholder="reason" value={reason} />
-      </FormAction>
-    </div>
-  )
-}
-
-function CandidatesSection() {
-  const query = useConsoleQuery<KbGapsResp>(KB_GAPS_KEY, '/api/kb-gaps?status=new')
-
-  return (
-    <section data-testid="console-kb-candidates">
-      <div className="mb-1 text-xs font-medium text-muted-foreground">candidates / review</div>
-      <QueryBody emptyText="no knowledge gaps" isEmpty={data => (data.gaps ?? []).length === 0} query={query}>
-        {data => (
-          <ConsoleRows testId="console-kb-gaps">
-            {(data.gaps ?? []).map(gap => (
-              <li
-                className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
-                key={gap.gap_id}
-              >
-                <div className="min-w-0">
-                  <div className="truncate">{gap.query}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {gap.signal} · hits {gap.hits} · {fmtEpoch(gap.ts_last)}
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <span className="inline-flex items-center gap-1 text-xs">
-                    <StatusDot tone={GAP_TONE[gap.status] ?? 'muted'} />
-                    {gap.status}
-                  </span>
-                  {gap.status === 'new' ? <GapReview gapId={gap.gap_id} /> : null}
-                </div>
-              </li>
-            ))}
-          </ConsoleRows>
-        )}
-      </QueryBody>
-    </section>
-  )
-}
-
-// ── Upload + preview + publish + rollback ──────────────────────────────────
-
-function UploadPanel() {
-  const transport = useTransport()
+export function KnowledgePage() {
+  const authority = useKnowledgeAuthority()
+  const mutations = useKnowledgeMutations()
   const queryClient = useQueryClient()
-  const who = useValue($whoami)
-  const canAuthor = who === null || hasPermission(who, 'kb.upload')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<null | string>(null)
 
-  const onFile = async (event: ChangeEvent<HTMLInputElement>) => {
+  // -----------------------------------------------------------------
+  // Server reads (queries) — owner: controller
+  // -----------------------------------------------------------------
+  const gapsQuery = useKbGaps()
+  const uploadsQuery = useKbUploads()
+  const collectionsQuery = useKbCollections()
+
+  // Per-collection entries are only mounted when a collection is
+  // selected (per P19). The hook call site is conditional.
+  const [selectedCollection, setSelectedCollection] = useState('')
+  const entriesQuery = useKbEntries(selectedCollection)
+
+  // -----------------------------------------------------------------
+  // Selection identity (per W1-B1 lessons): preview opens via
+  // DIALOG state, and the preview query only mounts when the dialog
+  // is open. We use a SEPARATE state to track which upload is
+  // currently previewing.
+  // -----------------------------------------------------------------
+  const [previewUploadId, setPreviewUploadId] = useState<null | string>(
+    null
+  )
+
+  const [previewOpen, setPreviewOpen] = useState(false)
+  // The preview query is mounted ONLY when both previewOpen === true
+  // AND previewUploadId !== null. Opening the dialog mounts the query;
+  // closing tears it down.
+  const previewQuery = useKbPreview(previewUploadId ?? '')
+
+  // -----------------------------------------------------------------
+  // Per-row form state (local; bound to row id). Each row keeps its
+  // OWN text / reason state, NOT shared across rows — this enforces
+  // the W1-B2 §P15 invariant.
+  // -----------------------------------------------------------------
+  const [gapText, setGapText] = useState<Record<string, string>>({})
+  const [gapReason, setGapReason] = useState<Record<string, string>>({})
+
+  const [publishCollection, setPublishCollection] = useState<
+    Record<string, string>
+  >({})
+
+  const [withdrawReason, setWithdrawReason] = useState<
+    Record<string, string>
+  >({})
+
+  // Upload-panel local state
+  const [uploadBusy, setUploadBusy] = useState(false)
+  const [uploadError, setUploadError] = useState<null | string>(null)
+
+  // -----------------------------------------------------------------
+  // Capability truth (server-declared; view-model does NOT derive
+  // LIVE from page.status — the view consumes the server-side
+  // capabilityStatus()).
+  // -----------------------------------------------------------------
+  const ragStatus = capabilityStatus(authority.whoamiSnapshot, 'knowledge_rag')
+
+  // -----------------------------------------------------------------
+  // VMs (pure derivation)
+  // -----------------------------------------------------------------
+  const gapsVm = deriveKbGaps(gapsQuery.data?.gaps, fmtEpoch)
+  const uploadsVm = deriveUploads(uploadsQuery.data?.uploads, fmtEpoch)
+  const collectionsVm = deriveCollections(collectionsQuery.data)
+  const entriesVm = deriveEntries(entriesQuery.data)
+  const previewVm = derivePreview(previewQuery.data)
+
+  // -----------------------------------------------------------------
+  // Action handlers
+  // -----------------------------------------------------------------
+  const onUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     event.target.value = ''
 
@@ -191,34 +154,276 @@ function UploadPanel() {
       return
     }
 
-    setBusy(true)
-    setError(null)
+    setUploadBusy(true)
+    setUploadError(null)
 
     try {
       const bytes = await file.arrayBuffer()
-      await transport.upload('/api/knowledge-upload', {
+      await mutations.uploadBytes(
         bytes,
-        contentType: file.type || 'application/octet-stream',
-        filename: file.name
-      })
+        file.type || 'application/octet-stream',
+        file.name
+      )
       await queryClient.invalidateQueries({ queryKey: UPLOADS_KEY })
     } catch (err) {
-      setError(actionError(err))
+      setUploadError(err instanceof Error ? err.message : String(err))
     } finally {
-      setBusy(false)
+      setUploadBusy(false)
     }
   }
 
-  if (!canAuthor) {
-    return null
-  }
+  // -----------------------------------------------------------------
+  // Preview slot (glue owns the Dialog; view owns the body)
+  // -----------------------------------------------------------------
+  const previewSlot =
+    previewUploadId && previewOpen ? (
+      <PreviewBody
+        error={previewQuery.error}
+        isPending={previewQuery.isPending}
+        preview={previewVm}
+        uploadId={previewUploadId}
+      />
+    ) : null
 
   return (
+    <KnowledgeView
+      capabilityStatus={ragStatus}
+      collections={collectionsVm}
+      collectionsError={collectionsQuery.error}
+      collectionsIsPending={collectionsQuery.isPending}
+      entries={entriesVm}
+      entriesError={entriesQuery.error}
+      entriesIsPending={entriesQuery.isPending}
+      entryRowActionsSlot={({ collection, source }) => {
+        if (!source) {
+          return null
+        }
+
+        const reason = withdrawReason[source] ?? ''
+
+        return (
+          <FormAction
+            canSubmit={isRejectReasonValid(reason)}
+            invalidateKey={kbEntriesKey(collection)}
+            permission="kb.delete"
+            submit={() => mutations.withdraw(collection, source, reason)}
+            submitLabel="Withdraw"
+            testId={`kb-withdraw-${source}`}
+            title="Withdraw this source"
+            trigger="withdraw"
+          >
+            <Input
+              data-testid={`kb-withdraw-reason-${source}`}
+              onChange={(event) =>
+                setWithdrawReason((prev) => ({
+                  ...prev,
+                  [source]: event.target.value,
+                }))
+              }
+              placeholder="reason (min 3 chars)"
+              value={reason}
+            />
+          </FormAction>
+        )
+      }}
+      gaps={gapsVm}
+      gapsError={gapsQuery.error}
+      gapsIsPending={gapsQuery.isPending}
+      gapsRowActionsSlot={({ gapId }) => {
+        if (!gapId) {
+          return null
+        }
+
+        const text = gapText[gapId] ?? ''
+        const reason = gapReason[gapId] ?? ''
+
+        return (
+          <div
+            className="flex shrink-0 items-center gap-1"
+            data-testid={`kb-gap-actions-${gapId}`}
+          >
+            <FormAction
+              canSubmit={isAuthorTextValid(text)}
+              invalidateKey={KB_GAPS_KEY}
+              permission="kb.author"
+              submit={() => mutations.authorGap(gapId, text)}
+              submitLabel="Author"
+              testId={`kb-author-${gapId}`}
+              title="Author an answer"
+              trigger="author"
+            >
+              <Textarea
+                data-testid={`kb-author-text-${gapId}`}
+                onChange={(event) =>
+                  setGapText((prev) => ({
+                    ...prev,
+                    [gapId]: event.target.value,
+                  }))
+                }
+                placeholder="answer text"
+                value={text}
+              />
+            </FormAction>
+            <FormAction
+              canSubmit={isRejectReasonValid(reason)}
+              invalidateKey={KB_GAPS_KEY}
+              permission="kb.author"
+              submit={() => mutations.rejectGap(gapId, reason)}
+              submitLabel="Reject"
+              testId={`kb-reject-${gapId}`}
+              title="Reject this gap"
+              trigger="reject"
+            >
+              <Input
+                data-testid={`kb-reject-reason-${gapId}`}
+                onChange={(event) =>
+                  setGapReason((prev) => ({
+                    ...prev,
+                    [gapId]: event.target.value,
+                  }))
+                }
+                placeholder="reason"
+                value={reason}
+              />
+            </FormAction>
+          </div>
+        )
+      }}
+      onChangeCollection={setSelectedCollection}
+      previewSlot={
+        // The view expects a ReactNode that contains the Dialog +
+        // body content. We render the Dialog wrapper here (in the
+        // glue) so the glue owns the dialog open state and the
+        // body is selection-bound by `uploadId`.
+        <>
+          <PreviewDialog
+            onOpenChange={(next) => {
+              setPreviewOpen(next)
+
+              if (!next) {
+                setPreviewUploadId(null)
+              }
+            }}
+            open={previewOpen}
+            previewSlot={previewSlot}
+          />
+        </>
+      }
+      selectedCollection={selectedCollection}
+      uploads={uploadsVm}
+      uploadsError={uploadsQuery.error}
+      uploadsIsPending={uploadsQuery.isPending}
+      uploadsPanelSlot={
+        authority.canUpload ? (
+          <UploadPanel
+            busy={uploadBusy}
+            error={uploadError}
+            onUpload={onUpload}
+          />
+        ) : null
+      }
+      uploadsRowActionsSlot={({
+        uploadId,
+        canPreview,
+        canPublish,
+        canRollback,
+      }) => {
+        if (!canPreview && !canPublish && !canRollback) {
+          return null
+        }
+
+        const collection = publishCollection[uploadId] ?? ''
+
+        return (
+          <>
+            {canPreview ? (
+              <Button
+                data-testid={`kb-preview-${uploadId}`}
+                onClick={() => {
+                  setPreviewUploadId(uploadId)
+                  setPreviewOpen(true)
+                }}
+                size="sm"
+                variant="ghost"
+              >
+                preview
+              </Button>
+            ) : null}
+            {canPublish ? (
+              <FormAction
+                canSubmit={isPublishCollectionValid(collection)}
+                invalidateKey={UPLOADS_KEY}
+                permission="kb.commit"
+                submit={() => mutations.publish(collection, uploadId)}
+                submitLabel="Publish"
+                testId={`kb-publish-${uploadId}`}
+                title="Publish to a collection"
+                trigger="publish"
+              >
+                <Input
+                  data-testid={`kb-publish-collection-${uploadId}`}
+                  onChange={(event) =>
+                    setPublishCollection((prev) => ({
+                      ...prev,
+                      [uploadId]: event.target.value,
+                    }))
+                  }
+                  placeholder="collection"
+                  value={collection}
+                />
+              </FormAction>
+            ) : null}
+            {canRollback ? (
+              <ConfirmAction
+                destructive
+                invalidateKey={UPLOADS_KEY}
+                permission="kb.upload"
+                run={() => mutations.rollback(uploadId)}
+                testId={`kb-rollback-${uploadId}`}
+                title="Roll back this upload?"
+              >
+                rollback
+              </ConfirmAction>
+            ) : null}
+          </>
+        )
+      }}
+    />
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Small sub-components owned by the glue (composing FormAction /
+// ConfirmAction which are NOT presentational primitives; the view
+// must not import them per W1-B2 §P14).
+// ---------------------------------------------------------------------------
+
+function UploadPanel({
+  busy,
+  error,
+  onUpload,
+}: {
+  busy: boolean
+  error: null | string
+  onUpload: (event: ChangeEvent<HTMLInputElement>) => void
+}) {
+  return (
     <div className="flex items-center gap-2" data-testid="console-kb-upload">
-      <input className="text-xs" data-testid="console-kb-upload-input" disabled={busy} onChange={onFile} type="file" />
-      {busy ? <span className="text-xs text-muted-foreground">uploading…</span> : null}
+      <input
+        className="text-xs"
+        data-testid="console-kb-upload-input"
+        disabled={busy}
+        onChange={onUpload}
+        type="file"
+      />
+      {busy ? (
+        <span className="text-xs text-muted-foreground">uploading…</span>
+      ) : null}
       {error ? (
-        <span className="text-xs text-destructive" data-testid="console-kb-upload-error">
+        <span
+          className="text-xs text-destructive"
+          data-testid="console-kb-upload-error"
+        >
           {error}
         </span>
       ) : null}
@@ -226,256 +431,26 @@ function UploadPanel() {
   )
 }
 
-function PreviewBody({ uploadId }: { uploadId: string }) {
-  const query = useConsoleQuery<PreviewResp>(
-    ['enterprise-console', 'kb-preview', uploadId],
-    `/api/knowledge-preview?upload_id=${encodeURIComponent(uploadId)}`,
-    0
-  )
-
+function PreviewDialog({
+  open,
+  onOpenChange,
+  previewSlot,
+}: {
+  open: boolean
+  onOpenChange: (next: boolean) => void
+  previewSlot: ReactNode
+}) {
+  // The view file does NOT export the Dialog wrapper because the
+  // Dialog owns interactive open state — that's glue responsibility.
+  // We render a minimal Dialog here using @hermes/plugin-sdk primitives.
   return (
-    <QueryBody emptyText="no chunks" isEmpty={data => (data.chunks ?? []).length === 0} query={query}>
-      {data => (
-        <div className="flex flex-col gap-2" data-testid={`kb-preview-body-${uploadId}`}>
-          <div className="text-xs text-muted-foreground">
-            {data.total} chunks · {data.stats.total_tokens} tokens · PII forbidden {data.stats.pii_forbidden_count} /
-            warning {data.stats.pii_warning_count}
-          </div>
-          <div className="flex max-h-64 flex-col gap-1 overflow-auto">
-            {(data.chunks ?? []).map(chunk => (
-              <div className="rounded border border-border p-1 text-xs" key={chunk.index}>
-                {chunk.text.slice(0, 200)}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </QueryBody>
-  )
-}
-
-function PreviewButton({ uploadId }: { uploadId: string }) {
-  const [open, setOpen] = useState(false)
-
-  return (
-    <>
-      <Button data-testid={`kb-preview-${uploadId}`} onClick={() => setOpen(true)} size="sm" variant="ghost">
-        preview
-      </Button>
-      <Dialog onOpenChange={setOpen} open={open}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Preview</DialogTitle>
-          </DialogHeader>
-          {open ? <PreviewBody uploadId={uploadId} /> : null}
-        </DialogContent>
-      </Dialog>
-    </>
-  )
-}
-
-function PublishAction({ uploadId }: { uploadId: string }) {
-  const transport = useTransport()
-  const [collection, setCollection] = useState('')
-
-  return (
-    <FormAction
-      canSubmit={collection.trim().length > 0 && collection.length <= 64}
-      invalidateKey={UPLOADS_KEY}
-      permission="kb.commit"
-      submit={() => transport.post('/api/knowledge-commit', { collection, upload_id: uploadId })}
-      submitLabel="Publish"
-      testId={`kb-publish-${uploadId}`}
-      title="Publish to a collection"
-      trigger="publish"
-    >
-      <Input
-        data-testid={`kb-publish-collection-${uploadId}`}
-        onChange={event => setCollection(event.target.value)}
-        placeholder="collection"
-        value={collection}
-      />
-    </FormAction>
-  )
-}
-
-function UploadsSection() {
-  const transport = useTransport()
-  const query = useConsoleQuery<UploadsResp>(UPLOADS_KEY, '/api/knowledge-uploads')
-
-  return (
-    <section data-testid="console-kb-uploads-section">
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground">uploads</span>
-        <UploadPanel />
-      </div>
-      <QueryBody emptyText="no uploads" isEmpty={data => (data.uploads ?? []).length === 0} query={query}>
-        {data => (
-          <ConsoleRows testId="console-kb-uploads">
-            {(data.uploads ?? []).map(upload => (
-              <li
-                className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
-                data-upload-status={upload.status}
-                key={upload.upload_id}
-              >
-                <div className="min-w-0">
-                  <div className="truncate">{upload.filename}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {upload.chunks_total} chunks · {fmtEpoch(upload.updated_ts)}
-                    {upload.error_detail ? ` · ${upload.error_detail}` : ''}
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <span className="inline-flex items-center gap-1 text-xs">
-                    <StatusDot tone={UPLOAD_TONE[upload.status] ?? 'muted'} />
-                    {upload.status}
-                  </span>
-                  {upload.status === 'staged' || upload.status === 'edited' ? (
-                    <>
-                      <PreviewButton uploadId={upload.upload_id} />
-                      <PublishAction uploadId={upload.upload_id} />
-                      <ConfirmAction
-                        destructive
-                        invalidateKey={UPLOADS_KEY}
-                        permission="kb.upload"
-                        run={() => transport.post('/api/knowledge-rollback', { upload_id: upload.upload_id })}
-                        testId={`kb-rollback-${upload.upload_id}`}
-                        title="Roll back this upload?"
-                      >
-                        rollback
-                      </ConfirmAction>
-                    </>
-                  ) : null}
-                </div>
-              </li>
-            ))}
-          </ConsoleRows>
-        )}
-      </QueryBody>
-    </section>
-  )
-}
-
-// ── Sources (committed) + withdraw ─────────────────────────────────────────
-
-function WithdrawAction({ collection, source }: { collection: string; source: string }) {
-  const transport = useTransport()
-  const [reason, setReason] = useState('')
-
-  return (
-    <FormAction
-      canSubmit={reason.trim().length >= 3}
-      invalidateKey={['enterprise-console', 'kb-entries', collection]}
-      permission="kb.delete"
-      submit={() => transport.post('/api/knowledge-delete', { collection, reason, source })}
-      submitLabel="Withdraw"
-      testId={`kb-withdraw-${source}`}
-      title="Withdraw this source"
-      trigger="withdraw"
-    >
-      <Input
-        data-testid={`kb-withdraw-reason-${source}`}
-        onChange={event => setReason(event.target.value)}
-        placeholder="reason (min 3 chars)"
-        value={reason}
-      />
-    </FormAction>
-  )
-}
-
-function EntriesList({ collection }: { collection: string }) {
-  const query = useConsoleQuery<EntriesResp>(
-    ['enterprise-console', 'kb-entries', collection],
-    `/api/knowledge-committed?collection=${encodeURIComponent(collection)}`
-  )
-
-  return (
-    <QueryBody emptyText="no sources" isEmpty={data => (data.entries ?? []).length === 0} query={query}>
-      {data => (
-        <ConsoleRows testId="console-kb-entries">
-          {data.entries.map(entry => (
-            <li
-              className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
-              key={entry.source}
-            >
-              <div className="min-w-0">
-                <div className="truncate">{entry.source}</div>
-                <div className="text-xs text-muted-foreground">{entry.chunks} chunks</div>
-              </div>
-              <WithdrawAction collection={collection} source={entry.source} />
-            </li>
-          ))}
-        </ConsoleRows>
-      )}
-    </QueryBody>
-  )
-}
-
-function SourcesSection() {
-  const [collection, setCollection] = useState('')
-  const query = useConsoleQuery<CollectionsResp>(COLLECTIONS_KEY, '/api/knowledge-committed')
-
-  return (
-    <section data-testid="console-kb-sources">
-      <div className="mb-1 text-xs font-medium text-muted-foreground">sources</div>
-      <QueryBody emptyText="no collections" isEmpty={data => (data.collections ?? []).length === 0} query={query}>
-        {data => (
-          <div className="flex flex-col gap-2">
-            <select
-              className="rounded-md border border-border bg-transparent px-2 py-1 text-sm"
-              data-testid="console-kb-collection-select"
-              onChange={event => setCollection(event.target.value)}
-              value={collection}
-            >
-              <option value="">select a collection…</option>
-              {(data.collections ?? []).map(name => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-            {collection ? <EntriesList collection={collection} /> : null}
-          </div>
-        )}
-      </QueryBody>
-    </section>
-  )
-}
-
-// ── Page ───────────────────────────────────────────────────────────────────
-
-export function KnowledgePage() {
-  const status = capabilityStatus(useValue($whoami), 'knowledge_rag')
-
-  return (
-    <div
-      className="mx-auto flex w-full max-w-[96rem] flex-col px-(--ec-page-inset-x) py-(--ec-page-inset-y)"
-      data-page-status="ready-dev"
-      data-testid="console-page-knowledge"
-    >
-      <PageHeader
-        purpose="Review knowledge gaps, stage sources, preview chunks and publish through authoritative server workflows."
-        status={<PageStatusBadge status="ready-dev" />}
-        title="Enterprise knowledge"
-      />
-
-      {status && status !== 'LIVE' ? (
-        <div
-          className="mb-(--ec-gutter) flex items-center gap-2 rounded-(--ec-panel-radius) border border-(--ui-stroke-secondary) bg-(--ui-bg-card) px-3 py-2 text-(--ui-text-secondary)"
-          data-testid="console-knowledge-dev"
-        >
-          <CapabilityBadge status={status} />
-          <span>knowledge RAG is not production-live on this server</span>
-        </div>
-      ) : null}
-
-      <div className="grid items-start gap-(--ec-gutter) xl:grid-cols-2">
-        <div className="flex min-w-0 flex-col gap-(--ec-gutter)">
-          <UploadsSection />
-          <SourcesSection />
-        </div>
-        <CandidatesSection />
-      </div>
-    </div>
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Preview</DialogTitle>
+        </DialogHeader>
+        {previewSlot}
+      </DialogContent>
+    </Dialog>
   )
 }
