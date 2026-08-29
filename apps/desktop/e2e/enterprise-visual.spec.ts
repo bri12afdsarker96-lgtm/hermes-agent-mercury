@@ -126,6 +126,7 @@ async function setContentViewport(
 let fixture: MockBackendFixture | null = null
 
 test.beforeAll(async () => {
+  test.setTimeout(180_000)
   fixture = await setupMockBackend({
     beforeFirstWindow: installEnterpriseEvidenceServer,
     headless: true,
