@@ -6,12 +6,17 @@
  *   - `/api/followup-detail`   (single follow-up by id)
  *   - `/api/followup-history`  (timeline events for one follow-up)
  *
- * Wire-shape types (`FollowupStatus`, `FollowupRow`,
- * `FollowupHistoryRow`, response envelopes) live here so the
- * view-model and view can stay free of the raw server payload.
+ * Per W1-B1-REMEDIATION-01 §P22, the list query key is the EXACT
+ * pre-split identity so cache sharing / observers / functional
+ * parity are preserved.
  *
  * The controller MUST NOT introduce mutations. Phase-1 follow-up is
  * intentionally read-only — actor-driven server transitions only.
+ *
+ * Per W1-B1-REMEDIATION-01 §P8, detail/history queries are only run
+ * when an id is present. The glue layer mounts
+ * `FollowupSelectedDetailContainer(id)` conditionally rather than
+ * calling hooks unconditionally with an empty-string id.
  */
 
 import { useConsoleQuery } from './page-kit'
@@ -74,7 +79,7 @@ export interface FollowupHistoryResp {
   history: FollowupHistoryRow[]
 }
 
-const FOLLOWUP_KEY = ['enterprise-console', 'followups'] as const
+export const FOLLOWUP_KEY = ['enterprise-console', 'followups'] as const
 
 const followupDetailKey = (id: string) =>
   ['enterprise-console', 'followup', id] as const
@@ -84,7 +89,7 @@ const followupHistoryKey = (id: string) =>
 
 const FOLLOWUP_LIST_PATH = '/api/followup-list'
 
-function followupListPath(status: '' | FollowupStatus): string {
+export function followupListPath(status: '' | FollowupStatus): string {
   return status
     ? `${FOLLOWUP_LIST_PATH}?status=${encodeURIComponent(status)}`
     : FOLLOWUP_LIST_PATH

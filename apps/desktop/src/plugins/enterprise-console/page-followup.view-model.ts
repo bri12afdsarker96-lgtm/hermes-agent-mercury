@@ -3,10 +3,24 @@
  *
  * Pure derivation: maps raw controller responses into presentation-safe
  * fields the view consumes. The view must not need to know about
- * `StatusTone` or any of the wire-shape fields directly.
+ * `StatusTone`, raw ISO timestamps, or the raw wire response shape.
  *
  * No transport, no useValue, no session atoms — the controller has
  * already resolved the queries.
+ *
+ * Per W1-B1-REMEDIATION-01:
+ *   - §P10: `deriveFollowupPageViewModel` accepts a real `whoami`
+ *     (resolved by the controller's `useValue($whoami)`); it does not
+ *     pass `whoami: null` like the W1-B1 closeout.
+ *   - §P15: `receivedAt` / `nextFollowupAt` are formatted via the
+ *     existing `fmtIso` (passed in as a formatter arg so this file
+ *     stays transport-free; the glue owns the formatter import).
+ *   - §P16: history events expose `transitionLabel: string | null`
+ *     (null when neither from nor to status is present) so the view
+ *     decides whether to render the description.
+ *   - §P9: the view model does not import the controller's wire types
+ *     (`FollowupDetailResp` etc.). The controller-glue layer maps
+ *     raw responses into VM shapes; the view consumes only the VM.
  */
 
 import type { StatusTone } from '@hermes/plugin-sdk'
@@ -17,6 +31,7 @@ import type {
   FollowupRow,
   FollowupStatus,
 } from './page-followup.controller'
+import type { Whoami } from './types'
 import { type CommonViewModelArgs, deriveCommonViewModel } from './view-model'
 
 export const STATUS_TONE: Record<FollowupStatus, StatusTone> = {
@@ -38,7 +53,7 @@ export interface FollowupListRowView {
   followupId: string
   followupType: string
   ownerPrincipalId: string
-  receivedAt: null | string
+  receivedAt: string
   status: FollowupStatus
   statusTone: StatusTone
 }
@@ -49,24 +64,26 @@ export interface FollowupDetailView {
   currency: string
   expectedReceiveDate: string
   followupId: string
-  nextFollowupAt: null | string
+  nextFollowupAt: string
   ownerPrincipalId: string
-  receivedAt: null | string
+  receivedAt: string
   status: FollowupStatus
   statusTone: StatusTone
 }
 
 export interface FollowupHistoryEventView {
   actorPrincipalId: null | string
-  createdTs: string
   eventType: string
-  fromStatus: null | string
   historyId: string
   statusTone: StatusTone
   timestamp: string
   title: string
-  toStatus: null | string
-  transitionLabel: string
+  /**
+   * Pre-formatted transition label (e.g. "open → completed"), or null
+   * when neither from_status nor to_status is present on the event.
+   * The view renders `<X> → <Y>` only when transitionLabel is not null.
+   */
+  transitionLabel: string | null
 }
 
 export interface FollowupListView {
@@ -76,34 +93,31 @@ export interface FollowupListView {
 
 export interface FollowupDetailViewModel {
   detail: null | FollowupDetailView
-  detailPending: boolean
-  detailError: null | string
 }
 
 export interface FollowupHistoryViewModel {
   events: FollowupHistoryEventView[]
   isEmpty: boolean
-  historyPending: boolean
-  historyError: null | string
 }
 
 export interface FollowupPageViewModel {
   // Shared VM (permission / capability / page status)
   canRead: boolean
-  capabilityStatus: null | ReturnType<typeof deriveCommonViewModel>['capabilityStatus']
   readOnlyReason: null | string
-  // Selection / filter state is presentation-owned; the page passes it
-  // through the glue. The VM exposes only the resolved list.
+  capabilityStatus: null | string
+  // List state
   list: FollowupListView
-  listPending: boolean
-  listError: null | string
 }
 
 /**
  * Derive the list rows from server-declared FollowupRow[].
- * Pure: no network, no role assumption.
+ * Pure: no network, no role assumption. `fmtIso` is passed in so this
+ * file stays transport-free (the glue owns the formatter import).
  */
-export function deriveFollowupList(rows: FollowupRow[]): FollowupListView {
+export function deriveFollowupList(
+  rows: FollowupRow[],
+  fmtIso: (iso: null | string | undefined) => string
+): FollowupListView {
   return {
     isEmpty: rows.length === 0,
     rows: rows.map((row) => ({
@@ -115,7 +129,7 @@ export function deriveFollowupList(rows: FollowupRow[]): FollowupListView {
       followupId: row.followup_id,
       followupType: row.followup_type,
       ownerPrincipalId: row.owner_principal_id,
-      receivedAt: row.received_at,
+      receivedAt: fmtIso(row.received_at),
       status: row.status,
       statusTone: STATUS_TONE[row.status],
     })),
@@ -124,10 +138,14 @@ export function deriveFollowupList(rows: FollowupRow[]): FollowupListView {
 
 /**
  * Derive the detail view from a server-declared FollowupRow.
+ * Pure: no network. `fmtIso` owns timestamp formatting.
  */
-export function deriveFollowupDetail(row: null | FollowupRow): FollowupDetailViewModel {
+export function deriveFollowupDetail(
+  row: null | FollowupRow,
+  fmtIso: (iso: null | string | undefined) => string
+): FollowupDetailViewModel {
   if (!row) {
-    return { detail: null, detailPending: false, detailError: null }
+    return { detail: null }
   }
 
   return {
@@ -137,20 +155,23 @@ export function deriveFollowupDetail(row: null | FollowupRow): FollowupDetailVie
       currency: row.currency,
       expectedReceiveDate: row.expected_receive_date,
       followupId: row.followup_id,
-      nextFollowupAt: row.next_followup_at,
+      nextFollowupAt: fmtIso(row.next_followup_at),
       ownerPrincipalId: row.owner_principal_id,
-      receivedAt: row.received_at,
+      receivedAt: fmtIso(row.received_at),
       status: row.status,
       statusTone: STATUS_TONE[row.status],
     },
-    detailPending: false,
-    detailError: null,
   }
 }
 
 /**
  * Derive the history view from server-declared FollowupHistoryRow[].
  * Pure: no network.
+ *
+ * Per W1-B1-REMEDIATION-01 §P16: transitionLabel is null when neither
+ * from_status nor to_status is present (the original `description`
+ * returned undefined in that case; we now return null so the view
+ * can short-circuit on it).
  */
 export function deriveFollowupHistory(
   events: FollowupHistoryRow[]
@@ -158,28 +179,26 @@ export function deriveFollowupHistory(
   return {
     isEmpty: events.length === 0,
     events: events.map((event) => {
+      const hasTransition =
+        event.from_status != null || event.to_status != null
+
       const tone =
         STATUS_TONE[(event.to_status ?? '') as FollowupStatus] ?? 'muted'
 
-      const fromStatus = event.from_status ?? '—'
-      const toStatus = event.to_status ?? '—'
-      const transitionLabel = `${fromStatus} → ${toStatus}`
+      const transitionLabel = hasTransition
+        ? `${event.from_status ?? '—'} → ${event.to_status ?? '—'}`
+        : null
 
       return {
         actorPrincipalId: event.actor_principal_id,
-        createdTs: event.created_ts,
         eventType: event.event_type,
-        fromStatus: event.from_status,
         historyId: event.history_id,
         statusTone: tone,
         timestamp: event.created_ts,
         title: event.event_type,
-        toStatus: event.to_status,
         transitionLabel,
       }
     }),
-    historyPending: false,
-    historyError: null,
   }
 }
 
@@ -188,20 +207,18 @@ export function deriveFollowupHistory(
  */
 export function deriveFollowupPageViewModel(args: {
   page: ConsolePage
+  whoami: null | Whoami
   listRows: FollowupRow[]
-  listPending: boolean
-  listError: unknown
+  fmtIso: (iso: null | string | undefined) => string
 }): FollowupPageViewModel {
-  const { page, listRows, listPending, listError } = args
-  const sharedArgs: CommonViewModelArgs = { whoami: null, page }
+  const { page, whoami, listRows, fmtIso } = args
+  const sharedArgs: CommonViewModelArgs = { whoami, page }
   const shared = deriveCommonViewModel(sharedArgs)
 
   return {
     canRead: shared.canRead,
     capabilityStatus: shared.capabilityStatus,
     readOnlyReason: shared.readOnlyReason,
-    list: deriveFollowupList(listRows),
-    listPending,
-    listError: listError instanceof Error ? listError.message : null,
+    list: deriveFollowupList(listRows, fmtIso),
   }
 }

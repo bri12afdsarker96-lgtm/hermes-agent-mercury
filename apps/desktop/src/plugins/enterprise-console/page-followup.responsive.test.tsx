@@ -96,8 +96,10 @@ describe('FollowupPage responsive detail', () => {
     const row = await screen.findByTestId('console-followup-f1')
     fireEvent.click(row)
 
-    await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy())
-    expect(screen.getByTestId('console-followup-detail')).toBeTruthy()
+    await waitFor(() =>
+      expect(screen.getByTestId('console-followup-detail')).toBeTruthy()
+    )
+    expect(screen.getByRole('dialog')).toBeTruthy()
     expect(row.getAttribute('aria-expanded')).toBe('true')
   })
 
@@ -109,7 +111,9 @@ describe('FollowupPage responsive detail', () => {
     const row = await screen.findByTestId('console-followup-f1')
     fireEvent.click(row)
 
-    await waitFor(() => expect(screen.getByTestId('console-followup-detail')).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByTestId('console-followup-detail')).toBeTruthy()
+    )
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(row.getAttribute('aria-expanded')).toBe('true')
   })
