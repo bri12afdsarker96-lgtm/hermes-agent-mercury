@@ -1,5 +1,10 @@
 # B14-ACTIVATION-SEAM-RESOLUTION-PREFLIGHT-01
 
+> **Historical preflight:** the `ConnectForm` observations below describe the B14
+> baseline. Native one-login subsequently closed the bootstrap gap. A branch-exact
+> census found no production, test, dynamic-import, barrel-export, or authorized DEV
+> reference to the form, so the unrouted renderer-bearer surface was removed.
+
 > READ / DESIGN only. No code in `plugins-store.ts` / `plugins.ts` / SDK root / app auth /
 > Hermes_AI. This is the exact-seam proof + impact analysis for TOTAL-CONTROL to grant a
 > narrow write authority. Evidence = the activation-seam census (Mercury `apps/desktop`).

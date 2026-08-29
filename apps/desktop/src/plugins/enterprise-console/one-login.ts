@@ -88,7 +88,7 @@ export function bootstrapEnterpriseSession(): void {
   started = true
 
   // Dev / browser / no desktop bridge: no native session to reuse. Leave the
-  // console hidden; ConnectForm stays as the dev/migration break-glass path.
+  // console hidden. There is deliberately no renderer credential fallback.
   if (!hasIpcBridge()) {
     return
   }

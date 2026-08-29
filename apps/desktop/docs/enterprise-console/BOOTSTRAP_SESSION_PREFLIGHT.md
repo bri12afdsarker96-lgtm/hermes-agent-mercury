@@ -1,5 +1,10 @@
 # B15-ENTERPRISE-SESSION-BOOTSTRAP-PREFLIGHT-01
 
+> **Historical preflight:** the in-page `ConnectForm` statements below describe the
+> B15 baseline. The accepted native one-login path now supplies the pre-page session;
+> the form had no remaining production/test/DEV entrypoint and was removed after a
+> branch-exact dead-code census.
+
 > READ / DESIGN only. No code changes. This is the seam survey + reuse decision for
 > TOTAL-CONTROL to decide the **enterprise-session source** that breaks the L1 activation
 > chicken-and-egg documented in `ACTIVATION_SEAM_PREFLIGHT.md`. It answers: *where does an
@@ -244,7 +249,8 @@ bootstrap bridge — server-gated).**
 
 These three server gaps are the true blocker for L1 "product entry appears automatically after an
 authenticated desktop session." Until a source is decided, L1 stays an explicit Phase-1 GAP and
-the current `defaultEnabled:false` + in-page `ConnectForm` remains the construction/DEV seam.
+the historical `defaultEnabled:false` + in-page `ConnectForm` was the construction/DEV seam.
+That seam is superseded by native one-login; no renderer credential fallback remains.
 
 ---
 

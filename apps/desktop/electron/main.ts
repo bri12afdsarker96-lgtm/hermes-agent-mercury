@@ -13526,7 +13526,7 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
 
   if (!enterpriseOrigin) {
     // No trusted enterprise origin configured -> one-login unavailable (UNKNOWN);
-    // the ConnectForm break-glass path remains. Never guess an origin.
+    // the console stays hidden. Never guess an origin or request a renderer bearer.
     return { code: 'no_enterprise_origin', message: 'enterprise API origin is not configured', ok: false }
   }
 

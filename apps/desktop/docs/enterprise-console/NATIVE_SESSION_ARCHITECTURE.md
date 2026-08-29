@@ -84,12 +84,11 @@ freezes (a) or (b).** Once frozen, the desktop delta is small (see §4/§5).
 (server-derived) → Console entry appears automatically → reconnect (wake/backoff) →
 revoke (entry disappears) → logout (bearer cleared)`.
 
-Today the desktop performs exactly **one** real login (native OAuth, main-held bearer via
-`ensureNativeAccessToken`), but the console is wired as a **second** login (renderer-pasted
-bearer). The one-login fix (post source-decision): reuse the native main-held bearer as the
-credential **source** for `enterprise:connect` — keep the existing `EnterpriseSessionStore`
-fencing, change only the credential origin — so the console never receives raw credential
-material. Retire the in-page `ConnectForm` to a DEV-only fallback.
+The accepted implementation performs exactly **one** real login (native OAuth, main-held
+bearer via `ensureNativeAccessToken`) and reuses that bearer as the credential source for
+the fenced Enterprise session. The console never receives raw credential material. The
+historical in-page `ConnectForm` had no remaining runtime/test/DEV entrypoint and has been
+removed; DEV transport tests remain injectable without exposing a production UI fallback.
 
 ## 5. Plugin activation (B16-C) — WRAP, no second manager
 
@@ -110,8 +109,8 @@ mirrors, never asserts; write handlers inject identity and ignore body; per-requ
 → revocation immediate). The desktop **mirrors** whoami, never computes it.
 
 Residuals to carry into B-AUD (none block this design; the top one is the reason for §4):
-- **HIGH** — the console bearer currently transits the renderer (pasted). Fixed by the §4
-  one-login unification (native main-held bearer).
+- **CLOSED** — the historical pasted-bearer surface was replaced by §4 one-login and the
+  unrouted `ConnectForm` was removed after branch-exact reference census.
 - **MEDIUM** — `enterprise:connect` trusts any preload-bearing renderer (no sender
   attestation); plain-text refresh-token under the keyring-less opt-in; silent capability
   downgrade to the embedded flow; whoami display-staleness after revoke; upstream

@@ -8,6 +8,10 @@
 > originating freeze record. The consolidated B→C consumption contract will land as
 > `B_TO_C_INTERFACE_FREEZE V2` (Hermes_AI docs) after the WAVE-7 focused audit.
 
+> **One-login amendment:** the originating freeze's transient renderer-bearer handoff is
+> superseded. Production now reuses the main-held native bearer and returns only an opaque
+> session id; the unrouted `ConnectForm` was removed after a branch-exact dead-code census.
+
 > Gate: `P3-M4A-DESKTOP-ASSISTANT-CONSOLE-01` · Repo: `hermes-agent-mercury` · Branch:
 > `claude/p3-m4a-desktop-assistant-console-01` (cut from Mercury `main` `60c2ed5`).
 > Server authority source (read-only): `Hermes_AI` `hermes_devices/webserver.py`
@@ -28,11 +32,10 @@
 - **Transport (amended per TOTAL-CONTROL):** pages depend on a narrow `HermesTransport`
   interface (`get/post/request`) and never see a token. Production = renderer → typed
   preload/contextBridge → IPC → Electron **main** → HTTPS, reusing the desktop's existing
-  main `fetchJson` engine (**WRAP**, per the B-T census). **Bearer contract (accurate):** a
-  user-entered credential exists transiently in the renderer during connect (cleared from
-  the input on handoff); after the IPC handoff the renderer does not persist/store/
-  re-expose it; **main owns the authenticated session credential** (per WebContents, fenced
-  by an opaque `sessionId`), never persisted, never logged. This is also the only design
+  main `fetchJson` engine (**WRAP**, per the B-T census). **Bearer contract (current):**
+  the renderer supplies no credential; **main owns the authenticated session credential**
+  (per WebContents, fenced by an opaque `sessionId`) and returns only non-secret session
+  state. The credential is never persisted or logged. This is also the only design
   that
   works against the Hermes server, which emits no CORS and enforces a strict Origin
   allowlist — a renderer `fetch` is both CORS-blocked and Origin-rejected; a main-process
