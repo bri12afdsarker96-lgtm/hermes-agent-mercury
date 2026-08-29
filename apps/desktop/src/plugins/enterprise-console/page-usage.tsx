@@ -1,68 +1,30 @@
 /**
- * Usage / Budget page (PARTIAL) — real budget from `/api/tenant-profile`
- * (`fields.llm.daily_budget_tokens`). Real-time token usage has no server
- * endpoint, so it is shown as unavailable rather than faked.
+ * Usage & Budget page — Glue layer.
+ *
+ * Composes the controller (query), view-model (derivation), and view
+ * (rendering). This is the only place that wires the three together.
+ * A 4-line file by design: if it grows, one of the three layers
+ * is wrong.
+ *
+ * Step 3 of the W5-B0 contract freeze. See
+ * .hermes/plans/2026-08-29_wave1-contract-freeze.md §3.
  */
 
-import { icons } from '@hermes/plugin-sdk'
-
-import { QueryBody, useConsoleQuery } from './page-kit'
-import { PageStatusBadge } from './status-badge'
-import { ConsolePanel, KpiCard, PageHeader } from './ui'
-
-interface TenantProfileResp {
-  fields: { llm?: { daily_budget_tokens?: number } }
-  tenant_id: string
-  version: number
-}
-
-function budgetLabel(tokens: number | undefined): string {
-  if (tokens == null) {
-    return 'default (server env)'
-  }
-
-  if (tokens === 0) {
-    return 'unlimited'
-  }
-
-  return `${tokens.toLocaleString()} tokens/day`
-}
+import { findPage } from './catalog'
+import { QueryBody } from './page-kit'
+import { useWhoami } from './session'
+import { useUsageData } from './page-usage.controller'
+import { deriveUsageViewModel } from './page-usage.view-model'
+import { UsageView } from './page-usage.view'
 
 export function UsagePage() {
-  const query = useConsoleQuery<TenantProfileResp>(['enterprise-console', 'tenant-profile'], '/api/tenant-profile')
+  const who = useWhoami()
+  const query = useUsageData()
+  const page = findPage('usage')!
 
   return (
-    <div
-      className="mx-auto flex w-full max-w-[96rem] flex-col px-(--ec-page-inset-x) py-(--ec-page-inset-y)"
-      data-page-status="partial"
-      data-testid="console-page-usage"
-    >
-      <PageHeader
-        purpose="Configured tenant budget with explicit gaps where real-time usage authority does not yet exist."
-        status={<PageStatusBadge status="partial" />}
-        title="Usage & budget"
-      />
-
-      <QueryBody emptyText="no profile" query={query}>
-        {data => {
-          const budget = budgetLabel(data.fields?.llm?.daily_budget_tokens)
-
-          return (
-            <div className="grid gap-(--ec-gutter) md:grid-cols-2" data-testid="console-budget">
-              <div data-testid="console-budget-value">
-                <KpiCard accent="knowledge" icon={icons.CreditCard} label="Daily token budget" value={budget} />
-              </div>
-              <KpiCard accent="brand" icon={icons.BarChart3} label="Real-time usage" value={null} />
-            </div>
-          )
-        }}
-      </QueryBody>
-
-      <ConsolePanel className="mt-(--ec-gutter)" title="Availability">
-        <p className="text-(--ui-text-secondary)">
-          Budget configuration is authoritative from the tenant profile. Real-time token usage and spend have no server endpoint yet, so no figure or trend is inferred.
-        </p>
-      </ConsolePanel>
-    </div>
+    <QueryBody emptyText="no profile" query={query}>
+      {data => <UsageView vm={deriveUsageViewModel({ page, whoami: who, data })} />}
+    </QueryBody>
   )
 }
