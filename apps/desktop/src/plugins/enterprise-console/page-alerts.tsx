@@ -1,94 +1,28 @@
 /**
- * Alerts / Exceptions page — real `/api/metrics/alerts`. Field names are the
- * server's actual shape: `{ level, code, value, threshold, message }` plus a
- * per-source `errors` map (NOT `severity/kind/detail`).
+ * Alerts & Exceptions page — Glue layer.
+ *
+ * Composes the controller (query), view-model (derivation), and view
+ * (rendering). This is the only place that wires the three together.
+ *
+ * Wave 1 / Step 5 of W5-B0 Controller/View Contract Freeze. See
+ * .hermes/plans/2026-08-29_wave1-contract-freeze.md §3.
  */
 
-import { StatusDot, type StatusTone } from '@hermes/plugin-sdk'
-
-import { ConsoleRows, QueryBody, useConsoleQuery } from './page-kit'
-import { PageStatusBadge } from './status-badge'
-import { ConsolePanel, PageHeader } from './ui'
-
-interface MetricAlert {
-  code: string
-  level: 'crit' | 'warn'
-  message: string
-  threshold: number
-  value: number
-}
-
-interface MetricsAlertsResp {
-  alerts: MetricAlert[]
-  errors: Record<string, string>
-  generated_ts: number
-}
-
-const LEVEL_TONE: Record<string, StatusTone> = { crit: 'bad', warn: 'warn' }
+import { findPage } from './catalog'
+import { QueryBody } from './page-kit'
+import { useWhoami } from './session'
+import { useAlertsData } from './page-alerts.controller'
+import { deriveAlertsViewModel } from './page-alerts.view-model'
+import { AlertsView } from './page-alerts.view'
 
 export function AlertsPage() {
-  const query = useConsoleQuery<MetricsAlertsResp>(['enterprise-console', 'alerts'], '/api/metrics/alerts', 60_000)
+  const who = useWhoami()
+  const query = useAlertsData()
+  const page = findPage('alerts')!
 
   return (
-    <div
-      className="mx-auto flex w-full max-w-[96rem] flex-col px-(--ec-page-inset-x) py-(--ec-page-inset-y)"
-      data-page-status="ready"
-      data-testid="console-page-alerts"
-    >
-      <PageHeader
-        purpose="Current server-reported alert conditions and source-level collection errors."
-        status={<PageStatusBadge status="ready" />}
-        title="Alerts & exceptions"
-      />
-
-      <QueryBody
-        emptyText="no active alerts"
-        isEmpty={data => data.alerts.length === 0 && Object.keys(data.errors ?? {}).length === 0}
-        query={query}
-      >
-        {data => (
-          <div className="grid items-start gap-(--ec-gutter) xl:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.6fr)]">
-            <ConsolePanel divided title="Active alerts">
-              <ConsoleRows testId="console-alerts">
-                {data.alerts.map(alert => (
-                  <li
-                    className="flex min-h-14 items-center justify-between gap-4 border-b border-(--ui-stroke-tertiary) py-3 last:border-b-0"
-                    key={alert.code}
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate font-medium text-(--ui-text-primary)">{alert.message}</div>
-                      <div className="text-(--ui-text-tertiary)" data-ec-mono="">
-                        {alert.code} · {alert.value}/{alert.threshold}
-                      </div>
-                    </div>
-                    <span className="inline-flex shrink-0 items-center gap-1 uppercase text-(--ui-text-secondary)">
-                      <StatusDot tone={LEVEL_TONE[alert.level] ?? 'warn'} />
-                      {alert.level}
-                    </span>
-                  </li>
-                ))}
-              </ConsoleRows>
-            </ConsolePanel>
-
-            <ConsolePanel divided title="Source errors">
-              {Object.entries(data.errors ?? {}).length > 0 ? (
-                <dl className="flex flex-col" data-testid="console-alert-errors">
-                  {Object.entries(data.errors).map(([source, detail]) => (
-                    <div className="border-b border-(--ui-stroke-tertiary) py-3 last:border-b-0" key={source}>
-                      <dt className="font-medium text-(--ui-text-primary)" data-ec-mono="">
-                        {source}
-                      </dt>
-                      <dd className="mt-1 break-words text-(--ui-text-secondary)">{detail}</dd>
-                    </div>
-                  ))}
-                </dl>
-              ) : (
-                <p className="text-(--ui-text-tertiary)">no source errors</p>
-              )}
-            </ConsolePanel>
-          </div>
-        )}
-      </QueryBody>
-    </div>
+    <QueryBody emptyText="no active alerts" isEmpty={vm => vm.isEmpty} query={query}>
+      {data => <AlertsView vm={deriveAlertsViewModel({ page, whoami: who, data })} />}
+    </QueryBody>
   )
 }
