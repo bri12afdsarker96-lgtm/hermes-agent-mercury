@@ -19,9 +19,9 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { deriveDashboardViewModel, dashboardPage } from './page-dashboard.view-model'
+import { type ConsolePage, findPage } from './catalog'
 import { workspaceCopy } from './page-dashboard.controller'
-import { findPage, type ConsolePage } from './catalog'
+import { dashboardPage, deriveDashboardViewModel } from './page-dashboard.view-model'
 import type { Health, Metrics, Whoami } from './types'
 
 const baseHealth: Health = {
