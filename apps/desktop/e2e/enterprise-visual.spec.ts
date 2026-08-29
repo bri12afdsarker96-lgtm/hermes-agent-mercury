@@ -107,6 +107,15 @@ async function setContentViewport(
   width: number,
   height: number,
 ): Promise<void> {
+  // Use setBounds rather than setContentSize: on cold CI runners the
+  // restored main-window size (DEFAULT_WIDTH=1220 / DEFAULT_HEIGHT=800
+  // from window-state.ts) ignores setContentSize when the window is
+  // already at its minimum, leaving the renderer at the default 1220×800
+  // instead of the requested viewport. setBounds forces the OS-level
+  // window resize; the renderer then reports innerWidth/Height matching
+  // the requested viewport, which the spec's `expect.poll` will then
+  // match. The trailing wait gives the renderer one paint frame to
+  // relayout before the screenshot.
   await app.evaluate(
     ({ BrowserWindow }, size) => {
       const win = BrowserWindow.getAllWindows()[0]
@@ -117,10 +126,12 @@ async function setContentViewport(
 
       win.unmaximize()
       win.setMinimumSize(640, 480)
-      win.setContentSize(size.width, size.height, false)
+      win.setBounds({ x: 0, y: 0, width: size.width, height: size.height })
     },
     { height, width },
   )
+  // Give the renderer one paint frame after the OS-level resize.
+  await new Promise(resolve => setTimeout(resolve, 250))
 }
 
 let fixture: MockBackendFixture | null = null
