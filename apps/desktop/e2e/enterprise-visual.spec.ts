@@ -130,7 +130,7 @@ test.beforeAll(async () => {
   })
   await waitForAppReady(fixture, 120_000)
 
-  const enterpriseNav = fixture.page.getByRole('button', { name: 'Enterprise Console' })
+  const enterpriseNav = fixture.page.getByRole('button', { name: 'Enterprise', exact: true })
   await expect(enterpriseNav).toBeVisible({ timeout: 15_000 })
   await enterpriseNav.click()
   await expect(fixture.page.getByTestId('console-page-dashboard')).toBeVisible({ timeout: 15_000 })
