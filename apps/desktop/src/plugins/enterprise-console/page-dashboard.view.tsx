@@ -14,6 +14,7 @@
 
 import { EmptyState, ErrorState, icons, Loader, usePluginI18n } from '@hermes/plugin-sdk'
 
+import { AlertsSummaryView } from './page-dashboard.alerts-summary'
 import type { DashboardViewModel } from './page-dashboard.view-model'
 import { CapabilityBadge, PageStatusBadge } from './status-badge'
 import { ConsolePanel, KpiCard, PageHeader } from './ui'
@@ -206,6 +207,10 @@ export function DashboardView({ vm }: { vm: DashboardViewModel }) {
           capabilityEntries={vm.capabilityEntries}
           hasNoCapabilities={vm.hasNoCapabilities}
         />
+      </div>
+
+      <div className="mt-(--ec-gutter)" data-testid="console-overview-alerts-summary">
+        <AlertsSummaryView summary={vm.alertsSummary} />
       </div>
     </div>
   )
