@@ -1,84 +1,122 @@
 {
-  "name": "hermes",
-  "productName": "hermes_Agent",
-  "private": true,
-  "version": "0.17.0",
-  "description": "Native desktop shell for hermes_Agent.",
   "author": "Nous Research",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/NousResearch/hermes-agent.git"
-  },
-  "type": "module",
-  "main": "dist/electron-main.mjs",
-  "engines": {
-    "node": ">=22.22.0"
-  },
-  "scripts": {
-    "clean": "npm run clean:e2e && npm run clean:renderer && npm run clean:electron",
-    "clean:e2e": "tsc --build tsconfig.e2e.json --clean",
-    "clean:renderer": "tsc --build tsconfig.json --clean ",
-    "clean:electron": "tsc --build tsconfig.electron.json --clean",
-    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
-    "dev:fake-boot": "cross-env HERMES_DESKTOP_BOOT_FAKE=1 HERMES_DESKTOP_BOOT_FAKE_STEP_MS=650 npm run dev",
-    "dev:mock": "node scripts/dev-mock.mjs",
-    "dev:renderer": "node scripts/assert-root-install.mjs && npm run clean:renderer && vite --host 127.0.0.1 --port 5174",
-    "dev:electron": "tsc --build tsconfig.electron.json && wait-on http://127.0.0.1:5174 && node scripts/bundle-electron-main.mjs --dev && cross-env XCURSOR_SIZE=24 HERMES_DESKTOP_DEV_SERVER=http://127.0.0.1:5174 electron .",
-    "profile:main": "tsc --build tsconfig.electron.json && wait-on http://127.0.0.1:5174 && node scripts/bundle-electron-main.mjs --dev && cross-env XCURSOR_SIZE=24 HERMES_DESKTOP_DEV_SERVER=http://127.0.0.1:5174 electron --inspect=9229 .",
-    "profile:main:cpu": "tsc --build tsconfig.electron.json && wait-on http://127.0.0.1:5174 && node scripts/bundle-electron-main.mjs --dev && cross-env XCURSOR_SIZE=24 NODE_OPTIONS=--cpu-prof HERMES_DESKTOP_DEV_SERVER=http://127.0.0.1:5174 electron .",
-    "start": "npm run build && electron .",
-    "prebuild": "npm run clean",
-    "build": "node scripts/assert-root-install.mjs && node scripts/write-build-stamp.mjs && vite build && node scripts/bundle-electron-main.mjs && node scripts/stage-native-deps.mjs",
-    "postbuild": "node scripts/assert-dist-built.mjs",
-    "prebuilder": "node scripts/patch-electron-builder-mac-binary.mjs",
-    "builder": "cross-env NODE_OPTIONS=--max-old-space-size=16384 node scripts/run-electron-builder.mjs",
-    "pack": "npm run build && npm run builder -- --dir --publish never",
-    "dist": "npm run build && npm run builder",
-    "dist:mac": "npm run build && npm run builder -- --mac",
-    "dist:mac:dmg": "npm run build && npm run builder -- --mac dmg",
-    "dist:mac:zip": "npm run build && npm run builder -- --mac zip",
-    "dist:win": "npm run build && npm run builder -- --win",
-    "dist:win:msi": "npm run build && npm run builder -- --win msi",
-    "dist:win:nsis": "npm run build && npm run builder -- --win nsis",
-    "dist:linux": "npm run build && npm run builder -- --linux AppImage deb rpm",
-    "perf": "node scripts/perf/run.mjs",
-    "update:shim": "bash ../../scripts/desktop-update/repro.sh shim",
-    "update:shim:fail": "bash ../../scripts/desktop-update/repro.sh shim-fail",
-    "update:repro:fresh": "bash ../../scripts/desktop-update/repro.sh fresh",
-    "update:repro:behind": "bash ../../scripts/desktop-update/repro.sh behind",
-    "update:repro:error": "bash ../../scripts/desktop-update/repro.sh error",
-    "update:repro:gate": "bash ../../scripts/desktop-update/repro.sh gate",
-    "update:repro:launch": "bash ../../scripts/desktop-update/repro.sh launch",
-    "perf:serve": "node scripts/perf/serve.mjs",
-    "test:desktop": "node scripts/test-desktop.mjs",
-    "test:desktop:all": "node scripts/test-desktop.mjs all",
-    "test:desktop:dmg": "node scripts/test-desktop.mjs dmg",
-    "test:desktop:nsis": "node scripts/test-desktop.mjs nsis",
-    "test:desktop:existing": "node scripts/test-desktop.mjs existing",
-    "test:desktop:fresh": "node scripts/test-desktop.mjs fresh",
-    "typecheck": "tsc -p . --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.e2e.json --noEmit",
-    "lint": "eslint src/ electron/",
-    "lint:fix": "eslint src/ electron/ --fix",
-    "fmt": "prettier --write 'src/**/*.{ts,tsx}' 'electron/**/*.ts' 'vite.config.ts'",
-    "fix": "npm run lint:fix && npm run fmt",
-    "test:ui": "vitest run --project ui",
-    "test:desktop:platforms": "vitest run --project electron",
-    "test:find-in-page-native": "electron electron/find-in-page-native-fixture",
-    "test": "vitest run",
-    "preview": "node scripts/assert-root-install.mjs && vite preview --host 127.0.0.1 --port 4174",
-    "check:test:desktop:platforms": "npm run test:desktop:platforms",
-    "check:test:plugins": "node --test src/plugins/*/tests/*.test.mjs",
-    "check:test:ui:shard-1of3": "node scripts/run-ui-shard.mjs",
-    "check:test:ui:shard-2of3": "node scripts/run-ui-shard.mjs",
-    "check:test:ui:shard-3of3": "node scripts/run-ui-shard.mjs",
-    "check:test:desktop:all": "npm run test:desktop:all",
-    "check:lint": "npm run typecheck && npm run lint",
-    "check": "npm run check:lint && npm run test:ui && npm run test:desktop:platforms && npm run test:desktop:all",
-    "test:e2e": "npm run build && playwright test e2e/",
-    "test:e2e:visual": "npm run build && WLR_BACKENDS=headless WLR_NO_HARDWARE_CURSORS=1 cage -- npx playwright test e2e/ --reporter=list",
-    "test:e2e:update-snapshots": "npm run build && WLR_BACKENDS=headless WLR_NO_HARDWARE_CURSORS=1 cage -- npx playwright test e2e/ --reporter=list --update-snapshots",
-    "repro:short-session-hang": "node scripts/run-short-session-hang-repro.mjs",
-    "repro:short-session-hang:test": "node --test scripts/run-short-session-hang-repro.test.mjs"
+  "build": {
+    "afterPack": "scripts/after-pack.mjs",
+    "afterSign": "scripts/notarize.mjs",
+    "appId": "com.nousresearch.hermes",
+    "artifactName": "hermes_Agent-${version}-${os}-${arch}.${ext}",
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node",
+      "**/prebuilds/**",
+      "dist/**"
+    ],
+    "beforeBuild": "scripts/before-build.mjs",
+    "beforePack": "scripts/before-pack.mjs",
+    "directories": {
+      "output": "release"
+    },
+    "dmg": {
+      "backgroundColor": "#f5f5f7",
+      "contents": [
+        {
+          "type": "file",
+          "x": 160,
+          "y": 170
+        },
+        {
+          "path": "/Applications",
+          "type": "link",
+          "x": 400,
+          "y": 170
+        }
+      ],
+      "iconSize": 96,
+      "title": "Install hermes_Agent",
+      "window": {
+        "height": 360,
+        "width": 560
+      }
+    },
+    "electronVersion": "40.10.2",
+    "executableName": "Hermes",
+    "extraResources": [
+      {
+        "from": "build/install-stamp.json",
+        "to": "install-stamp.json"
+      },
+      {
+        "from": "assets/icon.ico",
+        "to": "icon.ico"
+      }
+    ],
+    "files": [
+      "dist/**",
+      "assets/**",
+      "public/**",
+      "package.json"
+    ],
+    "icon": "assets/icon",
+    "linux": {
+      "category": "Development",
+      "maintainer": "Nous Research <support@nousresearch.com>",
+      "synopsis": "Native desktop shell for hermes_Agent.",
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm"
+      ]
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "entitlements": "electron/entitlements.mac.plist",
+      "entitlementsInherit": "electron/entitlements.mac.inherit.plist",
+      "extendInfo": {
+        "CFBundleDisplayName": "hermes_Agent",
+        "CFBundleExecutable": "Hermes",
+        "CFBundleName": "hermes_Agent",
+        "NSAudioCaptureUsageDescription": "hermes_Agent uses audio capture for voice conversations.",
+        "NSCameraUsageDescription": "hermes_Agent uses the camera when a plugin or feature you enable requests it.",
+        "NSMicrophoneUsageDescription": "hermes_Agent uses the microphone for voice input and voice conversations."
+      },
+      "gatekeeperAssess": false,
+      "hardenedRuntime": true,
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "allowToChangeInstallationDirectory": true,
+      "oneClick": false,
+      "perMachine": false,
+      "shortcutName": "hermes_Agent",
+      "uninstallDisplayName": "hermes_Agent",
+      "warningsAsErrors": false
+    },
+    "productName": "hermes_Agent",
+    "protocols": [
+      {
+        "name": "Hermes Protocol",
+        "schemes": [
+          "hermes"
+        ]
+      }
+    ],
+    "publish": {
+      "channel": "stable",
+      "provider": "generic",
+      "publishAutoUpdate": true,
+      "url": "https://updates.example.invalid/hermes-stable"
+    },
+    "win": {
+      "legalTrademarks": "hermes_Agent",
+      "signAndEditExecutable": false,
+      "target": [
+        "nsis",
+        "msi"
+      ]
+    }
   },
   "dependencies": {
     "@assistant-ui/core": "0.2.23",
@@ -119,6 +157,7 @@
     "d3-force": "3.0.0",
     "dnd-core": "14.0.1",
     "dompurify": "3.4.13",
+    "electron-updater": "6.6.8",
     "emojibase-data": "16.0.3",
     "fflate": "0.8.3",
     "frimousse": "0.3.0",
@@ -152,9 +191,7 @@
     "vfile": "6.0.3",
     "web-haptics": "0.0.6"
   },
-  "optionalDependencies": {
-    "get-windows": "9.3.0"
-  },
+  "description": "Native desktop shell for hermes_Agent.",
   "devDependencies": {
     "@electron/rebuild": "4.2.0",
     "@playwright/test": "1.58.2",
@@ -181,116 +218,91 @@
     "vitest": "4.1.10",
     "wait-on": "9.0.10"
   },
-  "build": {
-    "electronVersion": "40.10.2",
-    "appId": "com.nousresearch.hermes",
-    "productName": "hermes_Agent",
-    "executableName": "Hermes",
-    "protocols": [
-      {
-        "name": "Hermes Protocol",
-        "schemes": [
-          "hermes"
-        ]
-      }
-    ],
-    "artifactName": "hermes_Agent-${version}-${os}-${arch}.${ext}",
-    "icon": "assets/icon",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**",
-      "assets/**",
-      "public/**",
-      "package.json"
-    ],
-    "beforeBuild": "scripts/before-build.mjs",
-    "beforePack": "scripts/before-pack.mjs",
-    "afterPack": "scripts/after-pack.mjs",
-    "extraResources": [
-      {
-        "from": "build/install-stamp.json",
-        "to": "install-stamp.json"
-      },
-      {
-        "from": "assets/icon.ico",
-        "to": "icon.ico"
-      }
-    ],
-    "asar": true,
-    "afterSign": "scripts/notarize.mjs",
-    "asarUnpack": [
-      "**/*.node",
-      "**/prebuilds/**",
-      "dist/**"
-    ],
-    "mac": {
-      "category": "public.app-category.developer-tools",
-      "entitlements": "electron/entitlements.mac.plist",
-      "entitlementsInherit": "electron/entitlements.mac.inherit.plist",
-      "extendInfo": {
-        "CFBundleDisplayName": "hermes_Agent",
-        "CFBundleExecutable": "Hermes",
-        "CFBundleName": "hermes_Agent",
-        "NSAudioCaptureUsageDescription": "hermes_Agent uses audio capture for voice conversations.",
-        "NSCameraUsageDescription": "hermes_Agent uses the camera when a plugin or feature you enable requests it.",
-        "NSMicrophoneUsageDescription": "hermes_Agent uses the microphone for voice input and voice conversations."
-      },
-      "gatekeeperAssess": false,
-      "hardenedRuntime": true,
-      "target": [
-        "dmg",
-        "zip"
-      ]
-    },
-    "dmg": {
-      "title": "Install hermes_Agent",
-      "backgroundColor": "#f5f5f7",
-      "iconSize": 96,
-      "window": {
-        "width": 560,
-        "height": 360
-      },
-      "contents": [
-        {
-          "x": 160,
-          "y": 170,
-          "type": "file"
-        },
-        {
-          "x": 400,
-          "y": 170,
-          "type": "link",
-          "path": "/Applications"
-        }
-      ]
-    },
-    "win": {
-      "legalTrademarks": "hermes_Agent",
-      "target": [
-        "nsis",
-        "msi"
-      ],
-      "signAndEditExecutable": false
-    },
-    "linux": {
-      "category": "Development",
-      "maintainer": "Nous Research <support@nousresearch.com>",
-      "synopsis": "Native desktop shell for hermes_Agent.",
-      "target": [
-        "AppImage",
-        "deb",
-        "rpm"
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "perMachine": false,
-      "shortcutName": "hermes_Agent",
-      "uninstallDisplayName": "hermes_Agent",
-      "warningsAsErrors": false
-    }
-  }
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "main": "dist/electron-main.mjs",
+  "name": "hermes",
+  "optionalDependencies": {
+    "get-windows": "9.3.0"
+  },
+  "private": true,
+  "productName": "hermes_Agent",
+  "publishMeta": {
+    "NOTE": "synthetic .invalid URL; TOTAL-CONTROL must authorize production feed",
+    "PRODUCTION_UPDATE_URL_AUTHORIZED": false,
+    "REMEDIATION_01_REF": "§17"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NousResearch/hermes-agent.git"
+  },
+  "scripts": {
+    "build": "node scripts/assert-root-install.mjs && node scripts/write-build-stamp.mjs && vite build && node scripts/bundle-electron-main.mjs && node scripts/stage-native-deps.mjs",
+    "builder": "cross-env NODE_OPTIONS=--max-old-space-size=16384 node scripts/run-electron-builder.mjs",
+    "check": "npm run check:lint && npm run test:ui && npm run test:desktop:platforms && npm run test:desktop:all",
+    "check:lint": "npm run typecheck && npm run lint",
+    "check:test:desktop:all": "npm run test:desktop:all",
+    "check:test:desktop:platforms": "npm run test:desktop:platforms",
+    "check:test:plugins": "node --test src/plugins/*/tests/*.test.mjs",
+    "check:test:ui:shard-1of3": "node scripts/run-ui-shard.mjs",
+    "check:test:ui:shard-2of3": "node scripts/run-ui-shard.mjs",
+    "check:test:ui:shard-3of3": "node scripts/run-ui-shard.mjs",
+    "clean": "npm run clean:e2e && npm run clean:renderer && npm run clean:electron",
+    "clean:e2e": "tsc --build tsconfig.e2e.json --clean",
+    "clean:electron": "tsc --build tsconfig.electron.json --clean",
+    "clean:renderer": "tsc --build tsconfig.json --clean ",
+    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev:electron": "tsc --build tsconfig.electron.json && wait-on http://127.0.0.1:5174 && node scripts/bundle-electron-main.mjs --dev && cross-env XCURSOR_SIZE=24 HERMES_DESKTOP_DEV_SERVER=http://127.0.0.1:5174 electron .",
+    "dev:fake-boot": "cross-env HERMES_DESKTOP_BOOT_FAKE=1 HERMES_DESKTOP_BOOT_FAKE_STEP_MS=650 npm run dev",
+    "dev:mock": "node scripts/dev-mock.mjs",
+    "dev:renderer": "node scripts/assert-root-install.mjs && npm run clean:renderer && vite --host 127.0.0.1 --port 5174",
+    "dist": "npm run build && npm run builder",
+    "dist:linux": "npm run build && npm run builder -- --linux AppImage deb rpm",
+    "dist:mac": "npm run build && npm run builder -- --mac",
+    "dist:mac:dmg": "npm run build && npm run builder -- --mac dmg",
+    "dist:mac:zip": "npm run build && npm run builder -- --mac zip",
+    "dist:win": "npm run build && npm run builder -- --win",
+    "dist:win:msi": "npm run build && npm run builder -- --win msi",
+    "dist:win:nsis": "npm run build && npm run builder -- --win nsis",
+    "fix": "npm run lint:fix && npm run fmt",
+    "fmt": "prettier --write 'src/**/*.{ts,tsx}' 'electron/**/*.ts' 'vite.config.ts'",
+    "lint": "eslint src/ electron/",
+    "lint:fix": "eslint src/ electron/ --fix",
+    "pack": "npm run build && npm run builder -- --dir --publish never",
+    "perf": "node scripts/perf/run.mjs",
+    "perf:serve": "node scripts/perf/serve.mjs",
+    "postbuild": "node scripts/assert-dist-built.mjs",
+    "prebuild": "npm run clean",
+    "prebuilder": "node scripts/patch-electron-builder-mac-binary.mjs",
+    "preview": "node scripts/assert-root-install.mjs && vite preview --host 127.0.0.1 --port 4174",
+    "profile:main": "tsc --build tsconfig.electron.json && wait-on http://127.0.0.1:5174 && node scripts/bundle-electron-main.mjs --dev && cross-env XCURSOR_SIZE=24 HERMES_DESKTOP_DEV_SERVER=http://127.0.0.1:5174 electron --inspect=9229 .",
+    "profile:main:cpu": "tsc --build tsconfig.electron.json && wait-on http://127.0.0.1:5174 && node scripts/bundle-electron-main.mjs --dev && cross-env XCURSOR_SIZE=24 NODE_OPTIONS=--cpu-prof HERMES_DESKTOP_DEV_SERVER=http://127.0.0.1:5174 electron .",
+    "repro:short-session-hang": "node scripts/run-short-session-hang-repro.mjs",
+    "repro:short-session-hang:test": "node --test scripts/run-short-session-hang-repro.test.mjs",
+    "start": "npm run build && electron .",
+    "test": "vitest run",
+    "test:desktop": "node scripts/test-desktop.mjs",
+    "test:desktop:all": "node scripts/test-desktop.mjs all",
+    "test:desktop:dmg": "node scripts/test-desktop.mjs dmg",
+    "test:desktop:existing": "node scripts/test-desktop.mjs existing",
+    "test:desktop:fresh": "node scripts/test-desktop.mjs fresh",
+    "test:desktop:nsis": "node scripts/test-desktop.mjs nsis",
+    "test:desktop:platforms": "vitest run --project electron",
+    "test:e2e": "npm run build && playwright test e2e/",
+    "test:e2e:update-snapshots": "npm run build && WLR_BACKENDS=headless WLR_NO_HARDWARE_CURSORS=1 cage -- npx playwright test e2e/ --reporter=list --update-snapshots",
+    "test:e2e:visual": "npm run build && WLR_BACKENDS=headless WLR_NO_HARDWARE_CURSORS=1 cage -- npx playwright test e2e/ --reporter=list",
+    "test:find-in-page-native": "electron electron/find-in-page-native-fixture",
+    "test:ui": "vitest run --project ui",
+    "typecheck": "tsc -p . --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.e2e.json --noEmit",
+    "update:repro:behind": "bash ../../scripts/desktop-update/repro.sh behind",
+    "update:repro:error": "bash ../../scripts/desktop-update/repro.sh error",
+    "update:repro:fresh": "bash ../../scripts/desktop-update/repro.sh fresh",
+    "update:repro:gate": "bash ../../scripts/desktop-update/repro.sh gate",
+    "update:repro:launch": "bash ../../scripts/desktop-update/repro.sh launch",
+    "update:shim": "bash ../../scripts/desktop-update/repro.sh shim",
+    "update:shim:fail": "bash ../../scripts/desktop-update/repro.sh shim-fail"
+  },
+  "type": "module",
+  "version": "0.17.0"
 }
