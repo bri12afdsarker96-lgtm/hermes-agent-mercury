@@ -181,7 +181,9 @@ describe('Handoff direct behavior (W1-C-REM-01 §P12)', () => {
 
     wrap(<HandoffPage />)
 
-    await waitFor(() => expect(screen.getByText('no handoffs')).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText(/^no handoffs/)).toBeTruthy()
+    )
     expect(screen.queryByText('Should not render')).toBeNull()
     expect(screen.queryByTestId('console-handoff-row-m1')).toBeNull()
     expect(screen.queryByTestId('console-handoff-claim-m1')).toBeNull()

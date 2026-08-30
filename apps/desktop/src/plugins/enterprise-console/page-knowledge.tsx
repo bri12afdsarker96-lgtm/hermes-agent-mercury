@@ -189,8 +189,15 @@ export function KnowledgePage() {
                   title="Withdraw this source"
                   trigger="withdraw"
                 >
+                  <label
+                    className="sr-only"
+                    htmlFor={`kb-withdraw-reason-${source}`}
+                  >
+                    Withdraw reason
+                  </label>
                   <Input
                     data-testid={`kb-withdraw-reason-${source}`}
+                    id={`kb-withdraw-reason-${source}`}
                     onChange={(event) =>
                       setWithdrawReason((prev) => ({
                         ...prev,
@@ -238,8 +245,15 @@ export function KnowledgePage() {
               title="Author an answer"
               trigger="author"
             >
+              <label
+                className="sr-only"
+                htmlFor={`kb-author-text-${gapId}`}
+              >
+                Author answer text
+              </label>
               <Textarea
                 data-testid={`kb-author-text-${gapId}`}
+                id={`kb-author-text-${gapId}`}
                 onChange={(event) =>
                   setGapText((prev) => ({
                     ...prev,
@@ -260,8 +274,15 @@ export function KnowledgePage() {
               title="Reject this gap"
               trigger="reject"
             >
+              <label
+                className="sr-only"
+                htmlFor={`kb-reject-reason-${gapId}`}
+              >
+                Reject reason
+              </label>
               <Input
                 data-testid={`kb-reject-reason-${gapId}`}
+                id={`kb-reject-reason-${gapId}`}
                 onChange={(event) =>
                   setGapReason((prev) => ({
                     ...prev,
@@ -323,6 +344,7 @@ export function KnowledgePage() {
           <>
             {canPreview ? (
               <Button
+                aria-label={`Preview upload ${uploadId}`}
                 data-testid={`kb-preview-${uploadId}`}
                 onClick={() => {
                   setPreviewUploadId(uploadId)
@@ -345,8 +367,15 @@ export function KnowledgePage() {
                 title="Publish to a collection"
                 trigger="publish"
               >
+                <label
+                  className="sr-only"
+                  htmlFor={`kb-publish-collection-${uploadId}`}
+                >
+                  Publish to collection
+                </label>
                 <Input
                   data-testid={`kb-publish-collection-${uploadId}`}
+                  id={`kb-publish-collection-${uploadId}`}
                   onChange={(event) =>
                     setPublishCollection((prev) => ({
                       ...prev,
@@ -393,10 +422,13 @@ function PreviewDialog({
 }) {
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent>
+      <DialogContent aria-describedby="kb-preview-dialog-desc">
         <DialogHeader>
-          <DialogTitle>Preview</DialogTitle>
+          <DialogTitle id="kb-preview-dialog-title">Preview</DialogTitle>
         </DialogHeader>
+        <p className="sr-only" id="kb-preview-dialog-desc">
+          Preview the staged chunks for an upload before publishing.
+        </p>
         {open ? children : null}
       </DialogContent>
     </Dialog>
@@ -419,20 +451,33 @@ function UploadPanel({
 }) {
   return (
     <div className="flex items-center gap-2" data-testid="console-kb-upload">
+      <label className="sr-only" htmlFor="console-kb-upload-input">
+        Choose a source file to upload
+      </label>
       <input
+        aria-label="Upload a source file"
         className="text-xs"
         data-testid="console-kb-upload-input"
         disabled={busy}
+        id="console-kb-upload-input"
         onChange={onUpload}
         type="file"
       />
       {busy ? (
-        <span className="text-xs text-muted-foreground">uploading…</span>
+        <span
+          aria-live="polite"
+          className="text-xs text-muted-foreground"
+          role="status"
+        >
+          uploading…
+        </span>
       ) : null}
       {error ? (
         <span
+          aria-live="assertive"
           className="text-xs text-destructive"
           data-testid="console-kb-upload-error"
+          role="alert"
         >
           {error}
         </span>
