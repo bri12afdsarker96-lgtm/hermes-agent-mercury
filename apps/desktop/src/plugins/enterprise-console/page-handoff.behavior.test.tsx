@@ -1,17 +1,15 @@
 /**
- * Handoff page — Direct behavior test (W1-C-REMEDIATION-01 §P12).
+ * Handoff page — Direct behavior test (W1-C-REMEDIATION-01 §P12 +
+ * CONTINUATION-03 §LEVEL 3 / LEVEL 8).
  *
- * Same ConfirmAction testid-limitation as Tasks / Reminders (see
- * page-tasks.behavior.test.tsx for the full note): the per-row
- * claim / requeue ConfirmActions use ConfirmDialog which has no
- * testid for its confirm button. So claim/requeue paths are proven
- * via:
- *   - VM-derived canClaim / canRequeue are CONSUMED (trigger
- *     testid is present only when the VM flag is true).
- *   - Controller tests prove the exact route + body.
+ * ConfirmAction click-through strategy: claim / requeue are exercised
+ * through the rendered page by clicking the row action trigger,
+ * locating the rendered dialog via role=dialog, dispatching Enter on
+ * that dialog, and then asserting the real POST plus authoritative
+ * refetch / failure-no-refetch behavior.
  *
- * The REPLY path is provable end-to-end via FormAction (text
- * input → submit testid → server POST → authoritative refetch).
+ * Reply is exercised end-to-end through the existing FormAction
+ * text + submit path.
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'

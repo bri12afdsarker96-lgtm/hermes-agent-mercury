@@ -337,11 +337,8 @@ describe('Reminders direct behavior (W1-C-REM-01 §P11)', () => {
       target: { value: 'biz-1' },
     })
 
-    // Set datetime-local to a known local time
-    const input = document.createElement('input')
-    input.type = 'datetime-local'
-    input.value = '2024-06-15T14:30'
-    // Get the expected epoch via the same browser parsing
+    // Compute expected epoch from the same string the form will
+    // receive on change (matches browser datetime-local semantics).
     const expectedScheduledFor = Math.floor(new Date('2024-06-15T14:30').getTime() / 1000)
 
     fireEvent.change(screen.getByTestId('console-reminder-when'), {
