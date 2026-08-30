@@ -69,17 +69,7 @@ export function HandoffsView({
         title="Human handoff"
       />
 
-      <ConsolePanel
-        divided
-        title={
-          <span
-            className="text-sm font-medium"
-            id="console-handoff-queue-heading"
-          >
-            Handoff queue
-          </span>
-        }
-      >
+      <ConsolePanel divided title="Handoff queue">
         <QueryBody
           emptyText="no handoffs — when a conversation needs a human, it lands here"
           isEmpty={(data: { available: boolean; handoffs: unknown[] }) =>

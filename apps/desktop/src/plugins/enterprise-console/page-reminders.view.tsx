@@ -67,17 +67,7 @@ export function RemindersView({
         title="Reminders"
       />
 
-      <ConsolePanel
-        divided
-        title={
-          <span
-            className="text-sm font-medium"
-            id="console-reminders-schedule-heading"
-          >
-            Schedule
-          </span>
-        }
-      >
+      <ConsolePanel divided title="Schedule">
         <QueryBody
           emptyText="no reminders — schedule one with the new-reminder control above"
           isEmpty={(data: { available: boolean; reminders: unknown[] }) =>

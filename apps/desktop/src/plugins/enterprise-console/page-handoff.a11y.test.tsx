@@ -23,7 +23,7 @@ function wrap(node: ReactNode) {
 afterEach(cleanup)
 
 describe('Handoff a11y (LINE F)', () => {
-  it('Handoff queue section label is exposed via aria-labelledby (not nested h2)', () => {
+  it('Handoff queue panel exposes one real level-2 heading with accessible name "Handoff queue"', () => {
     wrap(
       <HandoffsView
         available
@@ -33,10 +33,12 @@ describe('Handoff a11y (LINE F)', () => {
         handoffsIsPending={false}
       />,
     )
-    const heading = document.getElementById('console-handoff-queue-heading')
+    // Per ConsolePanel contract: title="..." renders <h2>{title}</h2>.
+    // The page-level PageHeader above is <h1>, so this is the only h2
+    // named "Handoff queue" on the page.
+    const heading = screen.getByRole('heading', { level: 2, name: 'Handoff queue' })
     expect(heading).toBeTruthy()
-    expect(heading?.tagName.toLowerCase()).toBe('span')
-    expect(heading?.textContent).toBe('Handoff queue')
+    expect(heading.tagName.toLowerCase()).toBe('h2')
   })
 
   it('empty state text is informative', () => {

@@ -23,7 +23,7 @@ function wrap(node: ReactNode) {
 afterEach(cleanup)
 
 describe('Reminders a11y (LINE F)', () => {
-  it('Schedule section label is exposed via aria-labelledby (not nested h2)', () => {
+  it('Schedule panel exposes one real level-2 heading with accessible name "Schedule"', () => {
     wrap(
       <RemindersView
         available
@@ -34,12 +34,12 @@ describe('Reminders a11y (LINE F)', () => {
         remindersIsPending={false}
       />,
     )
-    // The Schedule label is rendered as a span (not a nested heading) so
-    // the panel-header h2 above remains the only heading on the page.
-    const heading = document.getElementById('console-reminders-schedule-heading')
+    // Per ConsolePanel contract: title="..." renders <h2>{title}</h2>.
+    // The page-level PageHeader above is <h1>, so this is the only h2
+    // named "Schedule" on the page.
+    const heading = screen.getByRole('heading', { level: 2, name: 'Schedule' })
     expect(heading).toBeTruthy()
-    expect(heading?.tagName.toLowerCase()).toBe('span')
-    expect(heading?.textContent).toBe('Schedule')
+    expect(heading.tagName.toLowerCase()).toBe('h2')
   })
 
   it('empty state text is informative', () => {
