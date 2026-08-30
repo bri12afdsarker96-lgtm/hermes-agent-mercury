@@ -1,72 +1,73 @@
 /**
- * Reminder page — real `/api/reminders` data plus create/cancel controls that
- * post to server authority and refetch the authoritative result. The server
- * expects `scheduled_for` as UTC epoch seconds plus an IANA timezone. A native
- * `datetime-local` is interpreted in the browser's local zone, so we send that
- * same resolved IANA zone instead of allowing contradictory free-text metadata.
+ * Reminders page — Glue layer.
+ *
+ * Composes:
+ *   - controller (queries + mutations)
+ *   - view-model (pure derivations)
+ *   - view (presentational; action slots)
+ *
+ * Per W1-C §P23, the glue owns:
+ *   - local form state (subjectType, subjectId, when, title, idempotency key)
+ *   - browser timezone computation (per P14)
+ *   - FormAction / ConfirmAction composition
+ *   - datetime-local → epoch seconds conversion
+ *
+ * Per W1-C §P13 (Reminders contract):
+ *   - Idempotency invariant: same key on failure, rotate on success.
+ *   - Cancel: only when state === 'active'; destructive confirm.
+ *   - datetime-local interpreted in browser local zone; sends
+ *     scheduled_for = floor(ms/1000) and the same resolved IANA
+ *     timezone (no free-text timezone input).
  */
 
-import { Input, StatusDot, type StatusTone } from '@hermes/plugin-sdk'
+import { Input } from '@hermes/plugin-sdk'
 import { useState } from 'react'
 
 import { ConfirmAction, FormAction } from './actions'
-import { ConsoleRows, fmtEpoch, QueryBody, useConsoleQuery } from './page-kit'
-import { PageStatusBadge } from './status-badge'
-import { useTransport } from './transport'
-import { ConsolePanel, PageHeader } from './ui'
+import { fmtEpoch } from './page-kit'
+import { useKbReminders, useRemindersMutations } from './page-reminders.controller'
+import { RemindersView } from './page-reminders.view'
+import { deriveReminders } from './page-reminders.view-model'
 
-interface ReminderRow {
-  generation: number
-  reminder_id: string
-  scheduled_for: number
-  state: string
-  subject_id: string
-  subject_type: string
-  timezone: string
-  title: string
-}
-
-interface RemindersResp {
-  available: boolean
-  reminders: ReminderRow[]
-}
-
-const REMINDER_TONE: Record<string, StatusTone> = {
-  active: 'good',
-  cancelled: 'muted',
-  exhausted: 'warn'
-}
-
-const REMINDERS_KEY = ['enterprise-console', 'reminders'] as const
+// ---------------------------------------------------------------------------
+// Browser timezone (per P14 — exact current behavior)
+// ---------------------------------------------------------------------------
 
 function browserTimezone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 }
 
-function CreateReminder() {
-  const transport = useTransport()
+function CreateReminderSlot() {
+  const mutations = useRemindersMutations()
   const [subjectType, setSubjectType] = useState('biz_task')
   const [subjectId, setSubjectId] = useState('')
   const [when, setWhen] = useState('')
   const [title, setTitle] = useState('')
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
   const timezone = browserTimezone()
-  const scheduledFor = when ? Math.floor(new Date(when).getTime() / 1000) : Number.NaN
+
+  const scheduledFor = when
+    ? Math.floor(new Date(when).getTime() / 1000)
+    : Number.NaN
 
   return (
     <FormAction
-      canSubmit={subjectId.trim().length > 0 && subjectType.trim().length > 0 && Number.isFinite(scheduledFor)}
-      invalidateKey={REMINDERS_KEY}
+      canSubmit={
+        subjectId.trim().length > 0 &&
+        subjectType.trim().length > 0 &&
+        Number.isFinite(scheduledFor)
+      }
+      invalidateKey={['enterprise-console', 'reminders']}
       onSuccess={() => setIdempotencyKey(crypto.randomUUID())}
       permission="reminder.write"
       submit={() =>
-        transport.post('/api/reminder-create', {
+        mutations.createReminder({
           scheduled_for: scheduledFor,
           idempotency_key: idempotencyKey,
           subject_id: subjectId.trim(),
           subject_type: subjectType.trim(),
           timezone,
-          title: title || undefined
+          title: title || undefined,
         })
       }
       submitLabel="Create"
@@ -76,83 +77,67 @@ function CreateReminder() {
     >
       <Input
         data-testid="console-reminder-subject"
-        onChange={event => setSubjectId(event.target.value)}
+        onChange={(event) => setSubjectId(event.target.value)}
         placeholder="subject id"
         value={subjectId}
       />
-      <Input onChange={event => setSubjectType(event.target.value)} placeholder="subject type" value={subjectType} />
-      <div className="text-xs text-muted-foreground" data-testid="console-reminder-timezone">
+      <Input
+        onChange={(event) => setSubjectType(event.target.value)}
+        placeholder="subject type"
+        value={subjectType}
+      />
+      <div
+        className="text-xs text-muted-foreground"
+        data-testid="console-reminder-timezone"
+      >
         timezone: {timezone}
       </div>
       <input
         className="rounded-md border border-border bg-transparent px-2 py-1 text-sm"
         data-testid="console-reminder-when"
-        onChange={event => setWhen(event.target.value)}
+        onChange={(event) => setWhen(event.target.value)}
         type="datetime-local"
         value={when}
       />
-      <Input onChange={event => setTitle(event.target.value)} placeholder="title (optional)" value={title} />
+      <Input
+        onChange={(event) => setTitle(event.target.value)}
+        placeholder="title (optional)"
+        value={title}
+      />
     </FormAction>
   )
 }
 
-export function RemindersPage() {
-  const transport = useTransport()
-  const query = useConsoleQuery<RemindersResp>(REMINDERS_KEY, '/api/reminders')
+function ReminderRowActionsSlot({ reminderId }: { reminderId: string }) {
+  const mutations = useRemindersMutations()
 
   return (
-    <div
-      className="mx-auto flex w-full max-w-[96rem] flex-col px-(--ec-page-inset-x) py-(--ec-page-inset-y)"
-      data-page-status="ready"
-      data-testid="console-page-reminders"
+    <ConfirmAction
+      destructive
+      invalidateKey={['enterprise-console', 'reminders']}
+      permission="reminder.write"
+      run={() => mutations.cancelReminder(reminderId)}
+      testId={`console-reminder-cancel-${reminderId}`}
+      title="Cancel this reminder?"
     >
-      <PageHeader
-        actions={<CreateReminder />}
-        purpose="Schedule and cancel server-authoritative reminders without duplicating the reminder state machine."
-        status={<PageStatusBadge status="ready" />}
-        title="Reminders"
-      />
+      cancel
+    </ConfirmAction>
+  )
+}
 
-      <ConsolePanel divided title="Schedule">
-        <QueryBody
-          emptyText="no reminders"
-          isEmpty={data => !data.available || data.reminders.length === 0}
-          query={query}
-        >
-          {data => (
-            <ConsoleRows testId="console-reminders">
-              {data.reminders.map(reminder => (
-                <li className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm" key={reminder.reminder_id}>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium text-(--ui-text-primary)">{reminder.title || 'Untitled reminder'}</div>
-                    <div className="text-(--ui-text-tertiary)">
-                      {reminder.subject_type}:{reminder.subject_id} · {fmtEpoch(reminder.scheduled_for)} · {reminder.timezone}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1 text-xs">
-                      <StatusDot tone={REMINDER_TONE[reminder.state] ?? 'muted'} />
-                      {reminder.state}
-                    </span>
-                    {reminder.state === 'active' ? (
-                      <ConfirmAction
-                        destructive
-                        invalidateKey={REMINDERS_KEY}
-                        permission="reminder.write"
-                        run={() => transport.post('/api/reminder-cancel', { reminder_id: reminder.reminder_id })}
-                        testId={`console-reminder-cancel-${reminder.reminder_id}`}
-                        title="Cancel this reminder?"
-                      >
-                        cancel
-                      </ConfirmAction>
-                    ) : null}
-                  </div>
-                </li>
-              ))}
-            </ConsoleRows>
-          )}
-        </QueryBody>
-      </ConsolePanel>
-    </div>
+export function RemindersPage() {
+  const query = useKbReminders()
+  const remindersVm = deriveReminders(query.data?.reminders, fmtEpoch)
+
+  return (
+    <RemindersView
+      createSlot={<CreateReminderSlot />}
+      reminderRowActionsSlot={({ reminderId }) => (
+        <ReminderRowActionsSlot reminderId={reminderId} />
+      )}
+      reminders={remindersVm}
+      remindersError={query.error}
+      remindersIsPending={query.isPending}
+    />
   )
 }
