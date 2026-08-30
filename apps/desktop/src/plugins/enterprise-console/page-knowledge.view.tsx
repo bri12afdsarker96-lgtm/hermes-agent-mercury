@@ -79,10 +79,13 @@ export interface KnowledgeViewProps {
   collectionsError: unknown
   selectedCollection: string
   onChangeCollection: (next: string) => void
-  // The entryRowActionsSlot threads through SourcesList → entries
-  // container → EntriesList so withdraw action affordances are
-  // available per entry row.
-  entryRowActionsSlot: (props: EntryRowActionsSlotProps) => ReactNode
+  // entriesSlot is composed by the glue: the view does NOT know
+  // about selection-bound hooks or containers. The glue passes
+  // either a KnowledgeEntriesContainer (when selectedCollection
+  // is set) or null. The glue also composes the entryRowActionsSlot
+  // (the withdraw affordance for each entry row) inside the
+  // entriesSlot itself.
+  entriesSlot: ReactNode
 }
 
 export function KnowledgeView({
@@ -102,7 +105,7 @@ export function KnowledgeView({
   collectionsError,
   selectedCollection,
   onChangeCollection,
-  entryRowActionsSlot,
+  entriesSlot,
 }: KnowledgeViewProps) {
   return (
     <div
@@ -127,14 +130,10 @@ export function KnowledgeView({
         </div>
       ) : null}
 
-      {/* Pre-split section order: candidates FIRST, then uploads, then sources. */}
+      {/* Parent-exact grid hierarchy (98e74dd9...):
+          GRID CHILD 1 (LEFT column) = Uploads + Sources (in this DOM order)
+          GRID CHILD 2 (RIGHT column) = Candidates */}
       <div className="grid items-start gap-(--ec-gutter) xl:grid-cols-2">
-        <CandidatesSection
-          gaps={gaps}
-          gapsError={gapsError}
-          gapsIsPending={gapsIsPending}
-          gapsRowActionsSlot={gapsRowActionsSlot}
-        />
         <div className="flex min-w-0 flex-col gap-(--ec-gutter)">
           <UploadsSection
             uploads={uploads}
@@ -147,11 +146,17 @@ export function KnowledgeView({
             collections={collections}
             collectionsError={collectionsError}
             collectionsIsPending={collectionsIsPending}
-            entryRowActionsSlot={entryRowActionsSlot}
+            entriesSlot={entriesSlot}
             onChangeCollection={onChangeCollection}
             selectedCollection={selectedCollection}
           />
         </div>
+        <CandidatesSection
+          gaps={gaps}
+          gapsError={gapsError}
+          gapsIsPending={gapsIsPending}
+          gapsRowActionsSlot={gapsRowActionsSlot}
+        />
       </div>
     </div>
   )
@@ -301,7 +306,7 @@ interface SourcesSectionProps
     | 'collectionsIsPending'
     | 'selectedCollection'
     | 'onChangeCollection'
-    | 'entryRowActionsSlot'
+    | 'entriesSlot'
   > {}
 
 function SourcesSection({
@@ -310,7 +315,7 @@ function SourcesSection({
   collectionsIsPending,
   selectedCollection,
   onChangeCollection,
-  entryRowActionsSlot,
+  entriesSlot,
 }: SourcesSectionProps) {
   return (
     <section data-testid="console-kb-sources">
@@ -329,7 +334,7 @@ function SourcesSection({
         {() => (
           <SourcesList
             collections={collections.names}
-            entryRowActionsSlot={entryRowActionsSlot}
+            entriesSlot={entriesSlot}
             onChangeCollection={onChangeCollection}
             selectedCollection={selectedCollection}
           />
@@ -349,14 +354,18 @@ export interface SourcesListProps {
   collections: string[]
   selectedCollection: string
   onChangeCollection: (next: string) => void
-  entryRowActionsSlot: (props: EntryRowActionsSlotProps) => ReactNode
+  // The entriesSlot is composed by the glue (e.g.
+  // <KnowledgeEntriesContainer key={collection} collection={collection}
+  // entryRowActionsSlot={...} />). The view just renders the slot
+  // and does NOT depend on the container / controller / hooks.
+  entriesSlot: ReactNode
 }
 
 export function SourcesList({
   collections,
   selectedCollection,
   onChangeCollection,
-  entryRowActionsSlot,
+  entriesSlot,
 }: SourcesListProps) {
   return (
     <div className="flex flex-col gap-2">
@@ -373,33 +382,15 @@ export function SourcesList({
           </option>
         ))}
       </select>
-      {selectedCollection ? (
-        <EntriesContainerWithKey
-          collection={selectedCollection}
-          entryRowActionsSlot={entryRowActionsSlot}
-        />
-      ) : null}
+      {/* The glue controls whether the entriesSlot is mounted
+          (i.e. whether a container is rendered). The view does
+          NOT decide this — it just renders whatever the glue
+          passes in. When the glue passes null (no selection),
+          nothing renders. When the glue passes a container,
+          the container's key={collection} forces re-mount on
+          selection switch. */}
+      {entriesSlot}
     </div>
-  )
-}
-
-// We import the container lazily here to avoid a circular dep with
-// the glue file. The container lives in the glue.
-import { KnowledgeEntriesContainer } from './page-knowledge.entries-container'
-
-function EntriesContainerWithKey({
-  collection,
-  entryRowActionsSlot,
-}: {
-  collection: string
-  entryRowActionsSlot: (props: EntryRowActionsSlotProps) => ReactNode
-}) {
-  return (
-    <KnowledgeEntriesContainer
-      collection={collection}
-      entryRowActionsSlot={entryRowActionsSlot}
-      key={collection}
-    />
   )
 }
 

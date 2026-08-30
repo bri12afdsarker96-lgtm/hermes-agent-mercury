@@ -67,6 +67,7 @@ import {
   useKnowledgeAuthority,
   useKnowledgeMutations,
 } from './page-knowledge.controller'
+import { KnowledgeEntriesContainer } from './page-knowledge.entries-container'
 import { KnowledgePreviewContainer } from './page-knowledge.preview-container'
 import { KnowledgeView } from './page-knowledge.view'
 import {
@@ -160,41 +161,57 @@ export function KnowledgePage() {
       collections={collectionsVm}
       collectionsError={collectionsQuery.error}
       collectionsIsPending={collectionsQuery.isPending}
+      entriesSlot={
+        // The glue composes the entriesSlot: it mounts the
+        // KnowledgeEntriesContainer only when a collection is
+        // selected, and `key={collection}` forces a fresh React
+        // Query subscription on switch. NO entry-stub is mounted
+        // before the user picks a collection, so no initial
+        // '?collection=' request fires.
+        selectedCollection ? (
+          <KnowledgeEntriesContainer
+            collection={selectedCollection}
+            entryRowActionsSlot={({ collection, source }) => {
+              if (!source) {
+                return null
+              }
+
+              const reason = withdrawReason[source] ?? ''
+
+              return (
+                <FormAction
+                  canSubmit={isRejectReasonValid(reason)}
+                  invalidateKey={kbEntriesKey(collection)}
+                  permission="kb.delete"
+                  submit={() => mutations.withdraw(collection, source, reason)}
+                  submitLabel="Withdraw"
+                  testId={`kb-withdraw-${source}`}
+                  title="Withdraw this source"
+                  trigger="withdraw"
+                >
+                  <Input
+                    data-testid={`kb-withdraw-reason-${source}`}
+                    onChange={(event) =>
+                      setWithdrawReason((prev) => ({
+                        ...prev,
+                        [source]: event.target.value,
+                      }))
+                    }
+                    placeholder="reason (min 3 chars)"
+                    value={reason}
+                  />
+                </FormAction>
+              )
+            }}
+            key={selectedCollection}
+          />
+        ) : null
+      }
       // entries + entriesError + entriesIsPending are now driven by
       // the conditional KnowledgeEntriesContainer (selectedCollection
-      // !== ''). The view does not receive them.
-      entryRowActionsSlot={({ collection, source }) => {
-        if (!source) {
-          return null
-        }
-
-        const reason = withdrawReason[source] ?? ''
-
-        return (
-          <FormAction
-            canSubmit={isRejectReasonValid(reason)}
-            invalidateKey={kbEntriesKey(collection)}
-            permission="kb.delete"
-            submit={() => mutations.withdraw(collection, source, reason)}
-            submitLabel="Withdraw"
-            testId={`kb-withdraw-${source}`}
-            title="Withdraw this source"
-            trigger="withdraw"
-          >
-            <Input
-              data-testid={`kb-withdraw-reason-${source}`}
-              onChange={(event) =>
-                setWithdrawReason((prev) => ({
-                  ...prev,
-                  [source]: event.target.value,
-                }))
-              }
-              placeholder="reason (min 3 chars)"
-              value={reason}
-            />
-          </FormAction>
-        )
-      }}
+      // !== ''). The view does not receive them. The
+      // entryRowActionsSlot is composed inside the entriesSlot
+      // below so the view no longer needs to thread it.
       gaps={gapsVm}
       gapsError={gapsQuery.error}
       gapsIsPending={gapsQuery.isPending}
