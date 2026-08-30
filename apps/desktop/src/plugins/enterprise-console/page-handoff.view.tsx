@@ -1,19 +1,16 @@
 /**
  * Handoff page — Presentational View layer.
  *
- * Receives fully-derived VMs + action slots from the glue. NO
- * transport, NO useQueryClient, NO session atom, NO permission
- * authority, NO `./actions` import.
- *
- * Per W1-C §P24:
- *   - View MUST be a dependency leaf.
- *   - Visible copy, className, layout hierarchy, button labels,
- *     dialog titles, placeholder text, status text, section order
- *     must match pre-split exact behavior.
- *
- * Per W1-C §P19: the view is presentation-eligibility-only.
- * Server rows decide action visibility (the action slot is
- * invoked from the glue, but it must be passed as a prop).
+ * Per W1-C-REMEDIATION-01 §P5 + §P9:
+ *   - Available flag is propagated from the SERVER (glue),
+ *     never fabricated as `true` here.
+ *   - Action slot receives three independent per-row eligibility
+ *     flags (canClaim / canReply / canRequeue) derived by the VM
+ *     from server row facts — the view does NOT recompute.
+ *   - View is a dependency leaf (only presentational imports).
+ *   - No client ownership inference; no else-if mutual exclusivity
+ *     at the view layer; each action is independently composed by
+ *     the glue based on its own eligibility flag.
  */
 
 import { StatusDot } from '@hermes/plugin-sdk'
@@ -25,11 +22,14 @@ import { PageStatusBadge } from './status-badge'
 import { ConsolePanel, PageHeader } from './ui'
 
 // ---------------------------------------------------------------------------
-// Action slot props
+// Action slot props (per §P9 — three INDEPENDENT flags)
 // ---------------------------------------------------------------------------
 
 export interface HandoffRowActionsSlotProps {
   msgId: string
+  canClaim: boolean
+  canReply: boolean
+  canRequeue: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -37,6 +37,7 @@ export interface HandoffRowActionsSlotProps {
 // ---------------------------------------------------------------------------
 
 export interface HandoffsViewProps {
+  available: boolean
   handoffs: HandoffRowView[]
   handoffsIsPending: boolean
   handoffsError: unknown
@@ -44,6 +45,7 @@ export interface HandoffsViewProps {
 }
 
 export function HandoffsView({
+  available,
   handoffs,
   handoffsIsPending,
   handoffsError,
@@ -68,7 +70,7 @@ export function HandoffsView({
             !data.available || data.handoffs.length === 0
           }
           query={{
-            data: { available: true, handoffs },
+            data: { available, handoffs },
             error: handoffsError,
             isPending: handoffsIsPending,
           }}
@@ -106,7 +108,12 @@ export function HandoffsView({
                       <StatusDot tone={handoff.stateTone} />
                       {handoff.state}
                     </span>
-                    {handoffRowActionsSlot({ msgId: handoff.msgId })}
+                    {handoffRowActionsSlot({
+                      msgId: handoff.msgId,
+                      canClaim: handoff.canClaim,
+                      canReply: handoff.canReply,
+                      canRequeue: handoff.canRequeue,
+                    })}
                   </div>
                 </li>
               ))}
