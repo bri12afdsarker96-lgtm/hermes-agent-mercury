@@ -18,16 +18,28 @@
  *     collection, which uploadId's preview is open) and the React Query
  *     transport hook for upload bytes.
  *
- * Per W1-B2 §P18 + §P19: Selection identity invariants
- *   - Preview: the dialog is mounted with `open` prop. The preview
- *     body is only mounted when `open === true && previewUploadId !==
- *     null`. Closing the dialog unmounts the body and tears down the
- *     React Query subscription — no stale preview can render under a
- *     different upload id. The dialog is rendered via the view's
- *     `previewSlot: ReactNode` so the view stays presentational.
- *   - Collection: <EntriesList> is mounted only when
- *     `selectedCollection !== ''`. Switching collections tears down
- *     the old list and its subscription before mounting the new one.
+ * Per W1-B2-REMEDIATION-01 §P2 + §P13 + §P14 + §P15:
+ *   - selection-bound queries are NOT mounted until the selection
+ *     exists. The hook call site is inside child components
+ *     (KnowledgeEntriesContainer, KnowledgePreviewContainer) that
+ *     are conditionally rendered, so React Hook Rules are preserved
+ *     and there is no empty sentinel request.
+ *   - The conditional containers receive `key={selection}` so that
+ *     switching selection tears down the old React Query
+ *     subscription immediately.
+ *   - The PreviewDialog mounts the preview container only when
+ *     `previewOpen && previewUploadId !== null`.
+ *   - The SourcesList mounts the entries container only when
+ *     `selectedCollection !== ''`.
+ *
+ * Per W1-B2-REMEDIATION-01 §P6:
+ *   - Upload uses `actionError` (shared with the rest of the console)
+ *     for error mapping. No local reimplementation of error codes.
+ *
+ * Per W1-B2 §P20:
+ *   - Publish is direct transport.post → await →
+ *     queryClient.invalidateQueries. No client state machine,
+ *     no optimistic committed state.
  */
 
 import {
@@ -42,32 +54,24 @@ import {
 } from '@hermes/plugin-sdk'
 import { type ChangeEvent, type ReactNode, useState } from 'react'
 
-import { ConfirmAction, FormAction } from './actions'
+import { actionError, ConfirmAction, FormAction } from './actions'
 import { capabilityStatus } from './capabilities'
 import { fmtEpoch } from './page-kit'
 import {
   KB_GAPS_KEY,
   kbEntriesKey,
   UPLOADS_KEY,
-} from './page-knowledge.controller'
-import {
   useKbCollections,
-  useKbEntries,
   useKbGaps,
-  useKbPreview,
   useKbUploads,
   useKnowledgeAuthority,
   useKnowledgeMutations,
 } from './page-knowledge.controller'
-import {
-  KnowledgeView,
-  PreviewBody,
-} from './page-knowledge.view'
+import { KnowledgePreviewContainer } from './page-knowledge.preview-container'
+import { KnowledgeView } from './page-knowledge.view'
 import {
   deriveCollections,
-  deriveEntries,
   deriveKbGaps,
-  derivePreview,
   deriveUploads,
   isAuthorTextValid,
   isPublishCollectionValid,
@@ -80,38 +84,22 @@ export function KnowledgePage() {
   const queryClient = useQueryClient()
 
   // -----------------------------------------------------------------
-  // Server reads (queries) — owner: controller
+  // Server reads that are ALWAYS live (no selection dependency).
+  // These are the only hooks the glue itself calls; the selection-
+  // bound hooks live inside child containers.
   // -----------------------------------------------------------------
   const gapsQuery = useKbGaps()
   const uploadsQuery = useKbUploads()
   const collectionsQuery = useKbCollections()
 
-  // Per-collection entries are only mounted when a collection is
-  // selected (per P19). The hook call site is conditional.
+  // -----------------------------------------------------------------
+  // Selection identity
+  // -----------------------------------------------------------------
   const [selectedCollection, setSelectedCollection] = useState('')
-  const entriesQuery = useKbEntries(selectedCollection)
-
-  // -----------------------------------------------------------------
-  // Selection identity (per W1-B1 lessons): preview opens via
-  // DIALOG state, and the preview query only mounts when the dialog
-  // is open. We use a SEPARATE state to track which upload is
-  // currently previewing.
-  // -----------------------------------------------------------------
-  const [previewUploadId, setPreviewUploadId] = useState<null | string>(
-    null
-  )
-
   const [previewOpen, setPreviewOpen] = useState(false)
-  // The preview query is mounted ONLY when both previewOpen === true
-  // AND previewUploadId !== null. Opening the dialog mounts the query;
-  // closing tears it down.
-  const previewQuery = useKbPreview(previewUploadId ?? '')
+  const [previewUploadId, setPreviewUploadId] = useState<null | string>(null)
 
-  // -----------------------------------------------------------------
-  // Per-row form state (local; bound to row id). Each row keeps its
-  // OWN text / reason state, NOT shared across rows — this enforces
-  // the W1-B2 §P15 invariant.
-  // -----------------------------------------------------------------
+  // Per-row form state (local; bound to row id)
   const [gapText, setGapText] = useState<Record<string, string>>({})
   const [gapReason, setGapReason] = useState<Record<string, string>>({})
 
@@ -127,21 +115,13 @@ export function KnowledgePage() {
   const [uploadBusy, setUploadBusy] = useState(false)
   const [uploadError, setUploadError] = useState<null | string>(null)
 
-  // -----------------------------------------------------------------
-  // Capability truth (server-declared; view-model does NOT derive
-  // LIVE from page.status — the view consumes the server-side
-  // capabilityStatus()).
-  // -----------------------------------------------------------------
+  // Capability truth (server-declared)
   const ragStatus = capabilityStatus(authority.whoamiSnapshot, 'knowledge_rag')
 
-  // -----------------------------------------------------------------
   // VMs (pure derivation)
-  // -----------------------------------------------------------------
   const gapsVm = deriveKbGaps(gapsQuery.data?.gaps, fmtEpoch)
   const uploadsVm = deriveUploads(uploadsQuery.data?.uploads, fmtEpoch)
   const collectionsVm = deriveCollections(collectionsQuery.data)
-  const entriesVm = deriveEntries(entriesQuery.data)
-  const previewVm = derivePreview(previewQuery.data)
 
   // -----------------------------------------------------------------
   // Action handlers
@@ -166,24 +146,13 @@ export function KnowledgePage() {
       )
       await queryClient.invalidateQueries({ queryKey: UPLOADS_KEY })
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : String(err))
+      // Per W1-B2-REMEDIATION-01 §P6: use the shared actionError
+      // mapper, not a local raw `err.message` fallback.
+      setUploadError(actionError(err))
     } finally {
       setUploadBusy(false)
     }
   }
-
-  // -----------------------------------------------------------------
-  // Preview slot (glue owns the Dialog; view owns the body)
-  // -----------------------------------------------------------------
-  const previewSlot =
-    previewUploadId && previewOpen ? (
-      <PreviewBody
-        error={previewQuery.error}
-        isPending={previewQuery.isPending}
-        preview={previewVm}
-        uploadId={previewUploadId}
-      />
-    ) : null
 
   return (
     <KnowledgeView
@@ -191,9 +160,9 @@ export function KnowledgePage() {
       collections={collectionsVm}
       collectionsError={collectionsQuery.error}
       collectionsIsPending={collectionsQuery.isPending}
-      entries={entriesVm}
-      entriesError={entriesQuery.error}
-      entriesIsPending={entriesQuery.isPending}
+      // entries + entriesError + entriesIsPending are now driven by
+      // the conditional KnowledgeEntriesContainer (selectedCollection
+      // !== ''). The view does not receive them.
       entryRowActionsSlot={({ collection, source }) => {
         if (!source) {
           return null
@@ -291,11 +260,7 @@ export function KnowledgePage() {
       }}
       onChangeCollection={setSelectedCollection}
       previewSlot={
-        // The view expects a ReactNode that contains the Dialog +
-        // body content. We render the Dialog wrapper here (in the
-        // glue) so the glue owns the dialog open state and the
-        // body is selection-bound by `uploadId`.
-        <>
+        previewUploadId ? (
           <PreviewDialog
             onOpenChange={(next) => {
               setPreviewOpen(next)
@@ -305,9 +270,12 @@ export function KnowledgePage() {
               }
             }}
             open={previewOpen}
-            previewSlot={previewSlot}
-          />
-        </>
+          >
+            {previewOpen ? (
+              <KnowledgePreviewContainer key={previewUploadId} uploadId={previewUploadId} />
+            ) : null}
+          </PreviewDialog>
+        ) : null
       }
       selectedCollection={selectedCollection}
       uploads={uploadsVm}
@@ -393,9 +361,34 @@ export function KnowledgePage() {
 }
 
 // ---------------------------------------------------------------------------
-// Small sub-components owned by the glue (composing FormAction /
-// ConfirmAction which are NOT presentational primitives; the view
-// must not import them per W1-B2 §P14).
+// PreviewDialog — owned by the glue. Mounts the KnowledgePreviewContainer
+// only when `previewOpen && previewUploadId !== null`.
+// ---------------------------------------------------------------------------
+
+function PreviewDialog({
+  open,
+  onOpenChange,
+  children,
+}: {
+  open: boolean
+  onOpenChange: (next: boolean) => void
+  children: ReactNode
+}) {
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Preview</DialogTitle>
+        </DialogHeader>
+        {open ? children : null}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// UploadPanel — owned by the glue (not the view; needs transport +
+// permission + busy/error local state).
 // ---------------------------------------------------------------------------
 
 function UploadPanel({
@@ -428,29 +421,5 @@ function UploadPanel({
         </span>
       ) : null}
     </div>
-  )
-}
-
-function PreviewDialog({
-  open,
-  onOpenChange,
-  previewSlot,
-}: {
-  open: boolean
-  onOpenChange: (next: boolean) => void
-  previewSlot: ReactNode
-}) {
-  // The view file does NOT export the Dialog wrapper because the
-  // Dialog owns interactive open state — that's glue responsibility.
-  // We render a minimal Dialog here using @hermes/plugin-sdk primitives.
-  return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Preview</DialogTitle>
-        </DialogHeader>
-        {previewSlot}
-      </DialogContent>
-    </Dialog>
   )
 }

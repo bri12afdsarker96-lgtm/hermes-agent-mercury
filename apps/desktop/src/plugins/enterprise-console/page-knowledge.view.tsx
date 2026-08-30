@@ -7,15 +7,17 @@
  * ReactNode slots from the glue (they own server write orchestration
  * + permission + invalidation).
  *
- * Reuses `QueryBody`, `ConsoleRows` via `./page-kit`. The Knowledge
- * view file never imports `./transport`, `./fetch-transport`,
- * `./session`, `./capabilities`, `useConsoleQuery`, `axios`,
- * global `fetch`, `window.hermesDesktop`, or `./actions` (per W1-A
- * ESLint boundary + W1-B2 §P14 extra boundary).
- *
- * Per W1-B2 §P27 NO VISUAL REDESIGN. Pre-split visual structure =
- * post-split visual structure (only JSX movement, no className/CSS/
- * layout changes).
+ * Per W1-B2-REMEDIATION-01:
+ *   - PreviewBody uses QueryBody for ALL states (pending / error /
+ *     not_implemented / empty / ready). NO `if (preview) { ... }`
+ *     bypass — empty state preserved via QueryBody's `isEmpty`.
+ *   - The body testid `kb-preview-body-<id>` only exists inside
+ *     QueryBody's READY child, not during loading.
+ *   - Pre-split visible copy preserved EXACTLY (no added
+ *     `est_cost_usd`, no removed `PII forbidden`/`warning`).
+ *   - Pre-split className preserved EXACTLY (DEV banner
+ *     `px-3 py-2 text-(--ui-text-secondary)`).
+ *   - Pre-split section order preserved: [candidates, uploads, sources].
  */
 
 import {
@@ -37,9 +39,7 @@ import type { CapabilityStatus } from './types'
 import { PageHeader } from './ui'
 
 // ---------------------------------------------------------------------------
-// Per-row action slots (provided by glue; FormAction/ConfirmAction are
-// NOT imported here — they live in the glue so the view stays free of
-// action framework authority).
+// Per-row action slots
 // ---------------------------------------------------------------------------
 
 export interface GapRowActionsSlotProps {
@@ -63,32 +63,25 @@ export interface EntryRowActionsSlotProps {
 // ---------------------------------------------------------------------------
 
 export interface KnowledgeViewProps {
-  // Capability truth (server-declared)
   capabilityStatus: CapabilityStatus | null
-  // Gaps
   gaps: KbGapView[]
   gapsIsPending: boolean
   gapsError: unknown
   gapsRowActionsSlot: (props: GapRowActionsSlotProps) => ReactNode
-  // Uploads
   uploads: UploadRowView[]
   uploadsIsPending: boolean
   uploadsError: unknown
   uploadsPanelSlot: ReactNode
   uploadsRowActionsSlot: (props: UploadRowActionsSlotProps) => ReactNode
-  // Preview is rendered by the glue (which owns the Dialog open
-  // state). The view accepts the rendered ReactNode and mounts it
-  // inside the page tree so the Dialog overlay still works.
   previewSlot: ReactNode
-  // Sources / collections / entries
   collections: CollectionsView
   collectionsIsPending: boolean
   collectionsError: unknown
   selectedCollection: string
   onChangeCollection: (next: string) => void
-  entries: EntryView[]
-  entriesIsPending: boolean
-  entriesError: unknown
+  // The entryRowActionsSlot threads through SourcesList → entries
+  // container → EntriesList so withdraw action affordances are
+  // available per entry row.
   entryRowActionsSlot: (props: EntryRowActionsSlotProps) => ReactNode
 }
 
@@ -109,9 +102,6 @@ export function KnowledgeView({
   collectionsError,
   selectedCollection,
   onChangeCollection,
-  entries,
-  entriesIsPending,
-  entriesError,
   entryRowActionsSlot,
 }: KnowledgeViewProps) {
   return (
@@ -120,10 +110,6 @@ export function KnowledgeView({
       data-page-status="ready-dev"
       data-testid="console-page-knowledge"
     >
-      {/* PreviewSlot is the Dialog wrapper + body content rendered by
-          the glue. The glue owns the open state + selection identity
-          (previewUploadId); the view only mounts the slot so the
-          Dialog overlay still has a trigger in the tree. */}
       {previewSlot}
       <PageHeader
         purpose="Review knowledge gaps, stage sources, preview chunks and publish through authoritative server workflows."
@@ -133,7 +119,7 @@ export function KnowledgeView({
 
       {capabilityStatus && capabilityStatus !== 'LIVE' ? (
         <div
-          className="mb-(--ec-gutter) flex items-center gap-2 rounded-(--ec-panel-radius) border border-(--ui-stroke-secondary) bg-(--ui-bg-card) px-(--ec-panel-pad)"
+          className="mb-(--ec-gutter) flex items-center gap-2 rounded-(--ec-panel-radius) border border-(--ui-stroke-secondary) bg-(--ui-bg-card) px-3 py-2 text-(--ui-text-secondary)"
           data-testid="console-knowledge-dev"
         >
           <CapabilityBadge status={capabilityStatus} />
@@ -141,38 +127,38 @@ export function KnowledgeView({
         </div>
       ) : null}
 
+      {/* Pre-split section order: candidates FIRST, then uploads, then sources. */}
       <div className="grid items-start gap-(--ec-gutter) xl:grid-cols-2">
-        <div className="flex min-w-0 flex-col gap-(--ec-gutter)">
-          <UploadsSection
-            collections={collections}
-            collectionsError={collectionsError}
-            collectionsIsPending={collectionsIsPending}
-            entries={entries}
-            entriesError={entriesError}
-            entriesIsPending={entriesIsPending}
-            entryRowActionsSlot={entryRowActionsSlot}
-            onChangeCollection={onChangeCollection}
-            selectedCollection={selectedCollection}
-            uploads={uploads}
-            uploadsError={uploadsError}
-            uploadsIsPending={uploadsIsPending}
-            uploadsPanelSlot={uploadsPanelSlot}
-            uploadsRowActionsSlot={uploadsRowActionsSlot}
-          />
-        </div>
         <CandidatesSection
           gaps={gaps}
           gapsError={gapsError}
           gapsIsPending={gapsIsPending}
           gapsRowActionsSlot={gapsRowActionsSlot}
         />
+        <div className="flex min-w-0 flex-col gap-(--ec-gutter)">
+          <UploadsSection
+            uploads={uploads}
+            uploadsError={uploadsError}
+            uploadsIsPending={uploadsIsPending}
+            uploadsPanelSlot={uploadsPanelSlot}
+            uploadsRowActionsSlot={uploadsRowActionsSlot}
+          />
+          <SourcesSection
+            collections={collections}
+            collectionsError={collectionsError}
+            collectionsIsPending={collectionsIsPending}
+            entryRowActionsSlot={entryRowActionsSlot}
+            onChangeCollection={onChangeCollection}
+            selectedCollection={selectedCollection}
+          />
+        </div>
       </div>
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// Sections (internal — receive their data as VMs)
+// Sections
 // ---------------------------------------------------------------------------
 
 interface UploadsSectionProps
@@ -183,15 +169,6 @@ interface UploadsSectionProps
     | 'uploadsIsPending'
     | 'uploadsPanelSlot'
     | 'uploadsRowActionsSlot'
-    | 'collections'
-    | 'collectionsError'
-    | 'collectionsIsPending'
-    | 'selectedCollection'
-    | 'onChangeCollection'
-    | 'entries'
-    | 'entriesError'
-    | 'entriesIsPending'
-    | 'entryRowActionsSlot'
   > {}
 
 function UploadsSection({
@@ -200,113 +177,58 @@ function UploadsSection({
   uploadsIsPending,
   uploadsPanelSlot,
   uploadsRowActionsSlot,
-  collections,
-  collectionsError,
-  collectionsIsPending,
-  selectedCollection,
-  onChangeCollection,
-  entries,
-  entriesError,
-  entriesIsPending,
-  entryRowActionsSlot,
 }: UploadsSectionProps) {
   return (
-    <>
-      <section data-testid="console-kb-uploads-section">
-        <div className="mb-1 flex items-center justify-between gap-2">
-          <span className="text-xs font-medium text-muted-foreground">uploads</span>
-          {uploadsPanelSlot}
-        </div>
-        <QueryBody
-          emptyText="no uploads"
-          isEmpty={(data: { uploads: unknown[] }) =>
-            (data.uploads ?? []).length === 0
-          }
-          query={{
-            data: { uploads },
-            error: uploadsError,
-            isPending: uploadsIsPending,
-          }}
-        >
-          {() => (
-            <ConsoleRows testId="console-kb-uploads">
-              {uploads.map((upload) => (
-                <li
-                  className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
-                  data-testid={`kb-upload-row-${upload.uploadId}`}
-                  data-upload-status={upload.status}
-                  key={upload.uploadId}
-                >
-                  <div className="min-w-0">
-                    <div className="truncate">{upload.filename}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {upload.chunksTotal} chunks · {upload.updatedTsDisplay}
-                      {upload.errorDetail
-                        ? ` · ${upload.errorDetail}`
-                        : ''}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <span className="inline-flex items-center gap-1 text-xs">
-                      <StatusDot tone={upload.tone} />
-                      {upload.status}
-                    </span>
-                    {uploadsRowActionsSlot({
-                      uploadId: upload.uploadId,
-                      canPreview: upload.canPreview,
-                      canPublish: upload.canPublish,
-                      canRollback: upload.canRollback,
-                    })}
-                  </div>
-                </li>
-              ))}
-            </ConsoleRows>
-          )}
-        </QueryBody>
-      </section>
-
-      <section data-testid="console-kb-sources">
-        <div className="mb-1 text-xs font-medium text-muted-foreground">sources</div>
-        <QueryBody
-          emptyText="no collections"
-          isEmpty={(data: { collections: string[] }) =>
-            (data.collections ?? []).length === 0
-          }
-          query={{
-            data: { collections: collections.names },
-            error: collectionsError,
-            isPending: collectionsIsPending,
-          }}
-        >
-          {() => (
-            <div className="flex flex-col gap-2">
-              <select
-                className="rounded-md border border-border bg-transparent px-2 py-1 text-sm"
-                data-testid="console-kb-collection-select"
-                onChange={(event) => onChangeCollection(event.target.value)}
-                value={selectedCollection}
+    <section data-testid="console-kb-uploads-section">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-muted-foreground">uploads</span>
+        {uploadsPanelSlot}
+      </div>
+      <QueryBody
+        emptyText="no uploads"
+        isEmpty={(data: { uploads: unknown[] }) =>
+          (data.uploads ?? []).length === 0
+        }
+        query={{
+          data: { uploads },
+          error: uploadsError,
+          isPending: uploadsIsPending,
+        }}
+      >
+        {() => (
+          <ConsoleRows testId="console-kb-uploads">
+            {uploads.map((upload) => (
+              <li
+                className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
+                data-testid={`kb-upload-row-${upload.uploadId}`}
+                data-upload-status={upload.status}
+                key={upload.uploadId}
               >
-                <option value="">select a collection…</option>
-                {collections.names.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-              {selectedCollection ? (
-                <EntriesList
-                  entries={entries}
-                  entriesError={entriesError}
-                  entriesIsPending={entriesIsPending}
-                  entryRowActionsSlot={entryRowActionsSlot}
-                  selectedCollection={selectedCollection}
-                />
-              ) : null}
-            </div>
-          )}
-        </QueryBody>
-      </section>
-    </>
+                <div className="min-w-0">
+                  <div className="truncate">{upload.filename}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {upload.chunksTotal} chunks · {upload.updatedTsDisplay}
+                    {upload.errorDetail ? ` · ${upload.errorDetail}` : ''}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <span className="inline-flex items-center gap-1 text-xs">
+                    <StatusDot tone={upload.tone} />
+                    {upload.status}
+                  </span>
+                  {uploadsRowActionsSlot({
+                    uploadId: upload.uploadId,
+                    canPreview: upload.canPreview,
+                    canPublish: upload.canPublish,
+                    canRollback: upload.canRollback,
+                  })}
+                </div>
+              </li>
+            ))}
+          </ConsoleRows>
+        )}
+      </QueryBody>
+    </section>
   )
 }
 
@@ -371,20 +293,133 @@ function CandidatesSection({
   )
 }
 
-interface EntriesListProps
+interface SourcesSectionProps
   extends Pick<
     KnowledgeViewProps,
-    | 'entries'
-    | 'entriesError'
-    | 'entriesIsPending'
+    | 'collections'
+    | 'collectionsError'
+    | 'collectionsIsPending'
     | 'selectedCollection'
+    | 'onChangeCollection'
     | 'entryRowActionsSlot'
   > {}
 
-function EntriesList({
+function SourcesSection({
+  collections,
+  collectionsError,
+  collectionsIsPending,
+  selectedCollection,
+  onChangeCollection,
+  entryRowActionsSlot,
+}: SourcesSectionProps) {
+  return (
+    <section data-testid="console-kb-sources">
+      <div className="mb-1 text-xs font-medium text-muted-foreground">sources</div>
+      <QueryBody
+        emptyText="no collections"
+        isEmpty={(data: { collections: string[] }) =>
+          (data.collections ?? []).length === 0
+        }
+        query={{
+          data: { collections: collections.names },
+          error: collectionsError,
+          isPending: collectionsIsPending,
+        }}
+      >
+        {() => (
+          <SourcesList
+            collections={collections.names}
+            entryRowActionsSlot={entryRowActionsSlot}
+            onChangeCollection={onChangeCollection}
+            selectedCollection={selectedCollection}
+          />
+        )}
+      </QueryBody>
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// SourcesList — owns the collection select AND conditionally mounts
+// the entries container (so no `?collection=` request fires before
+// a collection is selected). Per W1-B2-REMEDIATION-01 §P2 + §P13 + §P15.
+// ---------------------------------------------------------------------------
+
+export interface SourcesListProps {
+  collections: string[]
+  selectedCollection: string
+  onChangeCollection: (next: string) => void
+  entryRowActionsSlot: (props: EntryRowActionsSlotProps) => ReactNode
+}
+
+export function SourcesList({
+  collections,
+  selectedCollection,
+  onChangeCollection,
+  entryRowActionsSlot,
+}: SourcesListProps) {
+  return (
+    <div className="flex flex-col gap-2">
+      <select
+        className="rounded-md border border-border bg-transparent px-2 py-1 text-sm"
+        data-testid="console-kb-collection-select"
+        onChange={(event) => onChangeCollection(event.target.value)}
+        value={selectedCollection}
+      >
+        <option value="">select a collection…</option>
+        {collections.map((name) => (
+          <option key={name} value={name}>
+            {name}
+          </option>
+        ))}
+      </select>
+      {selectedCollection ? (
+        <EntriesContainerWithKey
+          collection={selectedCollection}
+          entryRowActionsSlot={entryRowActionsSlot}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+// We import the container lazily here to avoid a circular dep with
+// the glue file. The container lives in the glue.
+import { KnowledgeEntriesContainer } from './page-knowledge.entries-container'
+
+function EntriesContainerWithKey({
+  collection,
+  entryRowActionsSlot,
+}: {
+  collection: string
+  entryRowActionsSlot: (props: EntryRowActionsSlotProps) => ReactNode
+}) {
+  return (
+    <KnowledgeEntriesContainer
+      collection={collection}
+      entryRowActionsSlot={entryRowActionsSlot}
+      key={collection}
+    />
+  )
+}
+
+// ---------------------------------------------------------------------------
+// EntriesList — presentational. Receives fully-derived VM from the
+// container; no transport, no queries.
+// ---------------------------------------------------------------------------
+
+export interface EntriesListProps {
+  entries: EntryView[]
+  entriesIsPending: boolean
+  entriesError: unknown
+  selectedCollection: string
+  entryRowActionsSlot: (props: EntryRowActionsSlotProps) => ReactNode
+}
+
+export function EntriesList({
   entries,
-  entriesError,
   entriesIsPending,
+  entriesError,
   selectedCollection,
   entryRowActionsSlot,
 }: EntriesListProps) {
@@ -427,11 +462,9 @@ function EntriesList({
 }
 
 // ---------------------------------------------------------------------------
-// Preview rendering (no transport; receives derived preview VM + the
-// uploadId). The Dialog wrapper is owned by the GLUE because the glue
-// owns the selection identity and the dialog open state. The view
-// only renders the body content (loading / error / not_implemented /
-// empty / ready) via QueryBody.
+// PreviewBody — uses QueryBody for ALL states. The body testid is
+// ONLY inside the READY child, matching pre-split semantics.
+// Per W1-B2-REMEDIATION-01 §P4 + §P14.
 // ---------------------------------------------------------------------------
 
 export interface PreviewBodyProps {
@@ -447,43 +480,38 @@ export function PreviewBody({
   isPending,
   error,
 }: PreviewBodyProps) {
-  if (!preview) {
-    return (
-      <div className="flex flex-col gap-2" data-testid={`kb-preview-body-${uploadId}`}>
-        <QueryBody
-          emptyText="no chunks"
-          isEmpty={(data: { chunks: PreviewChunkView[] }) =>
-            (data.chunks ?? []).length === 0
-          }
-          query={{
-            data: { chunks: [] },
-            error,
-            isPending,
-          }}
-        >
-          {() => null}
-        </QueryBody>
-      </div>
-    )
-  }
-
   return (
-    <div className="flex flex-col gap-2" data-testid={`kb-preview-body-${uploadId}`}>
-      <div className="text-xs text-muted-foreground">
-        {preview.totalDisplay} · {preview.piiForbiddenDisplay} /{' '}
-        {preview.piiWarningDisplay} · {preview.estCostDisplay}
-      </div>
-      <div className="flex max-h-64 flex-col gap-1 overflow-auto">
-        {preview.chunks.map((chunk) => (
-          <div
-            className="rounded border border-border p-1 text-xs"
-            data-testid={`kb-preview-chunk-${chunk.index}`}
-            key={chunk.index}
-          >
-            {chunk.textPreview}
+    <QueryBody
+      emptyText="no chunks"
+      isEmpty={(data: { chunks: PreviewChunkView[] }) =>
+        (data.chunks ?? []).length === 0
+      }
+      query={{
+        data: { chunks: preview?.chunks ?? [] },
+        error,
+        isPending,
+      }}
+    >
+      {(data: { chunks: PreviewChunkView[] }) =>
+        preview ? (
+          <div className="flex flex-col gap-2" data-testid={`kb-preview-body-${uploadId}`}>
+            <div className="text-xs text-muted-foreground">
+              {preview.total} chunks · {preview.stats.totalTokens} tokens · PII forbidden {preview.stats.piiForbiddenCount} / warning {preview.stats.piiWarningCount}
+            </div>
+            <div className="flex max-h-64 flex-col gap-1 overflow-auto">
+              {preview.chunks.map((chunk) => (
+                <div
+                  className="rounded border border-border p-1 text-xs"
+                  data-testid={`kb-preview-chunk-${chunk.index}`}
+                  key={chunk.index}
+                >
+                  {chunk.textPreview}
+                </div>
+              ))}
+            </div>
           </div>
-        ))}
-      </div>
-    </div>
+        ) : null
+      }
+    </QueryBody>
   )
 }
