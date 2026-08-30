@@ -88,10 +88,23 @@ export interface AppUpdaterLike extends EventEmitter {
   quitAndInstall(): void
 }
 
-/** Minimal app.isPackaged / app.getVersion() surface for DI. */
+/** Minimal app.isPackaged / app.getVersion() / app.getAppPath() surface for DI. */
 export interface AppLike {
   isPackaged: boolean
   getVersion(): string
+  /**
+   * Returns the application root directory. In production this is the
+   * Electron `app.getAppPath()` value; in source-mode tests any
+   * directory may be injected. Per REMEDIATION-03 §P5.3 the runtime uses
+   * this to resolve `apps/desktop/package.json` without depending on
+   * bare `__dirname` (which is undefined in the bundled ESM main).
+   *
+   * Optional for backwards compatibility with the REMEDIATION-02
+   * AppLike; if absent the runtime falls back to a best-effort lookup
+   * that works in vitest source mode but is explicitly documented as
+   * NOT safe in packaged production.
+   */
+  getAppPath?(): string
 }
 
 /** A real instance of AppUpdater — built lazily on first initialize(). */
@@ -286,9 +299,13 @@ export class UpdaterE1Runtime {
     const minimumVersionPolicy = config.minimumVersionPolicy ?? MINIMUM_SUPPORTED_VERSION_POLICY
     const minimumVersion = config.minimumVersion ?? MINIMUM_VERSION
 
-    // B-R2-04: resolve from apps/desktop/package.json, NOT the repo root.
+    // B-R2-04: resolve the package metadata feed URL. We first consult
+    // the host application's root (Electron `app.getAppPath()` in
+    // production — REMEDIATION-03 §P5.3) and only fall back to a
+    // `__dirname`-based lookup when no host root is available (vitest
+    // source mode and ad-hoc scripts).
     const feedUrl =
-      config.feedUrl === undefined ? readFeedUrlFromDesktopPackage() : config.feedUrl
+      config.feedUrl === undefined ? readFeedUrlFromHost(deps) : config.feedUrl
 
     const configuredEnabled = config.enabled ?? deps.app.isPackaged
     this.config = {
@@ -525,6 +542,12 @@ export class UpdaterE1Runtime {
         errorClass: 'unknown',
         errorCode: 'downloaded-authoritative',
       })
+
+      // Per REMEDIATION-03 §P6.1 / §B-R3-06 / §B-R3-07: emit the authoritative
+      // error envelope AND the decline audit BEFORE the throw. Observers
+      // must be able to see the rejection in state and audit; we do not
+      // silently construct an envelope and discard it.
+      this.deps.emitState(envelope)
 
       this.deps.audit?.({
         event: 'update.install.declined',
@@ -819,35 +842,99 @@ function isInvalidFeed(url: string): boolean {
 }
 
 /**
- * Resolve the package metadata feed URL from `apps/desktop/package.json`.
+ * Resolve the package metadata feed URL.
  *
- * B-R2-04: this path is RELATIVE TO THIS FILE (`apps/desktop/electron/`),
- * NOT the repo root. We resolve by walking up from this source file's
- * location until we find a package.json whose `name === 'hermes'` (the
- * Desktop product's own package.json), then read `build.publish.url`.
+ * REMEDIATION-03 §P5.1 / §P5.3 / §P6 invariants:
  *
- * The repo-root package.json is monorepo metadata and would be a
- * cross-package mistake.
+ *   PACKAGED RUNTIME TRUTH > VITEST SOURCE-MODE PATH TRUTH
+ *   app.getAppPath()  >  cwd guess  >  bare __dirname in bundled ESM
+ *
+ * 1. PRIMARY: ask the host application for its root via
+ *    `deps.app.getAppPath()`. In production this is Electron
+ *    `app.getAppPath()`. We then look for a `package.json` directly
+ *    inside that root.
+ *
+ * 2. FALLBACK (source-mode vitest / ad-hoc scripts where the host did
+ *    not provide getAppPath): walk up from `__dirname` looking for a
+ *    package.json whose `name === 'hermes'` (the Desktop product's own
+ *    metadata). This path is documented as NOT safe in the bundled ESM
+ *    main — production code MUST provide getAppPath().
+ *
+ * 3. Distinguishes:
+ *      NO DATA                          → null (caller → feed-missing)
+ *      REAL apps/desktop package found
+ *      + synthetic .invalid publish URL → url (caller → feed-invalid)
+ *
+ * Per §P6: real package + synthetic URL must be classified feed-invalid,
+ * NOT feed-missing.
  */
-function readFeedUrlFromDesktopPackage(): string | null {
+function readFeedUrlFromHost(deps: UpdaterE1Deps): string | null {
+  // Primary: app.getAppPath()
   try {
-    // Walk up from this file's location. Start from `__dirname` (when
-    // available) or fall back to a relative-from-cwd guess.
-    let dir = __dirname
+    if (typeof deps.app.getAppPath === 'function') {
+      const appRoot = deps.app.getAppPath()
 
-    for (let i = 0; i < 6; i += 1) {
-      try {
+      if (appRoot) {
+        const url = readPublishUrlFromDir(appRoot)
 
-        const candidate = require(path.join(dir, 'package.json')) as {
-          name?: string
-          build?: { publish?: { url?: string } }
+        // Per REMEDIATION-03 §P6 invariants:
+        //   app.getAppPath()  >  cwd guess  >  bare __dirname in bundled ESM
+        // If the host explicitly provided an app root, we trust it and
+        // return its result verbatim. A "no usable metadata" outcome at
+        // the host root is honest feed-missing and MUST NOT be rescued
+        // by a silent walk-up that would re-introduce the vitest-source-
+        // mode path into packaged production.
+        if (url !== null) {return url}
+
+        return null // NO DATA → feed-missing per §P6
+      }
+    }
+  } catch {
+    // ignore — fall through to fallback
+  }
+
+  // Fallback: source-mode walk up from __dirname (vitest / ad-hoc scripts).
+  return walkUpForHermesPackage()
+}
+
+function readPublishUrlFromDir(dir: string): string | null {
+  try {
+    const candidate = require(path.join(dir, 'package.json')) as {
+      name?: string
+      build?: { publish?: { url?: string } }
+    }
+
+    if (candidate?.build?.publish?.url) {
+      return candidate.build.publish.url
+    }
+  } catch {
+    // not a package.json or unreadable
+  }
+
+  return null
+}
+
+function walkUpForHermesPackage(): string | null {
+  try {
+    const startDir =
+      typeof __dirname === 'string' && __dirname ? __dirname : process.cwd()
+
+    let dir = startDir
+
+    for (let i = 0; i < 8; i += 1) {
+      const url = readPublishUrlFromDir(dir)
+
+      if (url !== null) {
+        // Distinguish "hermes" product from any other package.
+        try {
+          const candidate = require(path.join(dir, 'package.json')) as {
+            name?: string
+          }
+
+          if (candidate?.name === 'hermes') {return url}
+        } catch {
+          // ignore — already returned null above
         }
-
-        if (candidate?.name === 'hermes' && candidate.build?.publish?.url) {
-          return candidate.build.publish.url
-        }
-      } catch {
-        // continue walking up
       }
 
       const parent = path.dirname(dir)

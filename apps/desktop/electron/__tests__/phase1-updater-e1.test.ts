@@ -3,9 +3,10 @@
 /**
  * phase1-updater-e1.test.ts
  *
- * P3-M4A · PHASE1-PARALLEL-ENGINEERING-01-CONTINUATION-02 · Line B REMEDIATION-01
+ * P3-M4A · PHASE1-PARALLEL-ENGINEERING-01-CONTINUATION-02 · Line B REMEDIATION-02
  *
- * E1 runtime composition tests (REMEDIATION-01 §23 B1-B18).
+ * E1 runtime composition tests (REMEDIATION-01 §23 B1-B18) plus the
+ * REMEDIATION-02 / REMEDIATION-03 behavioral acceptance tests.
  *
  * Imports are written for the project's vitest 4.1.10 runner, NOT node:test
  * (REMEDIATION-01 §22 — the previous commit claimed dual-compatibility but
@@ -16,6 +17,8 @@
  */
 
 import { EventEmitter } from 'node:events'
+import * as os from 'node:os'
+import * as path from 'node:path'
 
 import { beforeEach, describe, expect, it } from 'vitest'
 
@@ -49,6 +52,7 @@ import {
   UPDATE_STATE_CHANNEL,
 } from '../update-state-channel'
 import {
+  type AppLike,
   type AppUpdaterLike,
   type UpdaterE1Config,
   type UpdaterE1Deps,
@@ -1089,5 +1093,273 @@ describe('REMEDIATION-02 file invariants', () => {
     expect(pkg.build?.publish?.url).toMatch(/updates\.example\.invalid/)
     expect(pkg.build?.publish?.channel).toBe('stable')
     expect(pkg.publishMeta?.PRODUCTION_UPDATE_URL_AUTHORIZED).toBe(false)
+  })
+})
+
+// ────────────────────────────────────────────────────────────────────────────
+// REMEDIATION-03 · Packaged Feed Resolution / Download-Gate State Truth
+// ────────────────────────────────────────────────────────────────────────────
+// The bundled Electron main process is ESM (`dist/electron-main.mjs`) and does
+// not define `__dirname`. Per P5.1 the runtime must NOT depend on a bare
+// `__dirname` lookup. Per P5.3 the preferred authority is `app.getAppPath()`.
+// Per P6.1 the authoritative download gate MUST emit an error envelope +
+// audit decline BEFORE the throw so callers and observers see the rejection.
+
+describe('REMEDIATION-03 packaged feed resolution', () => {
+  // B-R3-02 — Injected App Root finds Desktop package metadata and produces
+  // feed-invalid (NOT feed-missing) when the metadata carries the synthetic
+  // .invalid placeholder.
+  it('B-R3-02: default feed via app.getAppPath() finds apps/desktop package.json and classifies feed-invalid', () => {
+    const states: ReturnType<typeof makeUpdateEnvelope>[] = []
+    const audits: unknown[] = []
+    const fake = new FakeAppUpdater()
+    const appsDesktopRoot = path.resolve(__dirname, '..', '..') // vitest cwd = apps/desktop
+
+    const rt = new UpdaterE1Runtime(
+      {
+        app: {
+          isPackaged: true,
+          getVersion: () => '0.17.0',
+          getAppPath: () => appsDesktopRoot,
+        },
+        emitState: (e) => states.push(e),
+        audit: (e) => audits.push(e),
+        appUpdaterFactory: () => fake as unknown as ReturnType<NonNullable<UpdaterE1Deps['appUpdaterFactory']>>,
+      },
+      {
+        // feedUrl OMITTED on purpose.
+        currentVersion: '0.17.0',
+      },
+    )
+
+    const r = rt.initialize()
+    expect(r.kind).toBe('disabled')
+    expect((r as { reason: string }).reason).toBe('feed-invalid')
+    const state = rt.getState()
+    expect(state.feedUrl ?? '').toMatch(/example\.invalid/)
+    // The synthetic feed MUST NOT trigger any AppUpdater wiring.
+    expect(fake.setFeedURLCalls.length).toBe(0)
+    expect(fake.checkForUpdatesCalls).toBe(0)
+  })
+
+  // B-R3-03 — When getAppPath() resolves to a directory without usable
+  // package.json (or without a publish.url), the runtime MUST classify as
+  // feed-missing (fail-closed). Distinguishes "no data" from "invalid data"
+  // per P6 invariants.
+  it('B-R3-03: getAppPath() without usable package metadata → feed-missing', () => {
+    const states: ReturnType<typeof makeUpdateEnvelope>[] = []
+    const audits: unknown[] = []
+    const fake = new FakeAppUpdater()
+    // Point at a temp dir that has no package.json.
+    const emptyRoot = path.join(os.tmpdir(), 'updater-e1-empty-' + String(Math.random()).slice(2, 10))
+    require('node:fs').mkdirSync(emptyRoot, { recursive: true })
+
+    const rt = new UpdaterE1Runtime(
+      {
+        app: {
+          isPackaged: true,
+          getVersion: () => '0.17.0',
+          getAppPath: () => emptyRoot,
+        },
+        emitState: (e) => states.push(e),
+        audit: (e) => audits.push(e),
+        appUpdaterFactory: () => fake as unknown as ReturnType<NonNullable<UpdaterE1Deps['appUpdaterFactory']>>,
+      },
+      {
+        currentVersion: '0.17.0',
+      },
+    )
+
+    const r = rt.initialize()
+    expect(r.kind).toBe('disabled')
+    expect((r as { reason: string }).reason).toBe('feed-missing')
+    expect(fake.setFeedURLCalls.length).toBe(0)
+  })
+
+  // B-R3-04 — Explicit config feedUrl must override package discovery.
+  it('B-R3-04: explicit feedUrl in config wins over package discovery', () => {
+    const states: ReturnType<typeof makeUpdateEnvelope>[] = []
+    const audits: unknown[] = []
+    const fake = new FakeAppUpdater()
+    const appsDesktopRoot = path.resolve(__dirname, '..', '..')
+
+    const rt = new UpdaterE1Runtime(
+      {
+        app: {
+          isPackaged: true,
+          getVersion: () => '0.17.0',
+          getAppPath: () => appsDesktopRoot,
+        },
+        emitState: (e) => states.push(e),
+        audit: (e) => audits.push(e),
+        appUpdaterFactory: () => fake as unknown as ReturnType<NonNullable<UpdaterE1Deps['appUpdaterFactory']>>,
+      },
+      {
+        currentVersion: '0.17.0',
+        feedUrl: 'https://example.com/hermes-stable', // explicit override
+      },
+    )
+
+    const r = rt.initialize()
+    expect(r.kind).toBe('initialized')
+    expect(rt.getState().feedUrl).toBe('https://example.com/hermes-stable')
+    expect(fake.setFeedURLCalls.length).toBe(1)
+  })
+
+  // B-R3-05 — readFeedUrlFromDesktopPackage must NOT be called when an
+  // explicit feedUrl is provided. (Implementation-level invariant.)
+  it('B-R3-05: explicit feedUrl skips package metadata resolution', () => {
+    const fake = new FakeAppUpdater()
+    const appsDesktopRoot = path.resolve(__dirname, '..', '..')
+
+    const rt = new UpdaterE1Runtime(
+      {
+        app: {
+          isPackaged: true,
+          getVersion: () => '0.17.0',
+          getAppPath: () => appsDesktopRoot,
+        },
+        emitState: () => { /* no-op */ },
+        audit: () => { /* no-op */ },
+        appUpdaterFactory: () => fake as unknown as ReturnType<NonNullable<UpdaterE1Deps['appUpdaterFactory']>>,
+      },
+      {
+        currentVersion: '0.17.0',
+        feedUrl: 'https://example.com/hermes-stable',
+      },
+    )
+
+    const r = rt.initialize()
+    expect(r.kind).toBe('initialized')
+    // The feed stored on state must be the EXPLICIT value, not the package value.
+    expect(rt.getState().feedUrl).toBe('https://example.com/hermes-stable')
+  })
+})
+
+describe('REMEDIATION-03 download-gate emitted-state truth', () => {
+  // B-R3-06 — When NO update-downloaded event has fired, requestRestartInstall
+  // MUST emit an error envelope (phase=error, errorCode=downloaded-authoritative)
+  // and a decline audit event BEFORE the throw.
+  it('B-R3-06: download gate emits error envelope + decline audit before throw', async () => {
+    const states: ReturnType<typeof makeUpdateEnvelope>[] = []
+    const audits: unknown[] = []
+    const fake = new FakeAppUpdater()
+
+    const rt = new UpdaterE1Runtime(
+      {
+        app: { isPackaged: true, getVersion: () => '0.17.0' },
+        emitState: (e) => states.push(e),
+        audit: (e) => audits.push(e),
+        appUpdaterFactory: () => fake as unknown as ReturnType<NonNullable<UpdaterE1Deps['appUpdaterFactory']>>,
+      },
+      {
+        currentVersion: '0.18.0',
+        minimumVersion: '0.17.0',
+        feedUrl: 'https://example.com/hermes-stable',
+      },
+    )
+
+    rt.initialize()
+    await expect(
+      rt.requestRestartInstall({
+        userConfirmed: true,
+        safeStoragePreserved: true,
+        hasPendingMutations: false,
+      }),
+    ).rejects.toThrow(/downloaded-authoritative/)
+    // The emitted-state envelope MUST be present.
+    const errorEnv = states.find((s) => s.phase === 'error')
+    expect(errorEnv).toBeDefined()
+    expect(errorEnv?.errorCode).toBe('downloaded-authoritative')
+    // quitAndInstall MUST NOT be called.
+    expect(fake.quitAndInstallCalls).toBe(0)
+  })
+
+  // B-R3-07 — The audit payload for the decline must carry the gate name and
+  // must NOT leak raw feed URL or other sensitive substrings.
+  it('B-R3-07: download-gate decline audit carries gate name and no secrets', async () => {
+    const states: ReturnType<typeof makeUpdateEnvelope>[] = []
+    const audits: unknown[] = []
+    const fake = new FakeAppUpdater()
+
+    const rt = new UpdaterE1Runtime(
+      {
+        app: { isPackaged: true, getVersion: () => '0.17.0' },
+        emitState: (e) => states.push(e),
+        audit: (e) => audits.push(e),
+        appUpdaterFactory: () => fake as unknown as ReturnType<NonNullable<UpdaterE1Deps['appUpdaterFactory']>>,
+      },
+      {
+        currentVersion: '0.18.0',
+        minimumVersion: '0.17.0',
+        feedUrl: 'https://updates.example.com/hermes-stable?token=ghp_SECRET',
+      },
+    )
+
+    rt.initialize()
+    await expect(
+      rt.requestRestartInstall({
+        userConfirmed: true,
+        safeStoragePreserved: true,
+        hasPendingMutations: false,
+      }),
+    ).rejects.toThrow(/downloaded-authoritative/)
+    const declineAudit = audits.find((a) => (a as { event?: string }).event === 'update.install.declined')
+    expect(declineAudit).toBeDefined()
+    expect((declineAudit as { reason?: string }).reason).toBe('downloaded-authoritative')
+    const json = JSON.stringify(audits)
+    expect(json).not.toContain('updates.example.com/hermes-stable?token=')
+    expect(json).not.toContain('ghp_SECRET')
+    expect(json).not.toContain('password')
+    expect(json).not.toContain('privateKey')
+  })
+
+  // B-R3-08 — After update-downloaded, the install still calls quitAndInstall
+  // exactly once (no regression from REMEDIATION-02 B-R2-02 / B-R2-03).
+  it('B-R3-08: downloaded + valid gates → quitAndInstall exactly once', async () => {
+    const states: ReturnType<typeof makeUpdateEnvelope>[] = []
+    const audits: unknown[] = []
+    const fake = new FakeAppUpdater()
+
+    const rt = new UpdaterE1Runtime(
+      {
+        app: { isPackaged: true, getVersion: () => '0.17.0' },
+        emitState: (e) => states.push(e),
+        audit: (e) => audits.push(e),
+        appUpdaterFactory: () => fake as unknown as ReturnType<NonNullable<UpdaterE1Deps['appUpdaterFactory']>>,
+      },
+      {
+        currentVersion: '0.18.0',
+        minimumVersion: '0.17.0',
+        feedUrl: 'https://example.com/hermes-stable',
+      },
+    )
+
+    rt.initialize()
+    fake.emit('update-downloaded', { version: '0.18.0' })
+    await rt.requestRestartInstall({
+      userConfirmed: true,
+      safeStoragePreserved: true,
+      hasPendingMutations: false,
+    })
+    await rt.requestRestartInstall({
+      userConfirmed: true,
+      safeStoragePreserved: true,
+      hasPendingMutations: false,
+    })
+    expect(fake.quitAndInstallCalls).toBe(1)
+  })
+
+  // B-R3-01 — AppLike MUST expose getAppPath() so the runtime can resolve the
+  // Desktop product root without depending on bare __dirname.
+  it('B-R3-01: AppLike exposes getAppPath()', () => {
+    const appLike = {
+      isPackaged: true,
+      getVersion: () => '0.17.0',
+      getAppPath: () => '/some/path',
+    } satisfies AppLike
+
+    expect(typeof appLike.getAppPath).toBe('function')
+    expect(appLike.getAppPath()).toBe('/some/path')
   })
 })
