@@ -323,9 +323,8 @@ import { waitForUpdateClearance } from './update-gate'
 import { readLiveUpdateMarker, updateHandoffConflict, writeUpdateMarker } from './update-marker'
 import { isOfficialSshRemote, OFFICIAL_REPO_HTTPS_URL } from './update-remote'
 import {
-  UpdaterE1Runtime,
-  type UpdaterE1Deps,
   type UpdaterE1InitResult,
+  UpdaterE1Runtime,
 } from './updater-e1'
 import {
   collectRelaunchArgs,
@@ -15625,7 +15624,9 @@ function bootstrapUpdaterE1(): UpdaterE1InitResult {
       currentVersion: app.getVersion(),
     },
   )
+
   __updaterE1Runtime = runtime
+
   return runtime.initialize()
 }
 

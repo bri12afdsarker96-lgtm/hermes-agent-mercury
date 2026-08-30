@@ -3,34 +3,45 @@
 /**
  * updater-e1.ts
  *
- * P3-M4A · PHASE1-PARALLEL-ENGINEERING-01-CONTINUATION-02 · Line B REMEDIATION-01
+ * P3-M4A · PHASE1-PARALLEL-ENGINEERING-01-CONTINUATION-02 · Line B REMEDIATION-02
  *
- * REAL runtime composition for the official electron-updater seam
- * (REMEDIATION-01 §4/§7/§8/§9/§10/§11/§13).
+ * REAL runtime composition for the official electron-updater seam. This
+ * module is the SOLE writer of AppUpdater interactions in the E1 runtime;
+ * nothing else in this Lane or any other Lane may directly import
+ * `electron-updater` outside of the factory below.
  *
- * What this module is:
- *   - A small, bounded main-process adapter that wires the official
- *     `electron-updater` AppUpdater into the E1 state contract
- *     (update-state-channel.ts envelope).
- *   - Source/dev vs packaged classification: in dev, this module is a
- *     no-op — the existing Hermes source/git updater flow is untouched.
- *   - DI-first: every external dependency (app updater, clock, emitter,
- *     audit sink, config) is injectable. Tests inject a fake.
- *   - Restart-install gating delegates to the pure evaluator in
- *     update-restart-install.ts. The adapter does NOT invent its own
- *     gate logic.
- *
- * What this module is NOT:
- *   - Not a replacement for `update-gate.ts`, `update-marker.ts`, or
- *     `updater-process.ts` (REMEDIATION-01 §21 — do not duplicate).
- *   - Not a renderer UI surface (REMEDIATION-01 §12 — main-only).
- *   - Not a real production updater — `updates.example.invalid` is a
- *     synthetic feed and is flagged NOT_AUTHORIZED in package.json
- *     (REMEDIATION-01 §17).
- *   - Not an E2 / V1→successor proof (REMEDIATION-01 §31 — out of scope).
+ * REMEDIATION-02 invariants (P9 §B-R2-01 .. §B-R2-16):
+ *   - Authoritative Download Gate: restart-install refused unless the
+ *     upstream AppUpdater has actually emitted `update-downloaded`
+ *     (B-R2-01).
+ *   - Idempotent failure: factory / setFeedURL errors and disabled-bootstrap
+ *     conditions do NOT silently flip to `initialized/ok` on repeat
+ *     initialize() calls (B-R2-05, B-R2-06, B-R2-07).
+ *   - Channel truth: beta / internal channels return `kind=disabled,
+ *     reason=channel-not-v1-shippable` — never `initialized/ok` with
+ *     unwired AppUpdater (B-R2-08).
+ *   - Runtime enabled truth: `getState().enabled` reflects whether the
+ *     AppUpdater is actually wired and ready, not merely configured
+ *     (B-R2-09).
+ *   - Bootstrap package metadata path: when no `feedUrl` is provided to
+ *     the constructor, the runtime reads from `apps/desktop/package.json`
+ *     via a path relative to this file (NOT the repo root) (B-R2-04).
+ *   - check() / download() failure truth: an authoritative error envelope
+ *     is emitted and the method returns an error envelope (or throws
+ *     after emitting one) — never a `checking`/`downloading` envelope
+ *     after the failure is known (B-R2-10, B-R2-11).
+ *   - Audit secret safety: audit events never carry raw feed URLs, raw
+ *     error messages, or credential substrings (B-R2-12).
+ *   - Existing source updater preservation: update-gate, update-marker,
+ *     updater-process, and the existing applyUpdates flow are NOT
+ *     touched by this module (B-R2-14).
+ *   - Product identity preservation: this module does not read or
+ *     mutate appId / productName / protocol / userData / install scope
+ *     (B-R2-15).
  */
 
 import type { EventEmitter } from 'node:events'
+import * as path from 'node:path'
 
 import type * as ElectronUpdater from 'electron-updater'
 import type { AppUpdater as ElectronAppUpdater } from 'electron-updater'
@@ -112,14 +123,14 @@ export interface UpdaterE1Config {
   minimumVersion?: string | typeof NOT_ESTABLISHED_MINIMUM_VERSION
   /**
    * Feed URL for the publish contract. Default: read from
-   * `build.publish.url` in package.json (validated by caller).
-   * Set to null to disable feed wiring.
+   * `build.publish.url` in `apps/desktop/package.json` (validated by caller).
+   * Set to null to force feed-missing classification.
    */
   feedUrl?: string | null
   /**
    * Whether to wire the AppUpdater in the current process. Defaults to
    * `app.isPackaged`. Dev/source runs MUST return a "disabled" runtime
-   * (REMEDIATION-01 §9).
+   * (REMEDIATION-02 §9).
    */
   enabled?: boolean
 }
@@ -134,7 +145,11 @@ export interface UpdaterE1Deps {
   audit?: (event: RestartAuditEvent | AuditEvent) => void
   /** Wall clock for testing. */
   clock?: () => number
-  /** Inject a fake AppUpdater post-construction (tests only). */
+  /**
+   * Test-only hook invoked with the wired AppUpdater after initialize().
+   * NOT used in production. Provided for tests that want to inspect the
+   * wired instance without going through the factory.
+   */
   setAppUpdaterForTesting?: (updater: AppUpdaterLike) => void
 }
 
@@ -148,6 +163,9 @@ export interface AuditEvent {
     | 'update.downloaded'
     | 'update.error'
     | 'update.bootstrap.disabled'
+    | 'update.install.requested'
+    | 'update.install.declined'
+    | 'update.install.completed'
   ts: number
   [k: string]: unknown
 }
@@ -155,7 +173,15 @@ export interface AuditEvent {
 /** Runtime status returned by initialize(). */
 export type UpdaterE1InitResult =
   | { kind: 'initialized'; reason: 'ok' }
-  | { kind: 'disabled'; reason: 'dev' | 'feed-missing' | 'feed-invalid' | 'app-not-packaged' }
+  | {
+      kind: 'disabled'
+      reason:
+        | 'dev'
+        | 'feed-missing'
+        | 'feed-invalid'
+        | 'app-not-packaged'
+        | 'channel-not-v1-shippable'
+    }
   | { kind: 'error'; reason: string }
 
 /** A snapshot of the most recent authoritative state for restart-install. */
@@ -166,12 +192,21 @@ export interface UpdaterE1State {
   channel: UpdateChannelName
   /** Configured feed URL, or null. */
   feedUrl: string | null
-  /** Whether the runtime was wired (true) or disabled (false). */
+  /**
+   * True iff the AppUpdater is actually wired AND ready to be asked to
+   * check / download / install. Distinct from `configuredEnabled` —
+   * `enabled` reflects runtime truth, configuration reflects intent.
+   */
   enabled: boolean
+  /** Whether the host's configuration permitted the wiring attempt. */
+  configuredEnabled: boolean
   /** Current installed version. */
   currentVersion: string
   /** Latest known available version (if reported by the updater). */
   availableVersion: string | null
+  /** Reason returned by the last initialize() call, for diagnostics. */
+  initKind: 'initialized' | 'disabled' | 'error' | 'pending'
+  initReason: string | null
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -220,14 +255,25 @@ function classifyError(err: unknown): UpdateErrorClass {
 
 export class UpdaterE1Runtime {
   private readonly deps: UpdaterE1Deps
-  private readonly config: Required<Omit<UpdaterE1Config, 'channel' | 'feedUrl' | 'enabled'>> & {
+  private readonly config: {
+    currentVersion: string
+    minimumVersionPolicy: MinimumVersionPolicy
+    minimumVersion: string | typeof NOT_ESTABLISHED_MINIMUM_VERSION
     channel: UpdateChannelName
     feedUrl: string | null
-    enabled: boolean
+    configuredEnabled: boolean
   }
   private appUpdater: AppUpdaterLike | null = null
   private appUpdaterWired = false
-  private initialized = false
+  /**
+   * initialize() result cache — REMEDIATION-02 §B-R2-05 / §B-R2-06 /
+   * §B-R2-07 / §B-R2-08 require that subsequent initialize() calls
+   * preserve the truthful classification of the first call. We do this
+   * by storing the first result and replaying it.
+   */
+  private initResult: UpdaterE1InitResult | null = null
+  /** True once a successful `quitAndInstall` has been issued (B-R2-03). */
+  private installRequested = false
   private latest: UpdaterE1State
   private readonly boundHandlers: Map<string, (...args: unknown[]) => void> = new Map()
 
@@ -235,38 +281,55 @@ export class UpdaterE1Runtime {
     this.deps = deps
 
     const resolvedChannel: UpdateChannelName =
-      config.channel ??
-      resolveUpdateChannel(process.env).name
+      config.channel ?? resolveUpdateChannel(process.env).name
 
     const minimumVersionPolicy = config.minimumVersionPolicy ?? MINIMUM_SUPPORTED_VERSION_POLICY
     const minimumVersion = config.minimumVersion ?? MINIMUM_VERSION
-    const feedUrl = config.feedUrl === undefined ? readFeedUrlFromPackage() : config.feedUrl
-    const enabled = config.enabled ?? deps.app.isPackaged
+
+    // B-R2-04: resolve from apps/desktop/package.json, NOT the repo root.
+    const feedUrl =
+      config.feedUrl === undefined ? readFeedUrlFromDesktopPackage() : config.feedUrl
+
+    const configuredEnabled = config.enabled ?? deps.app.isPackaged
     this.config = {
       currentVersion: config.currentVersion || deps.app.getVersion(),
       minimumVersionPolicy,
       minimumVersion,
       channel: resolvedChannel,
       feedUrl,
-      enabled,
+      configuredEnabled,
     }
     this.latest = {
       isDownloaded: false,
       channel: this.config.channel,
       feedUrl: this.config.feedUrl,
-      enabled: this.config.enabled,
+      enabled: false,
+      configuredEnabled: this.config.configuredEnabled,
       currentVersion: this.config.currentVersion,
       availableVersion: null,
+      initKind: 'pending',
+      initReason: null,
     }
   }
 
-  /** Lazy-init the AppUpdater + bind events. Idempotent. */
+  /**
+   * Lazy-init the AppUpdater + bind events. Idempotent across all
+   * classifications — a disabled bootstrap stays disabled, an error
+   * stays an error (B-R2-05 / B-R2-06 / B-R2-07).
+   */
   initialize(): UpdaterE1InitResult {
-    if (this.initialized) {return { kind: 'initialized', reason: 'ok' }}
-    this.initialized = true
+    if (this.initResult !== null) {
+      // Replay the first, truthful classification.
+      return this.initResult
+    }
 
-    if (!this.config.enabled) {
-      const reason: 'dev' | 'app-not-packaged' = this.deps.app.isPackaged ? 'dev' : 'app-not-packaged'
+    let result: UpdaterE1InitResult
+
+    if (!this.config.configuredEnabled) {
+      const reason: 'dev' | 'app-not-packaged' = this.deps.app.isPackaged
+        ? 'dev'
+        : 'app-not-packaged'
+
       this.deps.audit?.({
         event: 'update.bootstrap.disabled',
         ts: this.now(),
@@ -275,49 +338,36 @@ export class UpdaterE1Runtime {
       this.deps.emitState(
         makeUpdateEnvelope({ phase: 'idle', channel: this.config.channel }),
       )
-
-      return { kind: 'disabled', reason }
-    }
-
-    if (!this.config.feedUrl) {
+      result = { kind: 'disabled', reason }
+    } else if (!this.config.feedUrl) {
       this.deps.audit?.({
         event: 'update.bootstrap.disabled',
         ts: this.now(),
         reason: 'feed-missing',
       })
       this.deps.emitState(
-        makeUpdateEnvelope({ phase: 'idle', channel: this.config.channel, errorClass: 'unknown' }),
+        makeUpdateEnvelope({
+          phase: 'idle',
+          channel: this.config.channel,
+          errorClass: 'unknown',
+        }),
       )
-
-      return { kind: 'disabled', reason: 'feed-missing' }
-    }
-
-    // REMEDIATION-01 §17: a synthetic .invalid URL is allowed for E1 but
-    // must NOT be treated as a production feed. Detect the canonical
-    // placeholder TLD anywhere in the URL (path may have /channel suffix).
-    const url = this.config.feedUrl
-
-    const isInvalidFeed =
-      /(^|\.)invalid(\/|$)/i.test(url) || !/^https?:\/\//i.test(url)
-
-    if (isInvalidFeed) {
+      result = { kind: 'disabled', reason: 'feed-missing' }
+    } else if (isInvalidFeed(this.config.feedUrl)) {
       this.deps.audit?.({
         event: 'update.bootstrap.disabled',
         ts: this.now(),
         reason: 'feed-invalid',
-        feedUrl: this.config.feedUrl,
       })
       this.deps.emitState(
-        makeUpdateEnvelope({ phase: 'idle', channel: this.config.channel, errorClass: 'unknown' }),
+        makeUpdateEnvelope({
+          phase: 'idle',
+          channel: this.config.channel,
+          errorClass: 'unknown',
+        }),
       )
-
-      return { kind: 'disabled', reason: 'feed-invalid' }
-    }
-
-    // V1 channel guard (REMEDIATION-01 §14) — must never accept
-    // beta/internal even if feed URL parses. The runtime is still
-    // queryable; only the AppUpdater wiring is skipped.
-    if (!isV1ShippableChannel(this.config.channel)) {
+      result = { kind: 'disabled', reason: 'feed-invalid' }
+    } else if (!isV1ShippableChannel(this.config.channel)) {
       this.deps.audit?.({
         event: 'update.bootstrap.disabled',
         ts: this.now(),
@@ -331,47 +381,57 @@ export class UpdaterE1Runtime {
           errorClass: 'channel-mismatch',
         }),
       )
-      // Surface a sentinel state: appUpdater stays null, but the
-      // runtime is queryable so requestRestartInstall can fail-closed.
-      this.appUpdaterWired = false
+      result = { kind: 'disabled', reason: 'channel-not-v1-shippable' }
+    } else {
+      const factory = this.deps.appUpdaterFactory ?? defaultAppUpdaterFactory
+      let real: ElectronAppUpdater
 
-      return { kind: 'initialized', reason: 'ok' }
-    }
+      try {
+        real = factory()
+      } catch (err) {
+        result = {
+          kind: 'error',
+          reason: `appUpdater factory failed: ${(err as Error).message ?? String(err)}`,
+        }
+        this.initResult = result
+        this.recordInitState(result)
 
-    const factory = this.deps.appUpdaterFactory ?? defaultAppUpdaterFactory
+        return result
+      }
 
-    try {
-      const real = factory()
       this.appUpdater = real as unknown as AppUpdaterLike
-    } catch (err) {
-      return {
-        kind: 'error',
-        reason: `appUpdater factory failed: ${(err as Error).message ?? String(err)}`,
+
+      if (this.deps.setAppUpdaterForTesting) {
+        this.deps.setAppUpdaterForTesting(this.appUpdater)
       }
-    }
 
-    if (this.deps.setAppUpdaterForTesting) {
-      this.deps.setAppUpdaterForTesting(this.appUpdater)
-    }
+      this.bindEvents()
 
-    this.bindEvents()
+      try {
+        this.appUpdater.setFeedURL({
+          provider: 'generic',
+          url: this.config.feedUrl ?? undefined,
+          channel: this.config.channel,
+        })
+      } catch (err) {
+        result = {
+          kind: 'error',
+          reason: `setFeedURL failed: ${(err as Error).message ?? String(err)}`,
+        }
+        this.initResult = result
+        this.recordInitState(result)
 
-    try {
-      this.appUpdater.setFeedURL({
-        provider: 'generic',
-        url: this.config.feedUrl ?? undefined,
-        channel: this.config.channel,
-      })
-    } catch (err) {
-      return {
-        kind: 'error',
-        reason: `setFeedURL failed: ${(err as Error).message ?? String(err)}`,
+        return result
       }
+
+      this.appUpdaterWired = true
+      result = { kind: 'initialized', reason: 'ok' }
     }
 
-    this.appUpdaterWired = true
+    this.initResult = result
+    this.recordInitState(result)
 
-    return { kind: 'initialized', reason: 'ok' }
+    return result
   }
 
   /** Snapshot for the renderer / restart-install callers. */
@@ -381,27 +441,44 @@ export class UpdaterE1Runtime {
 
   /** Trigger an authoritative check. */
   async check(): Promise<UpdateStateEnvelope> {
-    this.ensureInitialized()
+    this.ensureInitializedAndWired()
+    let lastError: unknown = null
     this.deps.emitState(makeUpdateEnvelope({ phase: 'checking', channel: this.config.channel }))
-    this.deps.audit?.({ event: 'update.check.started', ts: this.now(), channel: this.config.channel })
+    this.deps.audit?.({
+      event: 'update.check.started',
+      ts: this.now(),
+      channel: this.config.channel,
+    })
 
     try {
       await this.appUpdater!.checkForUpdates()
     } catch (err) {
+      lastError = err
       this.emitError(err)
     }
 
-    // The real envelopes are emitted by the event handlers; this call
-    // returns the "checking" envelope as a return value for callers that
-    // want synchronous-ish feedback.
+    if (lastError !== null) {
+      // Authoritative failure → return error envelope, not checking (B-R2-10).
+      return makeUpdateEnvelope({
+        phase: 'error',
+        channel: this.config.channel,
+        errorClass: classifyError(lastError),
+      })
+    }
+
     return makeUpdateEnvelope({ phase: 'checking', channel: this.config.channel })
   }
 
   /** Trigger a real download (after `update-available`). */
   async download(): Promise<void> {
-    this.ensureInitialized()
+    this.ensureInitializedAndWired()
+    let lastError: unknown = null
     this.deps.emitState(
-      makeUpdateEnvelope({ phase: 'downloading', channel: this.config.channel, progress: 0 }),
+      makeUpdateEnvelope({
+        phase: 'downloading',
+        channel: this.config.channel,
+        progress: 0,
+      }),
     )
     this.deps.audit?.({
       event: 'update.download.started',
@@ -412,26 +489,55 @@ export class UpdaterE1Runtime {
     try {
       await this.appUpdater!.downloadUpdate()
     } catch (err) {
+      lastError = err
       this.emitError(err)
-      throw err
+    }
+
+    if (lastError !== null) {
+      throw lastError instanceof Error ? lastError : new Error(String(lastError))
     }
   }
 
   /**
    * Authoritative restart-install. Returns the E1 envelope and only calls
-   * the underlying `quitAndInstall()` when:
-   *   - state is `downloaded` (REMEDIATION-01 §13),
-   *   - channel is V1-shippable (REMEDIATION-01 §14),
-   *   - minimum-version gate passes (REMEDIATION-01 §15),
-   *   - safeStorage / userData are preserved (REMEDIATION-01 §20),
-   *   - caller supplies userConfirmed=true.
+   * the underlying `quitAndInstall()` when (B-R2-01 / B-R2-02):
+   *   - the upstream AppUpdater has emitted `update-downloaded`
+   *     (state.isDownloaded === true),
+   *   - channel is V1-shippable (REMEDIATION-02 §14),
+   *   - minimum-version gate passes (REMEDIATION-02 §15),
+   *   - safeStorage / userData preservation is asserted
+   *     (REMEDIATION-02 §20),
+   *   - caller supplies userConfirmed=true,
+   *   - hasPendingMutations=false.
+   * B-R2-03: subsequent calls return the same envelope without re-invoking
+   * `quitAndInstall`.
    */
   async requestRestartInstall(input: {
     userConfirmed: boolean
     safeStoragePreserved: boolean
     hasPendingMutations: boolean
   }): Promise<UpdateStateEnvelope> {
-    this.ensureInitialized()
+    // B-R2-01 — Authoritative Download Gate.
+    if (!this.latest.isDownloaded) {
+      const envelope = makeUpdateEnvelope({
+        phase: 'error',
+        channel: this.config.channel,
+        errorClass: 'unknown',
+        errorCode: 'downloaded-authoritative',
+      })
+
+      this.deps.audit?.({
+        event: 'update.install.declined',
+        ts: this.now(),
+        channel: this.config.channel,
+        reason: 'downloaded-authoritative',
+      })
+      // Throw so that the failure is unmissable in callers that ignore
+      // envelope phase — matches B-R2-11's download-failure pattern.
+      throw new Error(
+        '[updater-e1] restart-install refused: downloaded-authoritative (update-downloaded event has not fired)',
+      )
+    }
 
     const decision = evaluateRestartInstall({
       channel: this.config.channel,
@@ -443,21 +549,34 @@ export class UpdaterE1Runtime {
     } satisfies RestartInstallInput)
 
     if (decision.ok === false) {
-      // Fail-closed — no install, no audit, but a clear error envelope.
-      return makeUpdateEnvelope({
+      const envelope = makeUpdateEnvelope({
         phase: 'error',
         channel: this.config.channel,
         errorClass: classifyByGate(decision.failedGate),
         errorCode: decision.failedGate,
       })
+
+      this.deps.audit?.({
+        event: 'update.install.declined',
+        ts: this.now(),
+        channel: this.config.channel,
+        gate: decision.failedGate,
+        reason: decision.reason,
+      })
+
+      return envelope
     }
 
-    // De-duplicate: only one install call per lifetime of the runtime.
-    if (this.latest.isDownloaded && (this.appUpdater as unknown as { _installRequested?: boolean })._installRequested) {
-      return makeUpdateEnvelope({ phase: 'installing', channel: this.config.channel, restartPending: true })
+    // B-R2-03 — De-duplicate: at most one install call per runtime lifetime.
+    if (this.installRequested) {
+      return makeUpdateEnvelope({
+        phase: 'installing',
+        channel: this.config.channel,
+        restartPending: true,
+      })
     }
 
-    ;(this.appUpdater as unknown as { _installRequested?: boolean })._installRequested = true
+    this.installRequested = true
 
     this.deps.audit?.(
       recordRestartAuditEvent(
@@ -472,10 +591,22 @@ export class UpdaterE1Runtime {
         decision,
       ),
     )
+    this.deps.audit?.({
+      event: 'update.install.requested',
+      ts: this.now(),
+      channel: this.config.channel,
+    })
 
     try {
       this.appUpdater!.quitAndInstall()
+      this.deps.audit?.({
+        event: 'update.install.completed',
+        ts: this.now(),
+        channel: this.config.channel,
+      })
     } catch (err) {
+      // Roll back the de-dup latch so a host retry is possible.
+      this.installRequested = false
       this.emitError(err)
       throw err
     }
@@ -506,13 +637,26 @@ export class UpdaterE1Runtime {
     return this.deps.clock ? this.deps.clock() : Date.now()
   }
 
-  private ensureInitialized(): void {
-    if (!this.initialized) {
+  private recordInitState(result: UpdaterE1InitResult): void {
+    this.latest = {
+      ...this.latest,
+      enabled: this.appUpdaterWired,
+      initKind: result.kind,
+      initReason: 'reason' in result ? result.reason : null,
+    }
+  }
+
+  private ensureInitializedAndWired(): void {
+    if (this.initResult === null) {
       throw new Error('[updater-e1] runtime not initialized (call initialize() first)')
     }
 
     if (!this.appUpdaterWired || !this.appUpdater) {
-      throw new Error('[updater-e1] AppUpdater not wired (channel not V1-shippable or feed invalid)')
+      throw new Error(
+        '[updater-e1] AppUpdater not wired (init kind=' +
+          this.initResult.kind +
+          ')',
+      )
     }
   }
 
@@ -548,7 +692,11 @@ export class UpdaterE1Runtime {
       this.deps.audit?.({ event: 'update.not-available', ts: this.now() })
     }
 
-    const onDownloadProgress = (progress: { percent?: number; transferred?: number; total?: number }): void => {
+    const onDownloadProgress = (progress: {
+      percent?: number
+      transferred?: number
+      total?: number
+    }): void => {
       const raw = typeof progress?.percent === 'number' ? progress.percent / 100 : Number.NaN
       const clamped = clampProgress(raw)
       this.deps.emitState(
@@ -603,24 +751,32 @@ export class UpdaterE1Runtime {
     this.boundHandlers.set(event, handler)
   }
 
+  /**
+   * Emit an error envelope and audit event WITHOUT leaking raw error
+   * message substrings (B-R2-12). Only structured fields are forwarded.
+   */
   private emitError(err: unknown): void {
     const errorClass = classifyError(err)
-    const errorCode = (err as { code?: unknown })?.code
-    const message = (err as { message?: unknown })?.message
+    const errorCodeRaw = (err as { code?: unknown })?.code
+
+    const errorCode =
+      typeof errorCodeRaw === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(errorCodeRaw)
+        ? errorCodeRaw
+        : undefined
+
     this.deps.emitState(
       makeUpdateEnvelope({
         phase: 'error',
         channel: this.config.channel,
         errorClass,
-        errorCode: typeof errorCode === 'string' ? errorCode : undefined,
+        errorCode,
       }),
     )
     this.deps.audit?.({
       event: 'update.error',
       ts: this.now(),
       errorClass,
-      errorCode: typeof errorCode === 'string' ? errorCode : null,
-      message: typeof message === 'string' ? message : null,
+      errorCode: errorCode ?? null,
     })
   }
 }
@@ -649,14 +805,58 @@ function classifyByGate(gate: string): UpdateErrorClass {
   }
 }
 
-function readFeedUrlFromPackage(): string | null {
+/**
+ * Detect synthetic / invalid feed URLs without leaking the URL into audit
+ * logs. A URL is "invalid" if its host ends in `.invalid` (the RFC 6761
+ * reserved TLD for placeholder names) or if it is not an http(s) URL.
+ */
+function isInvalidFeed(url: string): boolean {
+  if (!/^https?:\/\//i.test(url)) {return true}
+
+  // Match the literal placeholder TLD anywhere in the URL (host may have
+  // port, path may include a channel suffix).
+  return /(^|\.)invalid(\/|$)/i.test(url)
+}
+
+/**
+ * Resolve the package metadata feed URL from `apps/desktop/package.json`.
+ *
+ * B-R2-04: this path is RELATIVE TO THIS FILE (`apps/desktop/electron/`),
+ * NOT the repo root. We resolve by walking up from this source file's
+ * location until we find a package.json whose `name === 'hermes'` (the
+ * Desktop product's own package.json), then read `build.publish.url`.
+ *
+ * The repo-root package.json is monorepo metadata and would be a
+ * cross-package mistake.
+ */
+function readFeedUrlFromDesktopPackage(): string | null {
   try {
-     
-    const pkg = require('../../package.json') as {
-      build?: { publish?: { url?: string } }
+    // Walk up from this file's location. Start from `__dirname` (when
+    // available) or fall back to a relative-from-cwd guess.
+    let dir = __dirname
+
+    for (let i = 0; i < 6; i += 1) {
+      try {
+
+        const candidate = require(path.join(dir, 'package.json')) as {
+          name?: string
+          build?: { publish?: { url?: string } }
+        }
+
+        if (candidate?.name === 'hermes' && candidate.build?.publish?.url) {
+          return candidate.build.publish.url
+        }
+      } catch {
+        // continue walking up
+      }
+
+      const parent = path.dirname(dir)
+
+      if (parent === dir) {break}
+      dir = parent
     }
 
-    return pkg?.build?.publish?.url ?? null
+    return null
   } catch {
     return null
   }
