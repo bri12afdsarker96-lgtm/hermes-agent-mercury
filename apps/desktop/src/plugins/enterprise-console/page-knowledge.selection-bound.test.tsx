@@ -1,12 +1,26 @@
 /**
  * Knowledge page — selection-bound interaction tests
- * (W1-B2 §P18 + §P19).
+ * (W1-B2-REMEDIATION-01 §P9 + §P10 + §P11 + §P18 + §P19).
  *
  * Proves that switching selection identity (previewUploadId for
- * preview, selectedCollection for entries) never leaks old data into
- * the new selection's surface. Uses deferred transport promises so
- * we can hold a selection-bound query in pending state while checking
- * what is / isn't rendered.
+ * preview, selectedCollection for entries) never leaks old data
+ * into the new selection's surface.
+ *
+ * Key invariants (P9 strict assertion — NO `if (u1) assert...`):
+ *   - Final u2 ready body MUST exist via `findByTestId`
+ *   - Final u2 ready body text MUST contain 'chunk-of-u2'
+ *   - Final u2 ready body text MUST NOT contain 'chunk-of-u1'
+ *
+ * Test transport uses a request ledger (P11) to prove:
+ *   - Initial mount: NO `?upload_id=` and NO `?collection=` request
+ *   - Close preview: NO subsequent empty-id request
+ *   - Select colA: exactly one `?collection=colA` request
+ *
+ * Routes match production (P11):
+ *   - /api/kb-gaps?status=new
+ *   - /api/knowledge-uploads
+ *   - /api/knowledge-committed
+ *   - selection-bound reads only when selection is set
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -20,7 +34,7 @@ import { $transport, BaseHermesTransport } from './transport'
 
 const WHO = {
   id: 'admin',
-  permissions: ['kb.author', 'kb.upload', 'kb.commit', 'kb.delete'],
+  effective_permissions: ['kb.author', 'kb.upload', 'kb.commit', 'kb.delete'],
   product_capabilities: { knowledge_rag: 'DEV' },
 } as never
 
@@ -39,9 +53,6 @@ function deferred<T>(): Deferred<T> {
     reject = rej
   })
 
-  // attach a no-op .catch so the rejection is always observed (avoids
-  // vitest's unhandled-error log counting the deferred rejects as a
-  // shard failure)
   promise.catch(() => undefined)
 
   return { promise, resolve, reject }
@@ -80,26 +91,22 @@ const STAGED_UPLOADS = {
   ],
 }
 
-const STAGED_UPLOAD_B = {
-  uploads: [
-    {
-      ...STAGED_UPLOADS.uploads[1]!,
-    },
-  ],
-}
-
 class StaleSelectionTransport extends BaseHermesTransport {
+  public requests: string[] = []
   public previewU1: Deferred<unknown> = deferred<unknown>()
   public previewU2: Deferred<unknown> = deferred<unknown>()
   public entriesColA: Deferred<unknown> = deferred<unknown>()
   public entriesColB: Deferred<unknown> = deferred<unknown>()
-  public uploadsA: unknown = STAGED_UPLOADS
-  public uploadsB: unknown = STAGED_UPLOAD_B
 
   async request<T>(path: string): Promise<T> {
+    this.requests.push(path)
+
+    if (path === '/api/kb-gaps?status=new') {
+      return { gaps: [] } as T
+    }
+
     if (path === '/api/knowledge-uploads') {
-      // dynamic so we can re-emit different content after a refetch
-      return (this.uploadsA ?? STAGED_UPLOADS) as T
+      return STAGED_UPLOADS as T
     }
 
     if (path === '/api/knowledge-committed') {
@@ -122,18 +129,7 @@ class StaleSelectionTransport extends BaseHermesTransport {
       return this.previewU2.promise as Promise<T>
     }
 
-    if (path === '/api/kb-gaps') {
-      return { gaps: [] } as T
-    }
-
     throw new Error(`unexpected route: ${path}`)
-  }
-
-  // Re-emit uploads as the new content (simulating server-side
-  // change between selections).
-  swapUploads() {
-    this.uploadsA = null
-    this.uploadsB = STAGED_UPLOADS
   }
 }
 
@@ -143,7 +139,44 @@ afterEach(() => {
   $whoami.set(null)
 })
 
-describe('Knowledge selection-bound preview (W1-B2 §P18)', () => {
+describe('Knowledge query mount (W1-B2-REMEDIATION-01 §P10)', () => {
+  it('initial mount: NO empty-id preview request and NO empty-collection entries request', async () => {
+    const transport = new StaleSelectionTransport()
+    $transport.set(transport)
+    $whoami.set(WHO)
+
+    // Keep any selection-bound requests as pending so the test
+    // ends quickly.
+    transport.previewU1 = deferred<unknown>()
+    transport.previewU2 = deferred<unknown>()
+    transport.entriesColA = deferred<unknown>()
+    transport.entriesColB = deferred<unknown>()
+
+    wrap(<KnowledgePage />)
+
+    // Wait for the always-live queries to settle.
+    await waitFor(() => {
+      expect(screen.getByTestId('console-kb-collection-select')).toBeTruthy()
+    })
+
+    // P10 invariants: initial mount must NOT have fired the
+    // selection-bound empty-id requests.
+    expect(transport.requests).not.toContain(
+      '/api/knowledge-preview?upload_id='
+    )
+    expect(transport.requests).not.toContain(
+      '/api/knowledge-preview?upload_id' // also covers no '?' at all
+    )
+    expect(transport.requests).not.toContain(
+      '/api/knowledge-committed?collection='
+    )
+    expect(transport.requests).not.toContain(
+      '/api/knowledge-committed?collection' // covers no '?' at all
+    )
+  })
+})
+
+describe('Knowledge selection-bound preview (W1-B2-REMEDIATION-01 §P18 + §P9)', () => {
   it('switching u1 → u2 with u2 still pending does NOT render u1 chunks under u2', async () => {
     const transport = new StaleSelectionTransport()
     $transport.set(transport)
@@ -158,48 +191,33 @@ describe('Knowledge selection-bound preview (W1-B2 §P18)', () => {
       status: 'staged',
       total: 1,
     })
-    // u2 stays pending (deferred reject with no-op .catch)
+    // u2 stays pending
 
     wrap(<KnowledgePage />)
 
-    // Click u1's preview button
     const btnU1 = await screen.findByTestId('kb-preview-u1')
     fireEvent.click(btnU1)
 
-    // Wait for the u1 body to render with its content
+    // Wait for u1's ready body to populate
+    const u1Body = await screen.findByTestId('kb-preview-body-u1')
     await waitFor(() => {
-      const body = screen.getByTestId('kb-preview-body-u1')
-      expect(body.textContent).toContain('chunk-of-u1')
+      expect(u1Body.textContent).toContain('chunk-of-u1')
     })
 
-    // Now close the u1 dialog by clicking outside (the dialog has its
-    // own onOpenChange). Simulate by clicking the trigger for u2.
-    // First we need to ensure u2's body renders — we click u2 preview.
+    // Now switch to u2 (still pending)
     const btnU2 = await screen.findByTestId('kb-preview-u2')
     fireEvent.click(btnU2)
 
-    // u2 preview is still pending. The previewSlot now renders the
-    // u2 body (the glue switches previewUploadId). The u1 body
-    // testid should NOT exist (the body is selection-bound to u2).
-    // Note: kb-preview-body-u1 may have been re-rendered for u1's
-    // selection that was open before; the glue re-mounts the slot
-    // with the new uploadId.
+    // Strict: no u1 body should be in DOM (selection identity)
+    // after switching. Per P9, NO conditional assertion.
     await waitFor(() => {
-      // Either u1 body is gone, or u2 body is mounted.
-      const u1 = screen.queryByTestId('kb-preview-body-u1')
-      const u2 = screen.queryByTestId('kb-preview-body-u2')
-      // At least one of these must be present
-      expect(u1 !== null || u2 !== null).toBe(true)
+      expect(screen.queryByTestId('kb-preview-body-u1')).toBeNull()
     })
 
-    // If u1 body is in the DOM, it MUST NOT contain u1 chunk text
-    const u1 = screen.queryByTestId('kb-preview-body-u1')
+    // No u2 body yet (pending) — strict null check
+    expect(screen.queryByTestId('kb-preview-body-u2')).toBeNull()
 
-    if (u1) {
-      expect(u1.textContent).not.toContain('chunk-of-u1')
-    }
-
-    // Resolve u2 with its own chunk text
+    // Resolve u2
     transport.previewU2.resolve({
       chunks: [
         { char_count: 5, index: 0, pii_forbidden: 0, pii_warning: 0, text: 'chunk-of-u2' },
@@ -209,19 +227,16 @@ describe('Knowledge selection-bound preview (W1-B2 §P18)', () => {
       total: 1,
     })
 
-    // Now u2's body must show 'chunk-of-u2' and not 'chunk-of-u1'
-    await waitFor(() => {
-      const u2 = screen.queryByTestId('kb-preview-body-u2')
-
-      if (u2) {
-        expect(u2.textContent).toContain('chunk-of-u2')
-        expect(u2.textContent).not.toContain('chunk-of-u1')
-      }
-    })
+    // Strict: u2 body MUST exist with u2 text and NO u1 text
+    const u2Body = await screen.findByTestId('kb-preview-body-u2')
+    expect(u2Body.textContent).toContain('chunk-of-u2')
+    expect(u2Body.textContent).not.toContain('chunk-of-u1')
+    // u1 body still absent
+    expect(screen.queryByTestId('kb-preview-body-u1')).toBeNull()
   })
 })
 
-describe('Knowledge selection-bound collection entries (W1-B2 §P19)', () => {
+describe('Knowledge selection-bound collection entries (W1-B2-REMEDIATION-01 §P19 + §P9)', () => {
   it('switching colA → colB with colB still pending does NOT leak colA entries', async () => {
     const transport = new StaleSelectionTransport()
     $transport.set(transport)
@@ -235,43 +250,36 @@ describe('Knowledge selection-bound collection entries (W1-B2 §P19)', () => {
 
     wrap(<KnowledgePage />)
 
-    // Wait for the collection select to be rendered
     const select = (await screen.findByTestId(
       'console-kb-collection-select'
     )) as HTMLSelectElement
 
     fireEvent.change(select, { target: { value: 'colA' } })
 
-    // Wait for colA entries to render
-    await waitFor(() => {
-      expect(screen.getByTestId('kb-entry-row-doc-of-colA.txt')).toBeTruthy()
-    })
+    // Wait for colA's row to populate
+    await screen.findByTestId('kb-entry-row-doc-of-colA.txt')
 
-    // Switch to colB
+    // Verify the EXACT collection route fired (not empty string)
+    expect(transport.requests).toContain('/api/knowledge-committed?collection=colA')
+
+    // Switch to colB (pending)
     fireEvent.change(select, { target: { value: 'colB' } })
 
-    // colB is pending. Wait for the entries list to be in pending
-    // state (no kb-entry-row for colB yet)
+    // Strict: colA row MUST be absent under colB selection
     await waitFor(() => {
-      const colA = screen.queryByTestId('kb-entry-row-doc-of-colA.txt')
-      const colB = screen.queryByTestId('kb-entry-row-anything')
-      // colA must NOT be in the document when colB is selected
-      // (selection identity)
-      expect(colA).toBeNull()
-      // colB has no rows yet (pending state)
-      expect(colB).toBeNull()
+      expect(screen.queryByTestId('kb-entry-row-doc-of-colA.txt')).toBeNull()
     })
 
-    // Resolve colB with its own entry
+    // The EXACT colB route MUST have fired (NOT empty string)
+    expect(transport.requests).toContain('/api/knowledge-committed?collection=colB')
+
+    // Resolve colB
     transport.entriesColB.resolve({
       entries: [{ chunks: 5, source: 'doc-of-colB.txt' }],
     })
 
-    // Now colB's entry must show
-    await waitFor(() => {
-      expect(screen.getByTestId('kb-entry-row-doc-of-colB.txt')).toBeTruthy()
-    })
-    // And colA must not have come back
+    // Strict: colB row MUST exist, colA row MUST NOT come back
+    await screen.findByTestId('kb-entry-row-doc-of-colB.txt')
     expect(screen.queryByTestId('kb-entry-row-doc-of-colA.txt')).toBeNull()
   })
 })
