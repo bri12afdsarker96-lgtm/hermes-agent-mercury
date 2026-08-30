@@ -133,6 +133,71 @@ describe('AuditPage · SC4 contract closure against PR131 frozen contracts', () 
     expect(body).not.toContain('1970')
   })
 
+  it('payload_ref is rendered as server-projected READ-ONLY evidence (the detail panel shows it as JSON, not as raw body / secret)', async () => {
+    // Per PR131 SC4 audit projection: payload_ref is part of the frozen
+    // server response and the renderer MUST render it as read-only evidence.
+    // It is NOT raw body, NOT secret, NOT credential — it is a controlled
+    // JSONB reference written by the audit writer's D11 contract.
+    $whoami.set(who({ effective_permissions: ['audit.read'] }))
+    $transport.set(
+      new (class extends BaseHermesTransport {
+        request<P>(path: string): Promise<P> {
+          if (path === '/api/audit-list') {
+            return Promise.resolve({
+              events: [
+                {
+                  action: 'kb.commit',
+                  actor: 'alice',
+                  event_id: '00000000-0000-0000-0000-000000000001',
+                  payload_ref: { delta: 'kb:doc:1 added', n: 1 },
+                  resource_ref: 'kb:doc:1',
+                  ts: '2026-08-01T12:00:00+00:00'
+                }
+              ]
+            } as P)
+          }
+
+          if (path.startsWith('/api/audit-detail')) {
+            return Promise.resolve({
+              event: {
+                action: 'kb.commit',
+                actor: 'alice',
+                event_id: '00000000-0000-0000-0000-000000000001',
+                payload_ref: { delta: 'kb:doc:1 added', n: 1 },
+                resource_ref: 'kb:doc:1',
+                ts: '2026-08-01T12:00:00+00:00'
+              }
+            } as P)
+          }
+
+          return Promise.reject(new HermesApiError(404, 'error', `unexpected route ${path}`))
+        }
+      })()
+    )
+    wrap(<AuditPage />)
+
+    await waitFor(() => expect(screen.getByTestId('console-audit')).toBeTruthy())
+    const eventButton = screen.getByTestId('console-audit-00000000-0000-0000-0000-000000000001')
+    fireEvent.click(eventButton)
+
+    await waitFor(() => expect(screen.getByTestId('console-audit-detail')).toBeTruthy())
+
+    const detail = screen.getByTestId('console-audit-detail').textContent ?? ''
+
+    // The payload_ref JSON is rendered as <pre> read-only evidence, NOT as
+    // a button/link/replay affordance. The rendered evidence must include the
+    // structured JSONB reference the server projected.
+    expect(detail).toContain('delta')
+    expect(detail).toContain('kb:doc:1 added')
+    expect(detail).toContain('n')
+    expect(detail).toContain('1')
+
+    // No mutation affordance is exposed for payload_ref.
+    expect(
+      screen.queryByRole('button', { name: /replay|retry|re-?execute|re-?send|restore|delete|mutate|payload_ref/i })
+    ).toBeNull()
+  })
+
   it('400 on detail: surfaces an honest empty state (never fakes an event)', async () => {
     $whoami.set(who({ effective_permissions: ['audit.read'] }))
     $transport.set(
@@ -270,9 +335,14 @@ describe('AuditPage · SC4 contract closure against PR131 frozen contracts', () 
     expect(src).not.toMatch(/\bFormAction\b/)
   })
 
-  it('frozen server column set: no body / no secret / no fencing token / no idempotency id', () => {
-    // Pure contract audit. If PR131 adds a column, this suite must grow in
-    // lockstep (regression on extension drift).
+  it('frozen server column set: payload_ref IS present as read-only evidence; body / secret / fencing_token / idempotency_id are NOT', () => {
+    // Pure contract audit. PR131 SC4 audit projection includes payload_ref
+    // (a controlled JSONB reference written by the audit writer's D11
+    // contract). The renderer MUST accept it and render it as read-only
+    // evidence (the detail panel's <pre>). What MUST stay absent: the raw
+    // request body, credentials, secrets, fencing tokens, idempotency ids,
+    // and tenant_id (which is RLS scope, not payload).
+    expect(SC4_AUDIT_KEYS).toContain('payload_ref')
     expect(SC4_AUDIT_KEYS).not.toContain('body')
     expect(SC4_AUDIT_KEYS).not.toContain('secret')
     expect(SC4_AUDIT_KEYS).not.toContain('fencing_token')
