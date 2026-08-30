@@ -11,6 +11,12 @@
  *   - No client ownership inference; no else-if mutual exclusivity
  *     at the view layer; each action is independently composed by
  *     the glue based on its own eligibility flag.
+ *
+ * Per LINE F (P1-SECONDARY-VISUAL-RESPONSIVE-A11Y-01):
+ *   - Visual-only additions: section aria-labelledby, row
+ *     aria-label, status aria-label, empty-text improvement,
+ *     flex-wrap for narrow viewports. NO controller, NO
+ *     contract change.
  */
 
 import { StatusDot } from '@hermes/plugin-sdk'
@@ -63,9 +69,19 @@ export function HandoffsView({
         title="Human handoff"
       />
 
-      <ConsolePanel divided title="Handoff queue">
+      <ConsolePanel
+        divided
+        title={
+          <span
+            className="text-sm font-medium"
+            id="console-handoff-queue-heading"
+          >
+            Handoff queue
+          </span>
+        }
+      >
         <QueryBody
-          emptyText="no handoffs"
+          emptyText="no handoffs — when a conversation needs a human, it lands here"
           isEmpty={(data: { available: boolean; handoffs: unknown[] }) =>
             !data.available || data.handoffs.length === 0
           }
@@ -79,11 +95,12 @@ export function HandoffsView({
             <ConsoleRows testId="console-handoffs">
               {handoffs.map((handoff) => (
                 <li
-                  className="flex min-h-16 items-center justify-between gap-4 border-b border-(--ui-stroke-tertiary) py-3 last:border-b-0"
+                  aria-label={`handoff ${handoff.msgId}, thread ${handoff.threadId}, state ${handoff.state}${handoff.ageSeconds != null ? `, ${handoff.ageSeconds}s old` : ''}`}
+                  className="flex flex-wrap items-center justify-between gap-3 border-b border-(--ui-stroke-tertiary) py-3 last:border-b-0"
                   data-testid={`console-handoff-row-${handoff.msgId}`}
                   key={handoff.msgId}
                 >
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="truncate font-medium text-(--ui-text-primary)">
                       {handoff.text}
                     </div>
@@ -97,6 +114,7 @@ export function HandoffsView({
                   <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 text-(--ui-text-secondary)">
                     {handoff.ageSeconds != null ? (
                       <span
+                        aria-label={`age ${handoff.ageSeconds} seconds`}
                         className="inline-flex items-center gap-1"
                         data-ec-mono=""
                       >
@@ -104,7 +122,10 @@ export function HandoffsView({
                         {handoff.ageSeconds}s
                       </span>
                     ) : null}
-                    <span className="inline-flex items-center gap-1">
+                    <span
+                      aria-label={`state ${handoff.state}`}
+                      className="inline-flex items-center gap-1"
+                    >
                       <StatusDot tone={handoff.stateTone} />
                       {handoff.state}
                     </span>

@@ -77,31 +77,49 @@ function CreateReminderSlot() {
       title="Create reminder"
       trigger="new reminder"
     >
+      <label className="sr-only" htmlFor="console-reminder-subject">
+        Subject id
+      </label>
       <Input
         data-testid="console-reminder-subject"
+        id="console-reminder-subject"
         onChange={(event) => setSubjectId(event.target.value)}
         placeholder="subject id"
         value={subjectId}
       />
+      <label className="sr-only" htmlFor="console-reminder-subject-type">
+        Subject type
+      </label>
       <Input
+        id="console-reminder-subject-type"
         onChange={(event) => setSubjectType(event.target.value)}
         placeholder="subject type"
         value={subjectType}
       />
       <div
+        aria-live="polite"
         className="text-xs text-muted-foreground"
         data-testid="console-reminder-timezone"
+        role="status"
       >
         timezone: {timezone}
       </div>
+      <label className="sr-only" htmlFor="console-reminder-when">
+        Scheduled for
+      </label>
       <input
         className="rounded-md border border-border bg-transparent px-2 py-1 text-sm"
         data-testid="console-reminder-when"
+        id="console-reminder-when"
         onChange={(event) => setWhen(event.target.value)}
         type="datetime-local"
         value={when}
       />
+      <label className="sr-only" htmlFor="console-reminder-title">
+        Reminder title (optional)
+      </label>
       <Input
+        id="console-reminder-title"
         onChange={(event) => setTitle(event.target.value)}
         placeholder="title (optional)"
         value={title}
