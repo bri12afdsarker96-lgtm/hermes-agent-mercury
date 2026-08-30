@@ -1,16 +1,13 @@
 /**
  * Reminders page — Presentational View layer.
  *
- * Receives fully-derived VMs + action slots from the glue. NO
- * transport, NO useQueryClient, NO session atom, NO permission
- * authority, NO `./actions` import. FormAction / ConfirmAction are
- * composed in the glue.
- *
- * Per W1-C §P24:
- *   - View MUST be a dependency leaf.
- *   - Visible copy, className, layout hierarchy, button labels,
- *     dialog titles, placeholder text, status text, section order
- *     must match pre-split exact behavior (per W1-C §P26).
+ * Per W1-C-REMEDIATION-01 §P5 + §P8:
+ *   - Available flag is propagated from the SERVER (glue),
+ *     never fabricated as `true` here.
+ *   - Action slot receives per-row eligibility flag
+ *     (canCancelFromState) derived by the VM — the view does NOT
+ *     recompute.
+ *   - View is a dependency leaf (only presentational imports).
  */
 
 import { StatusDot } from '@hermes/plugin-sdk'
@@ -22,11 +19,12 @@ import { PageStatusBadge } from './status-badge'
 import { ConsolePanel, PageHeader } from './ui'
 
 // ---------------------------------------------------------------------------
-// Action slot props
+// Action slot props (per §P8)
 // ---------------------------------------------------------------------------
 
 export interface ReminderRowActionsSlotProps {
   reminderId: string
+  canCancelFromState: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -34,16 +32,16 @@ export interface ReminderRowActionsSlotProps {
 // ---------------------------------------------------------------------------
 
 export interface RemindersViewProps {
+  available: boolean
   reminders: ReminderRowView[]
   remindersIsPending: boolean
   remindersError: unknown
   reminderRowActionsSlot: (props: ReminderRowActionsSlotProps) => ReactNode
-  // The create-action affordance (composed by the glue using
-  // FormAction with reminder.write permission).
   createSlot: ReactNode
 }
 
 export function RemindersView({
+  available,
   reminders,
   remindersIsPending,
   remindersError,
@@ -70,7 +68,7 @@ export function RemindersView({
             !data.available || data.reminders.length === 0
           }
           query={{
-            data: { available: true, reminders },
+            data: { available, reminders },
             error: remindersError,
             isPending: remindersIsPending,
           }}
@@ -94,7 +92,10 @@ export function RemindersView({
                       <StatusDot tone={reminder.tone} />
                       {reminder.state}
                     </span>
-                    {reminderRowActionsSlot({ reminderId: reminder.reminderId })}
+                    {reminderRowActionsSlot({
+                      reminderId: reminder.reminderId,
+                      canCancelFromState: reminder.canCancelFromState,
+                    })}
                   </div>
                 </li>
               ))}

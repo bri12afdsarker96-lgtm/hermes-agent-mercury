@@ -1,23 +1,22 @@
 /**
  * Reminders page — Glue layer.
  *
- * Composes:
- *   - controller (queries + mutations)
- *   - view-model (pure derivations)
- *   - view (presentational; action slots)
- *
- * Per W1-C §P23, the glue owns:
- *   - local form state (subjectType, subjectId, when, title, idempotency key)
- *   - browser timezone computation (per P14)
- *   - FormAction / ConfirmAction composition
- *   - datetime-local → epoch seconds conversion
+ * Per W1-C-REMEDIATION-01 §P5 + §P8 + §P6:
+ *   - Reads `query.data?.available ?? false` (server truth; NEVER
+ *     fabricates `available: true`).
+ *   - Uses REMINDERS_KEY constant from controller for every
+ *     invalidateKey (no literal query-key arrays in glue).
+ *   - Per-row cancel action is gated on the VM-derived
+ *     canCancelFromState flag. Glue does NOT recompute state.
+ *   - active → cancel visible; cancelled/exhausted/other → cancel
+ *     absent.
  *
  * Per W1-C §P13 (Reminders contract):
  *   - Idempotency invariant: same key on failure, rotate on success.
  *   - Cancel: only when state === 'active'; destructive confirm.
  *   - datetime-local interpreted in browser local zone; sends
  *     scheduled_for = floor(ms/1000) and the same resolved IANA
- *     timezone (no free-text timezone input).
+ *     timezone.
  */
 
 import { Input } from '@hermes/plugin-sdk'
@@ -25,13 +24,16 @@ import { useState } from 'react'
 
 import { ConfirmAction, FormAction } from './actions'
 import { fmtEpoch } from './page-kit'
-import { useKbReminders, useRemindersMutations } from './page-reminders.controller'
-import { RemindersView } from './page-reminders.view'
+import {
+  REMINDERS_KEY,
+  useKbReminders,
+  useRemindersMutations,
+} from './page-reminders.controller'
+import {
+  type ReminderRowActionsSlotProps,
+  RemindersView,
+} from './page-reminders.view'
 import { deriveReminders } from './page-reminders.view-model'
-
-// ---------------------------------------------------------------------------
-// Browser timezone (per P14 — exact current behavior)
-// ---------------------------------------------------------------------------
 
 function browserTimezone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
@@ -57,7 +59,7 @@ function CreateReminderSlot() {
         subjectType.trim().length > 0 &&
         Number.isFinite(scheduledFor)
       }
-      invalidateKey={['enterprise-console', 'reminders']}
+      invalidateKey={REMINDERS_KEY}
       onSuccess={() => setIdempotencyKey(crypto.randomUUID())}
       permission="reminder.write"
       submit={() =>
@@ -108,13 +110,20 @@ function CreateReminderSlot() {
   )
 }
 
-function ReminderRowActionsSlot({ reminderId }: { reminderId: string }) {
+function ReminderRowActionsSlot({
+  reminderId,
+  canCancelFromState,
+}: ReminderRowActionsSlotProps) {
   const mutations = useRemindersMutations()
+
+  if (!canCancelFromState) {
+    return null
+  }
 
   return (
     <ConfirmAction
       destructive
-      invalidateKey={['enterprise-console', 'reminders']}
+      invalidateKey={REMINDERS_KEY}
       permission="reminder.write"
       run={() => mutations.cancelReminder(reminderId)}
       testId={`console-reminder-cancel-${reminderId}`}
@@ -127,14 +136,14 @@ function ReminderRowActionsSlot({ reminderId }: { reminderId: string }) {
 
 export function RemindersPage() {
   const query = useKbReminders()
+  const available = query.data?.available ?? false
   const remindersVm = deriveReminders(query.data?.reminders, fmtEpoch)
 
   return (
     <RemindersView
+      available={available}
       createSlot={<CreateReminderSlot />}
-      reminderRowActionsSlot={({ reminderId }) => (
-        <ReminderRowActionsSlot reminderId={reminderId} />
-      )}
+      reminderRowActionsSlot={(props) => <ReminderRowActionsSlot {...props} />}
       reminders={remindersVm}
       remindersError={query.error}
       remindersIsPending={query.isPending}
