@@ -50,7 +50,7 @@ function HealthCardView({
   switch (healthState) {
     case 'loading':
       return (
-        <div className={HEALTH_PANEL_MIN_H} data-testid="console-health" data-health-state="loading">
+        <div className={HEALTH_PANEL_MIN_H} data-health-state="loading" data-testid="console-health">
           <Loader aria-label="health" />
           <span className="sr-only" data-testid="console-health-state">
             loading
@@ -63,7 +63,7 @@ function HealthCardView({
       // server-provided message verbatim and never invent "down".
       // The vm already collapsed `error.message` to a string.
       return (
-        <div className={HEALTH_PANEL_MIN_H} data-testid="console-health" data-health-state="error">
+        <div className={HEALTH_PANEL_MIN_H} data-health-state="error" data-testid="console-health">
           <ErrorState title="health" />
           <span className="sr-only" data-testid="console-health-state">
             error
@@ -74,7 +74,7 @@ function HealthCardView({
 
     case 'healthy':
       return (
-        <div className={HEALTH_PANEL_MIN_H} data-testid="console-health" data-health-state="healthy">
+        <div className={HEALTH_PANEL_MIN_H} data-health-state="healthy" data-testid="console-health">
           <KpiCard accent="brand" icon={icons.Activity} label="Hermes service" value="ok" />
           {/* PR18 contract — kept verbatim so existing tests stay green. */}
           <span className="sr-only" data-testid="console-health-ok">
@@ -92,7 +92,7 @@ function HealthCardView({
 
     case 'down':
       return (
-        <div className={HEALTH_PANEL_MIN_H} data-testid="console-health" data-health-state="down">
+        <div className={HEALTH_PANEL_MIN_H} data-health-state="down" data-testid="console-health">
           <KpiCard accent="brand" icon={icons.Activity} label="Hermes service" value="down" />
           {/* PR18 contract — kept verbatim. */}
           <span className="sr-only" data-testid="console-health-ok">
@@ -175,7 +175,7 @@ function MetricsCardView({
   switch (metricsState) {
     case 'loading':
       return (
-        <div className={METRICS_TILE_MIN_H} data-testid="console-metrics" data-metrics-state="loading">
+        <div className={METRICS_TILE_MIN_H} data-metrics-state="loading" data-testid="console-metrics">
           <KpiCard accent="takeover" icon={icons.Bell} label="Active alerts · 24h" loading />
           <span className="sr-only" data-testid="console-metrics-state">
             loading
@@ -185,7 +185,7 @@ function MetricsCardView({
 
     case 'error':
       return (
-        <div className={METRICS_TILE_MIN_H} data-testid="console-metrics" data-metrics-state="error">
+        <div className={METRICS_TILE_MIN_H} data-metrics-state="error" data-testid="console-metrics">
           <ErrorState title="metrics" />
           <span className="sr-only" data-testid="console-metrics-state">
             error
@@ -195,7 +195,7 @@ function MetricsCardView({
 
     case 'idle':
       return (
-        <div className={METRICS_TILE_MIN_H} data-testid="console-metrics" data-metrics-state="idle">
+        <div className={METRICS_TILE_MIN_H} data-metrics-state="idle" data-testid="console-metrics">
           <KpiCard accent="takeover" icon={icons.Bell} label="Active alerts · 24h" value={alertsCount} />
           <ConsolePanel divided title="Active alerts">
             <EmptyState className="min-h-20" title="no active alerts" />
@@ -208,7 +208,7 @@ function MetricsCardView({
 
     case 'loaded':
       return (
-        <div className={METRICS_TILE_MIN_H} data-testid="console-metrics" data-metrics-state="loaded">
+        <div className={METRICS_TILE_MIN_H} data-metrics-state="loaded" data-testid="console-metrics">
           <KpiCard accent="takeover" icon={icons.Bell} label="Active alerts · 24h" value={alertsCount} />
           <ConsolePanel divided title="Active alerts">
             {activeAlerts.length === 0 ? (
