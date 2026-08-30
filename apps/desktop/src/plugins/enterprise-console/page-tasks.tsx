@@ -1,24 +1,19 @@
 /**
  * Tasks page — Glue layer.
  *
- * Composes:
- *   - controller (queries + mutations)
- *   - view-model (pure derivations + tone tables)
- *   - view (presentational; action slots)
- *
- * Per W1-C §P23, the glue owns:
- *   - local form state (title, carrier, goal, idempotency key)
- *   - FormAction / ConfirmAction composition (these own permission +
- *     invalidation + server write)
- *   - ReactNode composition (createSlot, row action slots)
+ * Per W1-C-REMEDIATION-01 §P5 + §P7 + §P6:
+ *   - Reads `query.data?.available ?? false` (server truth; NEVER
+ *     fabricates `available: true`).
+ *   - Uses TASKS_KEY constant from controller for every invalidateKey
+ *     (no literal query-key arrays in glue).
+ *   - Per-row action composition is gated on VM-derived eligibility
+ *     flags (canRetry / canEscalate / canClose). Glue does NOT
+ *     recompute state.
+ *   - Closed + all permissions → 0 mutation controls.
  *
  * Per W1-C §P9 (Tasks contract):
- *   - Idempotency invariant: server failure → same key reused;
- *     server success → invalidate + rotate key. The local state
- *     starts as `() => crypto.randomUUID()` (one key per logical
- *     creation) and rotates only on success via onSuccess.
- *   - No optimistic task row, no client-side state machine.
- *   - retry / escalate / close only when task.state !== 'closed'.
+ *   - Idempotency invariant: server failure → same key remains;
+ *     server success → invalidate + rotate key.
  */
 
 import { Input, Textarea } from '@hermes/plugin-sdk'
@@ -27,16 +22,12 @@ import { useState } from 'react'
 import { ConfirmAction, FormAction } from './actions'
 import { fmtEpoch } from './page-kit'
 import {
+  TASKS_KEY,
   useKbTasks,
   useTasksMutations,
 } from './page-tasks.controller'
-import { TasksView } from './page-tasks.view'
+import { type TaskRowActionsSlotProps, TasksView } from './page-tasks.view'
 import { deriveBizTasks } from './page-tasks.view-model'
-
-// Note: crypto.randomUUID is a browser API available in jsdom and
-// in the Electron renderer. Per W1-C §P25, the VM must not own
-// crypto.randomUUID — only the glue (which owns the local creation
-// form state) uses it.
 
 function CreateTaskSlot() {
   const mutations = useTasksMutations()
@@ -48,7 +39,7 @@ function CreateTaskSlot() {
   return (
     <FormAction
       canSubmit={title.trim().length > 0}
-      invalidateKey={['enterprise-console', 'biz-tasks']}
+      invalidateKey={TASKS_KEY}
       onSuccess={() => setIdempotencyKey(crypto.randomUUID())}
       permission="biztask.write"
       submit={() =>
@@ -88,55 +79,68 @@ function CreateTaskSlot() {
   )
 }
 
-function TaskRowActionsSlot({ taskId }: { taskId: string }) {
+function TaskRowActionsSlot({
+  taskId,
+  canRetry,
+  canEscalate,
+  canClose,
+}: TaskRowActionsSlotProps) {
   const mutations = useTasksMutations()
 
   return (
     <>
-      <ConfirmAction
-        invalidateKey={['enterprise-console', 'biz-tasks']}
-        permission="biztask.write"
-        run={() => mutations.retryTask(taskId)}
-        testId={`console-task-retry-${taskId}`}
-        title="Retry this task?"
-      >
-        retry
-      </ConfirmAction>
-      <ConfirmAction
-        invalidateKey={['enterprise-console', 'biz-tasks']}
-        permission="biztask.escalate"
-        run={() => mutations.escalateTask(taskId)}
-        testId={`console-task-escalate-${taskId}`}
-        title="Escalate this task?"
-      >
-        escalate
-      </ConfirmAction>
-      <ConfirmAction
-        description="This closes the task on the server."
-        destructive
-        invalidateKey={['enterprise-console', 'biz-tasks']}
-        permission="biztask.write"
-        run={() => mutations.closeTask(taskId)}
-        testId={`console-task-close-${taskId}`}
-        title="Close this task?"
-      >
-        close
-      </ConfirmAction>
+      {canRetry ? (
+        <ConfirmAction
+          invalidateKey={TASKS_KEY}
+          permission="biztask.write"
+          run={() => mutations.retryTask(taskId)}
+          testId={`console-task-retry-${taskId}`}
+          title="Retry this task?"
+        >
+          retry
+        </ConfirmAction>
+      ) : null}
+      {canEscalate ? (
+        <ConfirmAction
+          invalidateKey={TASKS_KEY}
+          permission="biztask.escalate"
+          run={() => mutations.escalateTask(taskId)}
+          testId={`console-task-escalate-${taskId}`}
+          title="Escalate this task?"
+        >
+          escalate
+        </ConfirmAction>
+      ) : null}
+      {canClose ? (
+        <ConfirmAction
+          description="This closes the task on the server."
+          destructive
+          invalidateKey={TASKS_KEY}
+          permission="biztask.write"
+          run={() => mutations.closeTask(taskId)}
+          testId={`console-task-close-${taskId}`}
+          title="Close this task?"
+        >
+          close
+        </ConfirmAction>
+      ) : null}
     </>
   )
 }
 
 export function TasksPage() {
   const query = useKbTasks()
+  const available = query.data?.available ?? false
   const tasksVm = deriveBizTasks(query.data?.tasks, fmtEpoch)
 
   return (
     <TasksView
+      available={available}
       createSlot={<CreateTaskSlot />}
       tasks={tasksVm}
       tasksError={query.error}
       tasksIsPending={query.isPending}
-      tasksRowActionsSlot={({ taskId }) => <TaskRowActionsSlot taskId={taskId} />}
+      tasksRowActionsSlot={(props) => <TaskRowActionsSlot {...props} />}
     />
   )
 }

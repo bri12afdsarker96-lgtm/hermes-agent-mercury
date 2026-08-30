@@ -3,18 +3,19 @@
  *
  * Receives fully-derived VMs + action slots from the glue. NO
  * transport, NO useQueryClient, NO session atom, NO permission
- * authority, NO `./actions` import. FormAction / ConfirmAction are
- * composed in the glue.
+ * authority, NO `./actions` import.
  *
- * Per W1-C §P24:
- *   - View MUST NOT import: ./actions / ./transport / ./fetch-transport
- *     / ./session / ./capabilities / page-*.controller / useConsoleQuery
- *     / useQueryClient / useValue / global fetch / axios /
- *     window.hermesDesktop
- *   - View MUST be a dependency leaf.
- *   - Visible copy, className, layout hierarchy, button labels,
- *     dialog titles, placeholder text, status text, section order
- *     must match pre-split exact behavior (per W1-C §P26).
+ * Per W1-C-REMEDIATION-01 §P5 + §P7:
+ *   - Available flag is propagated from the SERVER (glue),
+ *     never fabricated as `true` here.
+ *   - Action slot receives per-row eligibility flags
+ *     (canRetry / canEscalate / canClose) derived by the VM
+ *     from server row state — the view does NOT recompute.
+ *   - View is a dependency leaf (only presentational imports).
+ *
+ * Per W1-C §P26: visible copy, className, layout hierarchy,
+ * testids, button labels, placeholder text, status text, and
+ * section order match pre-split exactly.
  */
 
 import { StatusDot } from '@hermes/plugin-sdk'
@@ -26,11 +27,14 @@ import { PageStatusBadge } from './status-badge'
 import { ConsolePanel, PageHeader } from './ui'
 
 // ---------------------------------------------------------------------------
-// Action slot props
+// Action slot props (per §P7)
 // ---------------------------------------------------------------------------
 
 export interface TaskRowActionsSlotProps {
   taskId: string
+  canRetry: boolean
+  canEscalate: boolean
+  canClose: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -38,16 +42,16 @@ export interface TaskRowActionsSlotProps {
 // ---------------------------------------------------------------------------
 
 export interface TasksViewProps {
+  available: boolean
   tasks: BizTaskView[]
   tasksIsPending: boolean
   tasksError: unknown
   tasksRowActionsSlot: (props: TaskRowActionsSlotProps) => ReactNode
-  // The create-action affordance (composed by the glue using
-  // FormAction with biztask.write permission).
   createSlot: ReactNode
 }
 
 export function TasksView({
+  available,
   tasks,
   tasksIsPending,
   tasksError,
@@ -74,7 +78,7 @@ export function TasksView({
             !data.available || data.tasks.length === 0
           }
           query={{
-            data: { available: true, tasks },
+            data: { available, tasks },
             error: tasksError,
             isPending: tasksIsPending,
           }}
@@ -99,7 +103,12 @@ export function TasksView({
                       <StatusDot tone={task.tone} />
                       {task.state}
                     </span>
-                    {tasksRowActionsSlot({ taskId: task.taskId })}
+                    {tasksRowActionsSlot({
+                      taskId: task.taskId,
+                      canRetry: task.canRetry,
+                      canEscalate: task.canEscalate,
+                      canClose: task.canClose,
+                    })}
                   </div>
                 </li>
               ))}
