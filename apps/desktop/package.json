@@ -291,6 +291,20 @@
       "shortcutName": "hermes_Agent",
       "uninstallDisplayName": "hermes_Agent",
       "warningsAsErrors": false
+    },
+    "publish": {
+      "provider": "generic",
+      "url": "https://updates.example.invalid/hermes-stable",
+      "channel": "stable",
+      "publishAutoUpdate": true
+    },
+    "update": {
+      "channelDefault": "stable",
+      "minimumSupportedVersion": "0.18.0",
+      "allowChannels": [
+        "stable"
+      ],
+      "v1ShippableChannel": "stable"
     }
   }
 }
