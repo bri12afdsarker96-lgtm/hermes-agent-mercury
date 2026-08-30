@@ -3,25 +3,25 @@
 /**
  * update-state-channel.ts
  *
- * P3-M4A · PHASE1-PARALLEL-ENGINEERING-01-CONTINUATION-01 · Lane B (E1 only).
+ * P3-M4A · PHASE1-PARALLEL-ENGINEERING-01-CONTINUATION-02 · Line B REMEDIATION-01
  *
  * Pure contract for progress / error state messages flowing from the main
- * process to the renderer during an update. The wire format is the
- * canonical IPC channel name + a frozen-state envelope.
+ * process to the renderer during an update. The wire format is the canonical
+ * IPC channel name + a frozen-state envelope.
  *
- * Per CONTINUATION-01 §P5.3 (E1 scope):
- *   - "progress/error state transport" — this module IS that contract.
- *   - "minimum-supported-version plumbing" — exposes it as part of the
- *     state envelope.
+ * Per REMEDIATION-01 §10/§11/§13/§15/§16:
+ *   - Wire real updater events/state into the E1 state contract.
+ *   - Strict validated semantic-version parser (NOT permissive semver-loose).
+ *   - NO hard-coded minimum-supported-version (was 0.18.0 in pre-remediation
+ *     branch — REMEDIATION-01 §15 explicitly REJECTED that as unauthorized
+ *     product policy).
+ *   - Channel policy is enforced upstream in update-channel.ts; this module
+ *     consumes the resolved channel string and the V1-shippable predicate.
  *
  * This module is PURE:
  *   - No Electron import, no IPC, no node APIs beyond `Object.freeze`.
  *   - No real signing secret reference.
  *   - No side effects beyond frozen module-scope constants.
- *
- * The host (main process) is responsible for ACTUALLY pushing these states
- * to the renderer. The contract here is the consumer-side schema and the
- * dispatcher-side helper.
  */
 
 export type UpdatePhase =
@@ -73,11 +73,23 @@ export interface UpdateStateEnvelope {
   ts?: number
 }
 
+/**
+ * REMEDIATION-01 §15: minimum-supported-version is NOT a hard-coded product
+ * decision. It is configuration / update metadata / release-policy input.
+ *
+ * Until TOTAL-CONTROL authorizes a specific value, the policy is
+ * `NOT_ESTABLISHED` and any caller passing `undefined` (or the explicit
+ * `NOT_ESTABLISHED_MINIMUM_VERSION` sentinel below) receives an honest
+ * "policy missing" error instead of an invented default.
+ */
+export const NOT_ESTABLISHED_MINIMUM_VERSION = '__NOT_ESTABLISHED__'
+
+export type MinimumVersionPolicy =
+  | { kind: 'configured'; version: string }
+  | { kind: 'not-established' }
+
 /** Canonical IPC channel name for the update state stream. */
 export const UPDATE_STATE_CHANNEL = 'hermes:update-state'
-
-/** Minimal minimum-supported-version floor for V1. */
-export const V1_MINIMUM_SUPPORTED_VERSION = '0.18.0'
 
 /** Pure producer-side helper: build a frozen envelope. */
 export function makeUpdateEnvelope(
@@ -116,56 +128,146 @@ export function isValidUpdateErrorClass(value: unknown): value is UpdateErrorCla
 }
 
 /**
- * Pure helper: assert the installed version is at or above
- * ``V1_MINIMUM_SUPPORTED_VERSION``. Used by the host before pushing
- * 'downloaded' or 'installing' envelopes.
+ * REMEDIATION-01 §16: strict validated semver parser. Replaces the previous
+ * `compareSemverLoose` helper which silently turned malformed components
+ * into numeric zero (e.g. "1.2.banana" → "1.2.0").
+ *
+ * Strict rules:
+ *   - Accepts core semver X.Y.Z (each component a non-negative integer).
+ *   - Accepts missing components: "1.2" → "1.2.0", "1" → "1.0.0".
+ *   - Rejects empty strings, non-numeric components, leading zeros, and any
+ *     pre-release / build-metadata suffix (not required by V1 floor check).
+ *   - Pre-release and build-metadata variants are E2 concerns; this module
+ *     does NOT decide them.
  */
-export function assertMinimumVersionSupported(
-  currentVersion: string,
-  minimum: string = V1_MINIMUM_SUPPORTED_VERSION,
-): { ok: true } | { ok: false; reason: UpdateErrorClass; message: string } {
-  if (typeof currentVersion !== 'string' || !currentVersion) {
-    return {
-      ok: false,
-      reason: 'minimum-version',
-      message: `currentVersion missing or empty (got ${JSON.stringify(currentVersion)})`,
-    }
+const STRICT_SEMVER_RE = /^(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){0,2}$/
+
+export type StrictSemverResult =
+  | { ok: true; components: readonly [number, number, number] }
+  | { ok: false; reason: 'empty' | 'malformed' }
+
+export function parseStrictSemver(value: unknown): StrictSemverResult {
+  if (typeof value !== 'string' || value.length === 0) {
+    return { ok: false, reason: 'empty' }
   }
-  const cmp = compareSemverLoose(currentVersion, minimum)
-  if (cmp < 0) {
-    return {
-      ok: false,
-      reason: 'minimum-version',
-      message: `currentVersion ${currentVersion} < required ${minimum}`,
-    }
+
+  if (!STRICT_SEMVER_RE.test(value)) {
+    return { ok: false, reason: 'malformed' }
   }
-  return { ok: true }
+
+  const parts = value.split('.').map((p) => Number.parseInt(p, 10))
+  const major = parts[0] ?? 0
+  const minor = parts[1] ?? 0
+  const patch = parts[2] ?? 0
+
+  return { ok: true, components: [major, minor, patch] as const }
+}
+
+export type CompareSemverResult = -1 | 0 | 1
+
+/**
+ * Compare two version strings strictly. Returns:
+ *   -1 when `a < b`
+ *    0 when `a === b`
+ *    1 when `a > b`
+ *
+ * Either input malformed → throws `RangeError` (deliberate, so a malformed
+ * version cannot silently pass an install gate).
+ */
+export function compareStrictSemver(a: unknown, b: unknown): CompareSemverResult {
+  const pa = parseStrictSemver(a)
+  const pb = parseStrictSemver(b)
+
+  if (pa.ok === false) {
+    throw new RangeError(`compareStrictSemver: invalid version a=${JSON.stringify(a)} (${pa.reason})`)
+  }
+
+  if (pb.ok === false) {
+    throw new RangeError(`compareStrictSemver: invalid version b=${JSON.stringify(b)} (${pb.reason})`)
+  }
+
+  for (let i = 0; i < 3; i += 1) {
+    const na = pa.components[i]
+    const nb = pb.components[i]
+
+    if (na < nb) {return -1}
+
+    if (na > nb) {return 1}
+  }
+
+  return 0
 }
 
 /**
- * Loose semver compare: handles `1.2`, `1.2.3`, `1.2.3-pre`, `1.2.3+meta`.
- * Returns -1 / 0 / 1 like `Array.prototype.sort`.
+ * Pure helper: assert the installed version meets the policy-provided
+ * minimum. Used by the host before pushing 'downloaded' or 'installing'
+ * envelopes, and by evaluateRestartInstall before allowing install.
  *
- * Loose because we do NOT need full semver semantics for the V1 floor check —
- * we only need to know "is current >= minimum". For production upgrade logic
- * (E2 contract) use a real semver library.
+ * REMEDIATION-01 §15: minimum is required. `undefined` is rejected with
+ * `policy-not-established`; the sentinel `NOT_ESTABLISHED_MINIMUM_VERSION`
+ * is the explicit marker an honest host emits when the release policy has
+ * not yet been set.
  */
-export function compareSemverLoose(a: string, b: string): -1 | 0 | 1 {
-  const parse = (s: string): number[] => {
-    const core = s.split('-')[0].split('+')[0]
-    return core.split('.').map((p) => {
-      const n = Number.parseInt(p, 10)
-      return Number.isFinite(n) ? n : 0
-    })
+export type MinimumVersionGateResult =
+  | { ok: true }
+  | {
+      ok: false
+      reason: UpdateErrorClass | 'policy-not-established' | 'malformed-version'
+      message: string
+    }
+
+export function assertMinimumVersionSupported(
+  currentVersion: unknown,
+  minimum: unknown,
+): MinimumVersionGateResult {
+  const currentParsed = parseStrictSemver(currentVersion)
+
+  if (currentParsed.ok === false) {
+    return {
+      ok: false,
+      reason: 'malformed-version',
+      message: `currentVersion not strict semver (got ${JSON.stringify(currentVersion)}, ${currentParsed.reason})`,
+    }
   }
-  const pa = parse(a)
-  const pb = parse(b)
-  const len = Math.max(pa.length, pb.length)
-  for (let i = 0; i < len; i++) {
-    const na = pa[i] ?? 0
-    const nb = pb[i] ?? 0
-    if (na < nb) return -1
-    if (na > nb) return 1
+
+  if (
+    minimum === undefined ||
+    minimum === null ||
+    minimum === '' ||
+    minimum === NOT_ESTABLISHED_MINIMUM_VERSION
+  ) {
+    return {
+      ok: false,
+      reason: 'policy-not-established',
+      message: 'minimum-supported-version policy not established; refusing to pass install gate',
+    }
   }
-  return 0
+
+  const minimumParsed = parseStrictSemver(minimum)
+
+  if (minimumParsed.ok === false) {
+    return {
+      ok: false,
+      reason: 'malformed-version',
+      message: `minimumVersion not strict semver (got ${JSON.stringify(minimum)}, ${minimumParsed.reason})`,
+    }
+  }
+
+  try {
+    if (compareStrictSemver(currentVersion, minimum) < 0) {
+      return {
+        ok: false,
+        reason: 'minimum-version',
+        message: `currentVersion ${String(currentVersion)} < required ${String(minimum)}`,
+      }
+    }
+  } catch {
+    return {
+      ok: false,
+      reason: 'malformed-version',
+      message: 'strict semver compare threw',
+    }
+  }
+
+  return { ok: true }
 }

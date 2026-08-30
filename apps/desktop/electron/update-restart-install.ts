@@ -3,31 +3,39 @@
 /**
  * update-restart-install.ts
  *
- * P3-M4A · PHASE1-PARALLEL-ENGINEERING-01-CONTINUATION-01 · Lane B (E1 only).
+ * P3-M4A · PHASE1-PARALLEL-ENGINEERING-01-CONTINUATION-02 · Line B REMEDIATION-01
  *
  * Pure wiring contract for restart-install. The actual Electron quit /
  * install / relaunch is performed by the host (main process) via the
- * existing `applyUpdates()` and `updater-process.ts` seams — this module
- * only computes:
+ * existing `applyUpdates()` and `updater-process.ts` seams plus the
+ * official `electron-updater` AppUpdater (see updater-e1.ts) — this
+ * module only computes:
  *   - whether restart-install is safe to request,
  *   - what minimum gates must pass before the request,
  *   - the serialized payload describing the restart to the host.
  *
- * Per CONTINUATION-01 §P5.3 (E1 scope):
- *   - "restart-install wiring" — this module IS that contract layer.
- *   - "minimum-supported-version plumbing" — reuses update-state-channel.
- *   - "audit/metrics hook seam" — `recordRestartAuditEvent` stub.
+ * Per REMEDIATION-01 §13/§14:
+ *   - "restart-install" MUST NOT accept beta/internal merely because
+ *     channel string != "". `isV1ShippableChannel` is enforced.
+ *   - Restart gate sequence (all required):
+ *       channel-resolved → v1-shippable-channel → minimum-version →
+ *       no-pending-mutations → safeStorage-preserved → user-confirmed
+ *   - minimum-supported-version is REQUIRED (no default to a hard-coded
+ *     value). Host MUST supply it from policy / config / release metadata
+ *     or pass `NOT_ESTABLISHED_MINIMUM_VERSION` to fail-closed.
  *
  * NO real signing secret. NO daemon lifecycle. NO actual quit / install.
  */
 
+import { isV1ShippableChannel, type UpdateChannelName } from './update-channel'
 import {
-  V1_MINIMUM_SUPPORTED_VERSION,
   assertMinimumVersionSupported,
+  NOT_ESTABLISHED_MINIMUM_VERSION,
 } from './update-state-channel'
 
 export type RestartInstallGate =
   | 'channel-resolved'
+  | 'v1-shippable-channel'
   | 'minimum-version'
   | 'no-pending-mutations'
   | 'safeStorage-preserved'
@@ -45,16 +53,20 @@ export type RestartInstallDecision =
 export interface RestartInstallInput {
   /** Resolved channel name from update-channel.ts. */
   channel: string
-  /** Currently installed version. */
+  /** Currently installed version (strict semver). */
   currentVersion: string
+  /**
+   * Minimum-supported-version from policy. REQUIRED. If left as
+   * NOT_ESTABLISHED_MINIMUM_VERSION (or undefined) the gate fails closed
+   * with reason `policy-not-established` (REMEDIATION-01 §15).
+   */
+  minimumVersion: string | typeof NOT_ESTABLISHED_MINIMUM_VERSION
   /** Whether pending local mutations (uncommitted drafts, etc.) exist. */
   hasPendingMutations: boolean
   /** Whether safeStorage / userData preservation has been verified. */
   safeStoragePreserved: boolean
   /** Whether the user has explicitly confirmed restart. */
   userConfirmed: boolean
-  /** Optional override for the minimum-supported-version floor. */
-  minimumVersion?: string
 }
 
 /** Pure: evaluate all gates; never throws. */
@@ -62,36 +74,54 @@ export function evaluateRestartInstall(
   input: RestartInstallInput,
 ): RestartInstallDecision {
   const ts = Date.now()
+
   const failed: { gate: RestartInstallGate; reason: string } | null = (() => {
     if (!input.channel || typeof input.channel !== 'string') {
       return { gate: 'channel-resolved', reason: 'channel missing' }
     }
+
+    // V1 channel restriction — REMEDIATION-01 §14. Must be enforced even
+    // when channel is non-empty.
+    if (!isV1ShippableChannel(input.channel as UpdateChannelName)) {
+      return {
+        gate: 'v1-shippable-channel',
+        reason: `channel ${input.channel} is not V1-shippable (only "stable" is)`,
+      }
+    }
+
     const mv = assertMinimumVersionSupported(
       input.currentVersion,
-      input.minimumVersion ?? V1_MINIMUM_SUPPORTED_VERSION,
+      input.minimumVersion,
     )
-    if (!mv.ok) {
+
+    if (mv.ok === false) {
       return { gate: 'minimum-version', reason: mv.message }
     }
+
     if (input.hasPendingMutations) {
       return { gate: 'no-pending-mutations', reason: 'pending mutations present' }
     }
+
     if (!input.safeStoragePreserved) {
       return { gate: 'safeStorage-preserved', reason: 'safeStorage not verified' }
     }
+
     if (!input.userConfirmed) {
       return { gate: 'user-confirmed', reason: 'user confirmation missing' }
     }
+
     return null
   })()
 
   if (failed !== null) {
     return { ok: false, failedGate: failed.gate, reason: failed.reason, ts }
   }
+
   return {
     ok: true,
     gates: [
       'channel-resolved',
+      'v1-shippable-channel',
       'minimum-version',
       'no-pending-mutations',
       'safeStorage-preserved',
@@ -105,9 +135,6 @@ export function evaluateRestartInstall(
  * Pure: produce the audit/metrics hook payload for a successful restart-install
  * request. The host is responsible for actually emitting the metric; this
  * function only computes the payload.
- *
- * Audit / metrics is an E1 SEAM, not an E1 contract. Per CONTINUATION-01
- * §P5.3 we only ship the contract here; the actual emitter lands in E2.
  */
 export interface RestartAuditEvent {
   event: 'update.restart-install.requested'
@@ -126,7 +153,10 @@ export function recordRestartAuditEvent(
     event: 'update.restart-install.requested',
     channel: input.channel,
     currentVersion: input.currentVersion,
-    minimumVersion: input.minimumVersion ?? V1_MINIMUM_SUPPORTED_VERSION,
+    minimumVersion:
+      input.minimumVersion === NOT_ESTABLISHED_MINIMUM_VERSION
+        ? 'NOT_ESTABLISHED'
+        : input.minimumVersion,
     gates: decision.gates,
     ts: decision.ts,
   }

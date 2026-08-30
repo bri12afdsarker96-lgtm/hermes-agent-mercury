@@ -56,6 +56,7 @@ export const DEFAULT_UPDATE_CHANNEL: UpdateChannelName = 'stable'
  */
 export function resolveUpdateChannel(env: NodeJS.ProcessEnv = process.env): ResolvedUpdateChannel {
   const raw = (env.HERMES_UPDATE_CHANNEL ?? '').toString().trim().toLowerCase()
+
   if (!raw) {
     return {
       name: DEFAULT_UPDATE_CHANNEL,
@@ -66,6 +67,7 @@ export function resolveUpdateChannel(env: NodeJS.ProcessEnv = process.env): Reso
   }
 
   const named = ALLOWED_UPDATE_CHANNELS.find((c) => c === raw)
+
   if (named === undefined) {
     // Unknown channel → silent fallback to default. The host MUST log this.
     return {

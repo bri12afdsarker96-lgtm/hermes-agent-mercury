@@ -323,6 +323,11 @@ import { waitForUpdateClearance } from './update-gate'
 import { readLiveUpdateMarker, updateHandoffConflict, writeUpdateMarker } from './update-marker'
 import { isOfficialSshRemote, OFFICIAL_REPO_HTTPS_URL } from './update-remote'
 import {
+  UpdaterE1Runtime,
+  type UpdaterE1Deps,
+  type UpdaterE1InitResult,
+} from './updater-e1'
+import {
   collectRelaunchArgs,
   observeUpdaterHandoff,
   resolvePosixScriptHandoff,
@@ -15379,6 +15384,11 @@ app.whenReady().then(() => {
   // here and surfaced in Settings via the IPC state (never silent).
   applyQuickEntrySettings(readQuickEntrySettings())
 
+  // P3-M4A · Line B REMEDIATION-01 — bootstrap the E1 packaged-update
+  // runtime. No-op in dev/source builds (when !app.isPackaged). See
+  // apps/desktop/electron/updater-e1.ts for the bounded composition.
+  bootstrapUpdaterE1()
+
   if (IS_MAC) {
     const reposition = () => wakeIndicatorController.reposition()
 
@@ -15581,3 +15591,44 @@ app.on('window-all-closed', () => {
     app.quit()
   }
 })
+
+// ────────────────────────────────────────────────────────────────────────────
+// P3-M4A · Line B REMEDIATION-01 — packaged-update E1 bootstrap
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Bounded composition over the official `electron-updater` seam. Exists
+// alongside the existing Hermes source/git updater; it does NOT replace
+// update-gate / update-marker / updater-process / applyUpdates. In dev
+// builds (app.isPackaged === false) it emits a single `idle` envelope
+// and returns disabled — the existing source updater remains the
+// authoritative path. See apps/desktop/electron/updater-e1.ts.
+
+let __updaterE1Runtime: UpdaterE1Runtime | null = null
+
+function bootstrapUpdaterE1(): UpdaterE1InitResult {
+  const runtime = new UpdaterE1Runtime(
+    {
+      app,
+      emitState: (envelope) => {
+        // The renderer is OUT OF SCOPE for E1 (REMEDIATION-01 §12).
+        // The envelope is logged via the existing desktop log seam so a
+        // future renderer bridge (out of scope here) can subscribe.
+        try {
+          rememberLog(`[update-e1] phase=${envelope.phase} channel=${envelope.channel ?? 'unknown'}`)
+        } catch {
+          // rememberLog may not be initialized in every code path; never
+          // throw from the updater seam.
+        }
+      },
+    },
+    {
+      currentVersion: app.getVersion(),
+    },
+  )
+  __updaterE1Runtime = runtime
+  return runtime.initialize()
+}
+
+export function __updaterE1ForTesting(): UpdaterE1Runtime | null {
+  return __updaterE1Runtime
+}
