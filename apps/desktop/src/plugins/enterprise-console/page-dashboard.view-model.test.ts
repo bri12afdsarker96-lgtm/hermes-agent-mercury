@@ -242,3 +242,283 @@ describe('workspaceCopy (view-model helper)', () => {
     expect(workspaceCopy(null).title).toBe('Workspace')
   })
 })
+
+/**
+ * V0 productization truth-surface tests (P1-VIS-V0).
+ *
+ * These tests lock the four-state truth derivations in place so the
+ * view can render without ever confusing:
+ *   - LOADING with ZERO
+ *   - ERROR with DOWN
+ *   - fabricated KPI with honest empty
+ *   - missing session with anonymous session
+ *
+ * Every assertion maps to one P5 invariant from the directive.
+ */
+
+describe('deriveDashboardViewModel · V0 four-state truth surface', () => {
+  const page = dashboardPage()
+
+  describe('healthState (LOADING / ERROR / HEALTHY / DOWN)', () => {
+    it('pending → loading (NOT down)', () => {
+      const vm = deriveDashboardViewModel({
+        page,
+        whoami: operatorWhoami,
+        health: null,
+        healthPending: true,
+        healthError: null,
+        metrics: null,
+        metricsPending: false,
+        metricsError: null,
+      })
+      expect(vm.healthState).toBe('loading')
+    })
+
+    it('error → error (NEVER down)', () => {
+      const vm = deriveDashboardViewModel({
+        page,
+        whoami: operatorWhoami,
+        health: null,
+        healthPending: false,
+        healthError: new Error('request failed'),
+        metrics: null,
+        metricsPending: false,
+        metricsError: null,
+      })
+      expect(vm.healthState).toBe('error')
+    })
+
+    it('health.ok === true → healthy', () => {
+      const vm = deriveDashboardViewModel({
+        page,
+        whoami: operatorWhoami,
+        health: baseHealth,
+        healthPending: false,
+        healthError: null,
+        metrics: null,
+        metricsPending: false,
+        metricsError: null,
+      })
+      expect(vm.healthState).toBe('healthy')
+    })
+
+    it('health.ok === false → down', () => {
+      const vm = deriveDashboardViewModel({
+        page,
+        whoami: operatorWhoami,
+        health: { ...baseHealth, ok: false },
+        healthPending: false,
+        healthError: null,
+        metrics: null,
+        metricsPending: false,
+        metricsError: null,
+      })
+      expect(vm.healthState).toBe('down')
+    })
+
+    it('answered but health === null → error (NOT down)', () => {
+      const vm = deriveDashboardViewModel({
+        page,
+        whoami: operatorWhoami,
+        health: null,
+        healthPending: false,
+        healthError: null,
+        metrics: null,
+        metricsPending: false,
+        metricsError: null,
+      })
+      expect(vm.healthState).toBe('error')
+    })
+  })
+
+  describe('metricsState (LOADING / ERROR / IDLE / LOADED)', () => {
+    it('pending → loading (NOT loaded-empty)', () => {
+      const vm = deriveDashboardViewModel({
+        page,
+        whoami: operatorWhoami,
+        health: baseHealth,
+        healthPending: false,
+        healthError: null,
+        metrics: null,
+        metricsPending: true,
+        metricsError: null,
+      })
+      expect(vm.metricsState).toBe('loading')
+    })
+
+    it('error → error', () => {
+      const vm = deriveDashboardViewModel({
+        page,
+        whoami: operatorWhoami,
+        health: baseHealth,
+        healthPending: false,
+        healthError: null,
+        metrics: null,
+        metricsPending: false,
+        metricsError: new Error('boom'),
+      })
+      expect(vm.metricsState).toBe('error')
+    })
+
+    it('answered but metrics.alerts key absent → idle (no fabricated empty)', () => {
+      const vm = deriveDashboardViewModel({
+        page,
+        whoami: operatorWhoami,
+        health: baseHealth,
+        healthPending: false,
+        healthError: null,
+        // `alerts` key explicitly absent
+        metrics: { errors: {} } as Metrics,
+        metricsPending: false,
+        metricsError: null,
+      })
+      expect(vm.metricsState).toBe('idle')
+    })
+
+    it('answered with alerts: [] → loaded (honest empty)', () => {
+      const vm = deriveDashboardViewModel({
+        page,
+        whoami: operatorWhoami,
+        health: baseHealth,
+        healthPending: false,
+        healthError: null,
+        metrics: { alerts: [], errors: {} },
+        metricsPending: false,
+        metricsError: null,
+      })
+      expect(vm.metricsState).toBe('loaded')
+    })
+
+    it('answered with non-empty alerts → loaded', () => {
+      const vm = deriveDashboardViewModel({
+        page,
+        whoami: operatorWhoami,
+        health: baseHealth,
+        healthPending: false,
+        healthError: null,
+        metrics: {
+          alerts: [{ code: 'C1', level: 'warn', message: 'msg' }],
+          errors: {},
+        },
+        metricsPending: false,
+        metricsError: null,
+      })
+      expect(vm.metricsState).toBe('loaded')
+    })
+  })
+
+  describe('identityState', () => {
+    it('whoami present → authenticated', () => {
+      const vm = deriveDashboardViewModel({
+        page,
+        whoami: operatorWhoami,
+        health: baseHealth,
+        healthPending: false,
+        healthError: null,
+        metrics: null,
+        metricsPending: false,
+        metricsError: null,
+      })
+      expect(vm.identityState).toBe('authenticated')
+    })
+
+    it('whoami null → missing (NEVER "anonymous")', () => {
+      const vm = deriveDashboardViewModel({
+        page,
+        whoami: null,
+        health: baseHealth,
+        healthPending: false,
+        healthError: null,
+        metrics: null,
+        metricsPending: false,
+        metricsError: null,
+      })
+      expect(vm.identityState).toBe('missing')
+    })
+  })
+
+  describe('alertsCount / isAlertsListEmpty / activeAlerts', () => {
+    it('alertsCount mirrors activeAlerts.length, never invents a number', () => {
+      const vm1 = deriveDashboardViewModel({
+        page,
+        whoami: operatorWhoami,
+        health: baseHealth,
+        healthPending: false,
+        healthError: null,
+        metrics: { alerts: [], errors: {} },
+        metricsPending: false,
+        metricsError: null,
+      })
+      expect(vm1.alertsCount).toBe(0)
+      expect(vm1.isAlertsListEmpty).toBe(true)
+      expect(vm1.activeAlerts).toHaveLength(0)
+
+      const vm2 = deriveDashboardViewModel({
+        page,
+        whoami: operatorWhoami,
+        health: baseHealth,
+        healthPending: false,
+        healthError: null,
+        metrics: {
+          alerts: [
+            { code: 'A', level: 'warn', message: '1' },
+            { code: 'B', level: 'error', message: '2' },
+          ],
+          errors: {},
+        },
+        metricsPending: false,
+        metricsError: null,
+      })
+      expect(vm2.alertsCount).toBe(2)
+      expect(vm2.isAlertsListEmpty).toBe(false)
+    })
+
+    it('metrics payload without alerts key → activeAlerts = [] BUT NOT via fabrication', () => {
+      const vm = deriveDashboardViewModel({
+        page,
+        whoami: operatorWhoami,
+        health: baseHealth,
+        healthPending: false,
+        healthError: null,
+        metrics: { errors: {} } as Metrics,
+        metricsPending: false,
+        metricsError: null,
+      })
+      expect(vm.alertsCount).toBe(0)
+      expect(vm.activeAlerts).toEqual([])
+      // the `idle` metrics state proves we distinguished "answer has no
+      // alerts key" from "answer says zero alerts"
+      expect(vm.metricsState).toBe('idle')
+    })
+  })
+
+  describe('authModeDisplay', () => {
+    it('auth_mode present → rendered string', () => {
+      const vm = deriveDashboardViewModel({
+        page,
+        whoami: operatorWhoami,
+        health: { ...baseHealth, auth_mode: 'onecard' },
+        healthPending: false,
+        healthError: null,
+        metrics: null,
+        metricsPending: false,
+        metricsError: null,
+      })
+      expect(vm.authModeDisplay).toBe('onecard')
+    })
+
+    it('auth_mode absent → em dash (matches KpiCard null fallback)', () => {
+      const vm = deriveDashboardViewModel({
+        page,
+        whoami: operatorWhoami,
+        health: null,
+        healthPending: false,
+        healthError: null,
+        metrics: null,
+        metricsPending: false,
+        metricsError: null,
+      })
+      expect(vm.authModeDisplay).toBe('—')
+    })
+  })
+})

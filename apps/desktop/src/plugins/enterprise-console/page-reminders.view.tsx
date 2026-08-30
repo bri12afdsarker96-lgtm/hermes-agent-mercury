@@ -8,6 +8,12 @@
  *     (canCancelFromState) derived by the VM — the view does NOT
  *     recompute.
  *   - View is a dependency leaf (only presentational imports).
+ *
+ * Per LINE F (P1-SECONDARY-VISUAL-RESPONSIVE-A11Y-01):
+ *   - Visual-only additions: section aria-labelledby, row
+ *     aria-label, status aria-label, empty-text improvement,
+ *     flex-wrap for narrow viewports. NO controller, NO
+ *     contract change.
  */
 
 import { StatusDot } from '@hermes/plugin-sdk'
@@ -63,7 +69,7 @@ export function RemindersView({
 
       <ConsolePanel divided title="Schedule">
         <QueryBody
-          emptyText="no reminders"
+          emptyText="no reminders — schedule one with the new-reminder control above"
           isEmpty={(data: { available: boolean; reminders: unknown[] }) =>
             !data.available || data.reminders.length === 0
           }
@@ -77,6 +83,7 @@ export function RemindersView({
             <ConsoleRows testId="console-reminders">
               {reminders.map((reminder) => (
                 <li
+                  aria-label={`reminder ${reminder.title}, scheduled ${reminder.scheduledForDisplay} ${reminder.timezone}, state ${reminder.state}`}
                   className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
                   data-testid={`console-reminder-row-${reminder.reminderId}`}
                   key={reminder.reminderId}
@@ -88,7 +95,10 @@ export function RemindersView({
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1 text-xs">
+                    <span
+                      aria-label={`state ${reminder.state}`}
+                      className="inline-flex items-center gap-1 text-xs"
+                    >
                       <StatusDot tone={reminder.tone} />
                       {reminder.state}
                     </span>

@@ -51,8 +51,15 @@ function ReplyActionSlot({ msgId }: { msgId: string }) {
       title="Reply to this handoff"
       trigger="reply"
     >
+      <label
+        className="sr-only"
+        htmlFor={`console-handoff-reply-text-${msgId}`}
+      >
+        Reply text
+      </label>
       <Textarea
         data-testid={`console-handoff-reply-text-${msgId}`}
+        id={`console-handoff-reply-text-${msgId}`}
         onChange={(event) => setText(event.target.value)}
         placeholder="reply text"
         value={text}

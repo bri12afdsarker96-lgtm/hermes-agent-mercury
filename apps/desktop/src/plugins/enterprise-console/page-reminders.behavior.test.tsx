@@ -184,7 +184,9 @@ describe('Reminders direct behavior (W1-C-REM-01 §P11)', () => {
 
     wrap(<RemindersPage />)
 
-    await waitFor(() => expect(screen.getByText('no reminders')).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText(/^no reminders/)).toBeTruthy()
+    )
     expect(screen.queryByText('Should not render')).toBeNull()
     expect(screen.queryByTestId('console-reminder-row-r1')).toBeNull()
     expect(screen.queryByTestId('console-reminder-cancel-r1')).toBeNull()

@@ -18,6 +18,13 @@
  *   - Pre-split className preserved EXACTLY (DEV banner
  *     `px-3 py-2 text-(--ui-text-secondary)`).
  *   - Pre-split section order preserved: [candidates, uploads, sources].
+ *
+ * Per LINE F (P1-SECONDARY-VISUAL-RESPONSIVE-A11Y-01):
+ *   - Visual-only additions: aria-label on icon-only controls,
+ *     role="status"/role="alert" on live regions, semantic
+ *     <article> for row lists, label htmlFor on form fields,
+ *     responsive grid breakpoint (lg:grid-cols-1 to xl:grid-cols-2)
+ *     for narrow viewports. NO controller, NO contract change.
  */
 
 import {
@@ -122,8 +129,10 @@ export function KnowledgeView({
 
       {capabilityStatus && capabilityStatus !== 'LIVE' ? (
         <div
+          aria-live="polite"
           className="mb-(--ec-gutter) flex items-center gap-2 rounded-(--ec-panel-radius) border border-(--ui-stroke-secondary) bg-(--ui-bg-card) px-3 py-2 text-(--ui-text-secondary)"
           data-testid="console-knowledge-dev"
+          role="status"
         >
           <CapabilityBadge status={capabilityStatus} />
           <span>knowledge RAG is not production-live on this server</span>
@@ -132,8 +141,10 @@ export function KnowledgeView({
 
       {/* Parent-exact grid hierarchy (98e74dd9...):
           GRID CHILD 1 (LEFT column) = Uploads + Sources (in this DOM order)
-          GRID CHILD 2 (RIGHT column) = Candidates */}
-      <div className="grid items-start gap-(--ec-gutter) xl:grid-cols-2">
+          GRID CHILD 2 (RIGHT column) = Candidates
+          Per LINE F: narrower viewports (below xl) collapse to a
+          single column so primary actions remain reachable. */}
+      <div className="grid items-start gap-(--ec-gutter) lg:grid-cols-1 xl:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-(--ec-gutter)">
           <UploadsSection
             uploads={uploads}
@@ -184,13 +195,21 @@ function UploadsSection({
   uploadsRowActionsSlot,
 }: UploadsSectionProps) {
   return (
-    <section data-testid="console-kb-uploads-section">
+    <section
+      aria-labelledby="console-kb-uploads-heading"
+      data-testid="console-kb-uploads-section"
+    >
       <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground">uploads</span>
+        <h2
+          className="text-xs font-medium text-muted-foreground"
+          id="console-kb-uploads-heading"
+        >
+          uploads
+        </h2>
         {uploadsPanelSlot}
       </div>
       <QueryBody
-        emptyText="no uploads"
+        emptyText="no uploads — drop a source file above to start staging"
         isEmpty={(data: { uploads: unknown[] }) =>
           (data.uploads ?? []).length === 0
         }
@@ -204,20 +223,24 @@ function UploadsSection({
           <ConsoleRows testId="console-kb-uploads">
             {uploads.map((upload) => (
               <li
-                className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
+                aria-label={`upload ${upload.filename}, status ${upload.status}`}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
                 data-testid={`kb-upload-row-${upload.uploadId}`}
                 data-upload-status={upload.status}
                 key={upload.uploadId}
               >
-                <div className="min-w-0">
-                  <div className="truncate">{upload.filename}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium">{upload.filename}</div>
                   <div className="text-xs text-muted-foreground">
                     {upload.chunksTotal} chunks · {upload.updatedTsDisplay}
                     {upload.errorDetail ? ` · ${upload.errorDetail}` : ''}
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <span className="inline-flex items-center gap-1 text-xs">
+                <div className="flex shrink-0 flex-wrap items-center gap-1">
+                  <span
+                    aria-label={`status ${upload.status}`}
+                    className="inline-flex items-center gap-1 text-xs"
+                  >
                     <StatusDot tone={upload.tone} />
                     {upload.status}
                   </span>
@@ -250,12 +273,18 @@ function CandidatesSection({
   gapsRowActionsSlot,
 }: CandidatesSectionProps) {
   return (
-    <section data-testid="console-kb-candidates">
-      <div className="mb-1 text-xs font-medium text-muted-foreground">
+    <section
+      aria-labelledby="console-kb-candidates-heading"
+      data-testid="console-kb-candidates"
+    >
+      <h2
+        className="mb-1 text-xs font-medium text-muted-foreground"
+        id="console-kb-candidates-heading"
+      >
         candidates / review
-      </div>
+      </h2>
       <QueryBody
-        emptyText="no knowledge gaps"
+        emptyText="no knowledge gaps — when retrieval misses, candidates appear here"
         isEmpty={(data: { gaps: KbGapView[] }) =>
           (data.gaps ?? []).length === 0
         }
@@ -269,19 +298,23 @@ function CandidatesSection({
           <ConsoleRows testId="console-kb-gaps">
             {gaps.map((gap) => (
               <li
-                className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
+                aria-label={`gap ${gap.query}, ${gap.status}, ${gap.hits} hits`}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
                 data-gap-status={gap.status}
                 data-testid={`kb-gap-row-${gap.gapId}`}
                 key={gap.gapId}
               >
-                <div className="min-w-0">
-                  <div className="truncate">{gap.query}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium">{gap.query}</div>
                   <div className="text-xs text-muted-foreground">
                     {gap.signal} · hits {gap.hits} · {gap.tsLastDisplay}
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <span className="inline-flex items-center gap-1 text-xs">
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <span
+                    aria-label={`status ${gap.status}`}
+                    className="inline-flex items-center gap-1 text-xs"
+                  >
                     <StatusDot tone={gap.tone} />
                     {gap.status}
                   </span>
@@ -318,10 +351,18 @@ function SourcesSection({
   entriesSlot,
 }: SourcesSectionProps) {
   return (
-    <section data-testid="console-kb-sources">
-      <div className="mb-1 text-xs font-medium text-muted-foreground">sources</div>
+    <section
+      aria-labelledby="console-kb-sources-heading"
+      data-testid="console-kb-sources"
+    >
+      <h2
+        className="mb-1 text-xs font-medium text-muted-foreground"
+        id="console-kb-sources-heading"
+      >
+        sources
+      </h2>
       <QueryBody
-        emptyText="no collections"
+        emptyText="no collections — publish an upload to create the first one"
         isEmpty={(data: { collections: string[] }) =>
           (data.collections ?? []).length === 0
         }
@@ -369,9 +410,14 @@ export function SourcesList({
 }: SourcesListProps) {
   return (
     <div className="flex flex-col gap-2">
+      <label className="sr-only" htmlFor="console-kb-collection-select">
+        Select a knowledge collection
+      </label>
       <select
+        aria-label="Knowledge collection"
         className="rounded-md border border-border bg-transparent px-2 py-1 text-sm"
         data-testid="console-kb-collection-select"
+        id="console-kb-collection-select"
         onChange={(event) => onChangeCollection(event.target.value)}
         value={selectedCollection}
       >
@@ -416,7 +462,7 @@ export function EntriesList({
 }: EntriesListProps) {
   return (
     <QueryBody
-      emptyText="no sources"
+      emptyText="no sources in this collection yet"
       isEmpty={(data: { entries: EntryView[] }) =>
         (data.entries ?? []).length === 0
       }
@@ -430,12 +476,13 @@ export function EntriesList({
         <ConsoleRows testId="console-kb-entries">
           {entries.map((entry) => (
             <li
-              className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
+              aria-label={`source ${entry.source}, ${entry.chunks} chunks`}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
               data-testid={`kb-entry-row-${entry.source}`}
               key={entry.source}
             >
-              <div className="min-w-0">
-                <div className="truncate">{entry.source}</div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">{entry.source}</div>
                 <div className="text-xs text-muted-foreground">
                   {entry.chunks} chunks
                 </div>
@@ -485,13 +532,23 @@ export function PreviewBody({
     >
       {(data: { chunks: PreviewChunkView[] }) =>
         preview ? (
-          <div className="flex flex-col gap-2" data-testid={`kb-preview-body-${uploadId}`}>
-            <div className="text-xs text-muted-foreground">
+          <div
+            aria-label={`preview body for ${uploadId}`}
+            className="flex flex-col gap-2"
+            data-testid={`kb-preview-body-${uploadId}`}
+            role="region"
+          >
+            <div
+              aria-live="polite"
+              className="text-xs text-muted-foreground"
+              role="status"
+            >
               {preview.total} chunks · {preview.stats.totalTokens} tokens · PII forbidden {preview.stats.piiForbiddenCount} / warning {preview.stats.piiWarningCount}
             </div>
             <div className="flex max-h-64 flex-col gap-1 overflow-auto">
               {preview.chunks.map((chunk) => (
                 <div
+                  aria-label={`chunk ${chunk.index}, ${chunk.charCount} chars`}
                   className="rounded border border-border p-1 text-xs"
                   data-testid={`kb-preview-chunk-${chunk.index}`}
                   key={chunk.index}
