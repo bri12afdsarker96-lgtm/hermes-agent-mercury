@@ -39,7 +39,10 @@ import type {
   KbGapView,
   PreviewChunkView,
   PreviewView,
-  UploadRowView,
+  UploadRowView} from './page-knowledge.view-model';
+import {
+  formatKnowledgePurpose,
+  KNOWLEDGE_READ_ONLY_NOTICE
 } from './page-knowledge.view-model'
 import { CapabilityBadge, PageStatusBadge } from './status-badge'
 import type { CapabilityStatus } from './types'
@@ -122,7 +125,17 @@ export function KnowledgeView({
     >
       {previewSlot}
       <PageHeader
-        purpose="Review knowledge gaps, stage sources, preview chunks and publish through authoritative server workflows."
+        actions={
+          <span
+            aria-label="Server-backed knowledge actions. Upload, preview, publish, withdraw, and manual candidate review call authoritative server endpoints. No view-local state machine."
+            className="inline-flex items-center gap-1 rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-card) px-2 py-1 text-xs text-(--ui-text-secondary)"
+            data-testid="console-knowledge-actions-marker"
+          >
+            <StatusDot tone="good" />
+            server-backed actions
+          </span>
+        }
+        purpose={formatKnowledgePurpose()}
         status={<PageStatusBadge status="ready-dev" />}
         title="Enterprise knowledge"
       />
@@ -169,6 +182,12 @@ export function KnowledgeView({
           gapsRowActionsSlot={gapsRowActionsSlot}
         />
       </div>
+      <p
+        className="mt-(--ec-page-inset-y) text-(--ui-text-tertiary)"
+        data-testid="console-knowledge-read-only-notice"
+      >
+        {KNOWLEDGE_READ_ONLY_NOTICE}
+      </p>
     </div>
   )
 }

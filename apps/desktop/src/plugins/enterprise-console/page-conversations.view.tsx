@@ -17,7 +17,10 @@
  *   - §P21: `ConsoleRows` is reused for inbound / outbound / attempts.
  */
 
-import { StatusDot, type StatusTone } from '@hermes/plugin-sdk'
+import {
+  StatusDot,
+  type StatusTone,
+} from '@hermes/plugin-sdk'
 import type { ReactNode } from 'react'
 
 import {
@@ -26,6 +29,7 @@ import {
   type ConversationsInboundListView,
   type ConversationsOutboundListView,
   type ConversationsTab,
+  formatConversationsPurpose,
   type InboundView,
   type OutboundView,
   OUTCOME_TONE,
@@ -260,7 +264,17 @@ export function ConversationsView({
       data-testid="console-page-conversations"
     >
       <PageHeader
-        purpose="Inspect tenant-scoped inbound and outbound message facts and delivery attempts. Read-only by design."
+        actions={
+          <span
+            aria-label="Read-only conversation evidence surface. Inbound, outbound, and delivery-attempt rows are derived from authoritative server queries. No retry, release, requeue, or blind-resend action is exposed."
+            className="inline-flex items-center gap-1 rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-card) px-2 py-1 text-xs text-(--ui-text-secondary)"
+            data-testid="console-conversations-actions-marker"
+          >
+            <StatusDot tone="muted" />
+            read-only evidence
+          </span>
+        }
+        purpose={formatConversationsPurpose()}
         status={<PageStatusBadge status="ready" />}
         title="WeCom conversations"
       />
