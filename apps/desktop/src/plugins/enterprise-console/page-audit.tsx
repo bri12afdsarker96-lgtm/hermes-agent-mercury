@@ -21,9 +21,40 @@
  *   - the literal strings `malformed event id`, `event not found`,
  *     `audit unavailable` in the four error states.
  * No replay / re-execute / retry / resend control was added.
+ *
+ * V3-REMEDIATION-01 · V3-R2 — Visible interaction restored.
+ *
+ * The initial V3 productisation moved the audit-event list into the shared
+ * Timeline primitive, but Timeline is a static, non-interactive display —
+ * the visible action affordances the V0 row / action semantics exposed
+ * (`console-audit-<event_id>` for detail toggle, `console-audit-correlate-<event_id>`
+ * for evidence chain) only survived as sr-only compatibility DOM. A screen
+ * reader user could still find them; a sighted user could not. That is a
+ * functional regression, not a visual difference.
+ *
+ * The page now splits the surface into two deliberately distinct layers:
+ *
+ *   - The main audit-event list (V0 row / action semantics) is rendered as a
+ *     visible interactive row per event. Each row carries the row's primary
+ *     detail affordance (`console-audit-<event_id>`, a real `<button>`
+ *     keyboard-focusable, click to toggle detail) and, when the event has a
+ *     `resource_ref`, the secondary correlation affordance
+ *     (`console-audit-correlate-<event_id>`, also a real `<button>`). These
+ *     buttons are NOT descendants of any `sr-only` element — that is the
+ *     regression gate the behavior tests now hold.
+ *
+ *   - The evidence chain (correlate result) keeps the shared Timeline
+ *     primitive because that surface is non-interactive — the user has
+ *     already navigated to it via the visible correlate button and only
+ *     needs to read it.
+ *
+ * The four SC4 frozen error states (`malformed event id`, `event not found`,
+ * `audit unavailable`) are preserved by `auditErrorState`. No replay /
+ * retry / resend / re-execute control is introduced. The page imports
+ * nothing from `./actions.tsx`. No new write route is requested.
  */
 
-import { EmptyState, ErrorState, Input, Loader, useValue } from '@hermes/plugin-sdk'
+import { EmptyState, ErrorState, Input, Loader, StatusDot, useValue } from '@hermes/plugin-sdk'
 import { useState } from 'react'
 
 import { HermesApiError } from './fetch-transport'
@@ -156,6 +187,72 @@ function AuditChain({ events }: { events: AuditEvent[] }) {
   )
 }
 
+/**
+ * Visible, interactive audit-event row. The action / correlate buttons are
+ * real `<button>` elements with stable `data-testid`s and live INSIDE this
+ * visible row — they are NOT descendants of any `sr-only` ancestor. The
+ * `closest('.sr-only')` invariant is part of the V3-R2 acceptance test.
+ */
+function AuditEventRow({
+  event,
+  isSelected,
+  onSelect,
+  onCorrelate
+}: {
+  event: AuditEvent
+  isSelected: boolean
+  onSelect: (id: string) => void
+  onCorrelate: (resourceRef: string) => void
+}) {
+  const canCorrelate = Boolean(event.resource_ref)
+
+  return (
+    <li
+      className="flex flex-col gap-2 rounded-(--ec-panel-radius) border border-(--ui-stroke-tertiary) p-3"
+      data-audit-event-id={event.event_id}
+    >
+      <div className="flex flex-wrap items-start gap-3">
+        <button
+          aria-expanded={isSelected}
+          aria-label={`Toggle detail for ${event.action}`}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          data-testid={`console-audit-${event.event_id}`}
+          onClick={() => onSelect(event.event_id)}
+          type="button"
+        >
+          <StatusDot tone={isSelected ? 'good' : 'muted'} />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-medium text-(--ui-text-primary)">{event.action}</span>
+            <span className="block text-xs text-(--ui-text-tertiary)">
+              <span data-ec-mono="">{fmtIso(event.ts)}</span>
+              {' · '}
+              {event.actor ?? '—'}
+              {event.resource_ref ? (
+                <>
+                  {' · '}
+                  <span data-ec-mono="">{event.resource_ref}</span>
+                </>
+              ) : null}
+            </span>
+          </span>
+        </button>
+        {canCorrelate ? (
+          <button
+            aria-label={`Open evidence chain for ${event.resource_ref}`}
+            className="text-xs underline text-(--ui-text-secondary)"
+            data-testid={`console-audit-correlate-${event.event_id}`}
+            onClick={() => onCorrelate(event.resource_ref as string)}
+            type="button"
+          >
+            correlate
+          </button>
+        ) : null}
+      </div>
+      {isSelected ? <AuditDetail eventId={event.event_id} /> : null}
+    </li>
+  )
+}
+
 function AuditBody() {
   const [action, setAction] = useState('')
   const [resourceRef, setResourceRef] = useState('')
@@ -231,34 +328,21 @@ function AuditBody() {
           ) : (listQuery.data as AuditListResp).events.length === 0 ? (
             <EmptyState title="no audit events" />
           ) : (
-            <div className="-mx-(--ec-panel-pad) -mb-(--ec-panel-pad) px-(--ec-panel-pad) pb-(--ec-panel-pad)" data-testid="console-audit">
-              <Timeline events={(listQuery.data as AuditListResp).events.map(toTimelineEvent)} label="Audit events" />
-              {/* Hidden button-row mirroring the V0 surface so the contract test
-                  still finds the per-event action/correlation affordances. */}
-              <ul className="sr-only">
-                {(listQuery.data as AuditListResp).events.map(event => (
-                  <li key={`legacy-${event.event_id}`}>
-                    <button
-                      data-testid={`console-audit-${event.event_id}`}
-                      onClick={() => setSelectedId(id => (id === event.event_id ? null : event.event_id))}
-                      type="button"
-                    >
-                      {event.action} {fmtIso(event.ts)} {event.actor ?? '—'} {event.resource_ref ?? '—'}
-                    </button>
-                    {event.resource_ref ? (
-                      <button
-                        data-testid={`console-audit-correlate-${event.event_id}`}
-                        onClick={() => setCorrelateRef(event.resource_ref)}
-                        type="button"
-                      >
-                        correlate
-                      </button>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-              {selectedId ? <AuditDetail eventId={selectedId} /> : null}
-            </div>
+            <ul
+              aria-label="Audit events"
+              className="flex flex-col gap-2"
+              data-testid="console-audit"
+            >
+              {(listQuery.data as AuditListResp).events.map(event => (
+                <AuditEventRow
+                  event={event}
+                  isSelected={selectedId === event.event_id}
+                  key={event.event_id}
+                  onCorrelate={setCorrelateRef}
+                  onSelect={id => setSelectedId(prev => (prev === id ? null : id))}
+                />
+              ))}
+            </ul>
           )}
         </ConsolePanel>
       )}

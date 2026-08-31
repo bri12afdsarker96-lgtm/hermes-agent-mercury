@@ -1,13 +1,11 @@
 /**
- * P1-VIS-V3 behavior coverage for `AuditPage`.
+ * V3-REMEDIATION-01 · V3-R2 — Audit behavior coverage.
  *
- * The audit page is read-only evidence. Behavior coverage re-verifies that
- * invariant on top of the SC4 contract test, and pins the four honest
- * error states (malformed event id / event not found / audit unavailable
- * / generic error) plus the evidence-chain navigation.
- *
- * No replay / retry / resend / re-execute control is introduced anywhere.
- * The transport is asserted to be GET-only.
+ * Re-verifies the read-only contract (no replay / retry / resend / re-execute;
+ * no transport mutation) and adds the V3-R2 regression gate: every visible
+ * action button (per-event detail toggle and per-event correlate) must live
+ * OUTSIDE any `sr-only` container, and clicking it must drive a real GET to
+ * the corresponding `/api/audit-detail` or `/api/audit-correlate` endpoint.
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -52,7 +50,18 @@ function wrap(node: ReactNode) {
 class SpyTransport extends BaseHermesTransport {
   readonly mutating: string[] = []
   readonly requests: { method: string; path: string }[] = []
-  private listResponse: { events: AuditEvent[] } | 'OUTAGE' = { events: [] }
+  private listResponse: { events: AuditEvent[] } | 'OUTAGE' = {
+    events: [
+      {
+        action: 'kb.commit',
+        actor: 'alice',
+        event_id: 'e1',
+        payload_ref: { delta: 'kb:doc:1 added', n: 1 },
+        resource_ref: 'kb:doc:1',
+        ts: '2026-08-28T00:00:00+00:00'
+      }
+    ]
+  }
   private detailResponse: { event: AuditEvent } | Error = {
     event: {
       action: 'kb.commit',
@@ -84,12 +93,12 @@ class SpyTransport extends BaseHermesTransport {
       return this.listResponse as T
     }
 
-    if (path.startsWith('/api/audit-detail') && !(this.detailResponse instanceof Error)) {
-      return this.detailResponse as T
-    }
-
     if (path.startsWith('/api/audit-correlate') && this.listResponse !== 'OUTAGE') {
       return this.listResponse as T
+    }
+
+    if (path.startsWith('/api/audit-detail') && !(this.detailResponse instanceof Error)) {
+      return this.detailResponse as T
     }
 
     if (this.listResponse === 'OUTAGE') {
@@ -118,8 +127,55 @@ afterEach(() => {
   $transport.set(null)
 })
 
-describe('AuditPage · behavior (P1-VIS-V3)', () => {
-  it('AU-B1: filter inputs change the URL of the audit-list request without ever leaving read-only', async () => {
+function sampleEvent(): AuditEvent {
+  return {
+    action: 'kb.commit',
+    actor: 'alice',
+    event_id: 'e1',
+    payload_ref: { delta: 'kb:doc:1 added', n: 1 },
+    resource_ref: 'kb:doc:1',
+    ts: '2026-08-28T00:00:00+00:00'
+  }
+}
+
+describe('AuditPage · behavior (V3-REMEDIATION-01)', () => {
+  it('AU-B1: visible event toggle drives a real GET /api/audit-detail and renders the detail panel', async () => {
+    spy.setList({ events: [sampleEvent()] })
+    wrap(<AuditPage />)
+
+    const toggle = await screen.findByTestId('console-audit-e1')
+
+    // V3-R2 regression gate: the visible action must NOT be sr-only.
+    expect(toggle.closest('.sr-only')).toBeNull()
+
+    await act(async () => {
+      fireEvent.click(toggle)
+    })
+
+    expect(await screen.findByTestId('console-audit-detail')).toBeTruthy()
+    expect(spy.requests.some(r => r.path === '/api/audit-detail?event_id=e1')).toBe(true)
+    expect(spy.mutating).toEqual([])
+  })
+
+  it('AU-B2: visible correlate drives a real GET /api/audit-correlate and renders the chain panel', async () => {
+    spy.setList({ events: [sampleEvent()] })
+    wrap(<AuditPage />)
+
+    const correlate = await screen.findByTestId('console-audit-correlate-e1')
+
+    // V3-R2 regression gate.
+    expect(correlate.closest('.sr-only')).toBeNull()
+
+    await act(async () => {
+      fireEvent.click(correlate)
+    })
+
+    await waitFor(() => screen.getByTestId('console-audit-correlate'))
+    expect(spy.requests.some(r => r.path === '/api/audit-correlate?resource_ref=kb%3Adoc%3A1')).toBe(true)
+    expect(spy.mutating).toEqual([])
+  })
+
+  it('AU-B3: filter inputs change the URL of the audit-list request without ever leaving read-only', async () => {
     spy.setList({ events: [] })
     wrap(<AuditPage />)
     await waitFor(() => screen.getByTestId('console-audit-action'))
@@ -146,20 +202,9 @@ describe('AuditPage · behavior (P1-VIS-V3)', () => {
     expect(spy.mutating).toEqual([])
   })
 
-  it('AU-B2: 400 on /api/audit-detail surfaces "malformed event id"', async () => {
+  it('AU-B4: 400 on /api/audit-detail surfaces "malformed event id" (no replay affordance)', async () => {
     spy.setDetail(new HermesApiError(400, 'error', 'bad_event_id'))
-    spy.setList({
-      events: [
-        {
-          action: 'kb.commit',
-          actor: 'alice',
-          event_id: 'e1',
-          payload_ref: {},
-          resource_ref: 'kb:doc:1',
-          ts: '2026-08-28T00:00:00+00:00'
-        }
-      ]
-    })
+    spy.setList({ events: [sampleEvent()] })
     wrap(<AuditPage />)
     const row = await screen.findByTestId('console-audit-e1')
 
@@ -170,20 +215,9 @@ describe('AuditPage · behavior (P1-VIS-V3)', () => {
     expect(await screen.findByText(/malformed event id/i)).toBeTruthy()
   })
 
-  it('AU-B3: 404 on /api/audit-detail surfaces "event not found"', async () => {
+  it('AU-B5: 404 on /api/audit-detail surfaces "event not found" (no replay affordance)', async () => {
     spy.setDetail(new HermesApiError(404, 'error', 'event_not_found'))
-    spy.setList({
-      events: [
-        {
-          action: 'kb.commit',
-          actor: 'alice',
-          event_id: 'e1',
-          payload_ref: {},
-          resource_ref: 'kb:doc:1',
-          ts: '2026-08-28T00:00:00+00:00'
-        }
-      ]
-    })
+    spy.setList({ events: [sampleEvent()] })
     wrap(<AuditPage />)
     const row = await screen.findByTestId('console-audit-e1')
 
@@ -194,25 +228,14 @@ describe('AuditPage · behavior (P1-VIS-V3)', () => {
     expect(await screen.findByText(/event not found/i)).toBeTruthy()
   })
 
-  it('AU-B4: 503 on /api/audit-list surfaces "audit unavailable"', async () => {
+  it('AU-B6: 503 on /api/audit-list surfaces "audit unavailable" (no replay affordance)', async () => {
     spy.setList('OUTAGE')
     wrap(<AuditPage />)
     expect(await screen.findByText(/audit unavailable/i)).toBeTruthy()
   })
 
-  it('AU-B5: correlate button opens the evidence chain panel and never POSTs anything', async () => {
-    spy.setList({
-      events: [
-        {
-          action: 'kb.commit',
-          actor: 'alice',
-          event_id: 'e1',
-          payload_ref: {},
-          resource_ref: 'kb:doc:1',
-          ts: '2026-08-28T00:00:00+00:00'
-        }
-      ]
-    })
+  it('AU-B7: "back to list" button on the evidence chain panel returns the visible event list', async () => {
+    spy.setList({ events: [sampleEvent()] })
     wrap(<AuditPage />)
     const correlate = await screen.findByTestId('console-audit-correlate-e1')
 
@@ -220,7 +243,13 @@ describe('AuditPage · behavior (P1-VIS-V3)', () => {
       fireEvent.click(correlate)
     })
 
-    await waitFor(() => screen.getByTestId('console-audit-correlate'))
+    await waitFor(() => screen.getByTestId('console-audit-correlate-close'))
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('console-audit-correlate-close'))
+    })
+
+    await waitFor(() => screen.getByTestId('console-audit-e1'))
     expect(spy.mutating).toEqual([])
   })
 })

@@ -60,10 +60,12 @@ const CREDENTIAL_TONE: Record<CredentialState, StatusTone> = {
 
 /** One-line honest gloss of what each credential state means in this Phase-1. */
 const CREDENTIAL_GLOSS: Record<CredentialState, string> = {
-  ABSENT: 'observed refs without any matching runtime credential',
-  PARTIAL: 'some runtime credentials present, but not for every observed app config ref',
-  PRESENT: 'every observed app config ref has a runtime credential',
-  UNKNOWN: 'no observed app config refs — nothing to check against'
+  ABSENT:
+    'server reports no runtime credential present for the observed app config refs',
+  PARTIAL:
+    'server reports runtime credentials for some, but not all, observed app config refs',
+  PRESENT: 'server reports runtime credentials for all observed app config refs',
+  UNKNOWN: 'credential presence is not established by current server evidence'
 }
 
 function Field({ children, label }: { children: React.ReactNode; label: string }) {

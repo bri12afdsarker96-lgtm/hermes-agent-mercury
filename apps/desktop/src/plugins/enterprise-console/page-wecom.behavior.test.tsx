@@ -1,17 +1,15 @@
 /**
- * P1-VIS-V3 behavior coverage for `WeComPage`.
+ * V3-REMEDIATION-01 · V3-R1 — WeCom behavior coverage (extended).
  *
- * WeCom is read-only end-to-end. The page must never POST anything to the
- * server. This test pins the four-state truth contract on top of the
- * existing SC5 contract test, and proves that:
+ * Inherits the V3 behavior suite and adds the V3-R1 acceptance gate:
+ *   - the SC5-permitted UNKNOWN fixture (observed_app_config_ref_count = 1,
+ *     runtime_credential_present_count = null) renders the literal
+ *     `UNKNOWN` token and does NOT render the client-inferred phrase
+ *     "no observed app config refs".
+ *   - no POST / PUT / PATCH / DELETE is ever dispatched.
+ *   - callback health is still "unknown · not actively probed".
  *
- *   - Every legal `runtime_credential_state` value renders the literal
- *     state word and never invents a positive value out of silence.
- *   - `callback_health` is rendered as `unknown · not actively probed`
- *     and never as healthy / live / ok.
- *   - No POST / PUT / PATCH / DELETE is ever dispatched.
- *   - When the server 503s, an honest `status.error` is shown — never a
- *     cached or fake row.
+ * The pre-existing V3 four-state tests are preserved unchanged.
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -156,5 +154,68 @@ describe('WeComPage · behavior (P1-VIS-V3)', () => {
     expect(screen.queryByText('PRESENT')).toBeNull()
     expect(screen.queryByText('ABSENT')).toBeNull()
     expect(screen.queryByText('PARTIAL')).toBeNull()
+  })
+})
+
+describe('WeComPage · behavior (V3-REMEDIATION-01 · V3-R1)', () => {
+  it('W-R1-1: UNKNOWN fixture (observed_app_config_ref_count=1, present_count=null) renders the literal UNKNOWN and does NOT render the client-inferred phrase "no observed app config refs"', async () => {
+    const spy = new ReadOnlySpyTransport(
+      makeFixture('UNKNOWN', {
+        observed_app_config_ref_count: 1,
+        runtime_credential_present_count: null
+      })
+    )
+
+    wrapPage(spy)
+    await waitFor(() => screen.getByTestId('console-wecom'))
+    const body = screen.getByTestId('console-wecom').textContent ?? ''
+    expect(body).toContain('UNKNOWN')
+    expect(body).not.toContain('no observed app config refs')
+    expect(body).toContain('credential presence is not established by current server evidence')
+  })
+
+  it('W-R1-2: no client recomputation — the four-state word is rendered as-is and the page never POSTs anything', async () => {
+    const spy = new ReadOnlySpyTransport(
+      makeFixture('UNKNOWN', {
+        observed_app_config_ref_count: 1,
+        runtime_credential_present_count: null
+      })
+    )
+
+    wrapPage(spy)
+    await waitFor(() => screen.getByTestId('console-wecom'))
+    expect(spy.mutating).toEqual([])
+  })
+
+  it('W-R1-3: ABSENT / PARTIAL / PRESENT fixtures render server-report-style wording, never client-inferential phrasing', async () => {
+    const cases: Array<{
+      state: CredentialState
+      mustContain: string
+    }> = [
+      {
+        state: 'ABSENT',
+        mustContain: 'server reports no runtime credential present for the observed app config refs'
+      },
+      {
+        state: 'PARTIAL',
+        mustContain:
+          'server reports runtime credentials for some, but not all, observed app config refs'
+      },
+      {
+        state: 'PRESENT',
+        mustContain: 'server reports runtime credentials for all observed app config refs'
+      }
+    ]
+
+    for (const c of cases) {
+      cleanup()
+      $transport.set(null)
+      const spy = new ReadOnlySpyTransport(makeFixture(c.state))
+      wrapPage(spy)
+      await waitFor(() => screen.getByTestId('console-wecom'))
+      const body = screen.getByTestId('console-wecom').textContent ?? ''
+      expect(body, `state=${c.state}`).toContain(c.mustContain)
+      expect(body, `state=${c.state}`).not.toContain('no observed app config refs')
+    }
   })
 })

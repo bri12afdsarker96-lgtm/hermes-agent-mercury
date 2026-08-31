@@ -1,18 +1,22 @@
 /**
- * P1-VIS-V3 a11y coverage for `AuditPage`.
+ * V3-REMEDIATION-01 · V3-R2 — Audit a11y coverage.
  *
- * The audit page is the canonical read-only evidence surface in the
- * console. It must therefore read at product quality while remaining
- * strictly read-only:
+ * Per the remediation brief, the V3 visible-interaction regression must be
+ * closed while preserving every prior screen-reader contract:
  *
  *   - heading hierarchy: h1 (PageHeader) → h2 (panel titles)
- *   - each event row uses the shared Timeline primitive (rail + dot +
- *     mono timestamp + actor + resource)
- *   - filter inputs are labelled (placeholder-only would fail a real
- *     accessibility test)
- *   - no `replay`, `re-execute`, `retry`, `resend` control is rendered
- *   - the correlation affordance lives on a real `<button>` with a
- *     stable testid
+ *   - the main audit-event list is a visible interactive `<ul>` with the
+ *     stable `console-audit` testid and an `aria-label="Audit events"`
+ *   - the evidence-chain surface (correlate result) continues to use the
+ *     shared Timeline primitive (data-slot="ec-timeline") because it is
+ *     read-only and non-interactive
+ *   - per-event action buttons (`console-audit-<event_id>`,
+ *     `console-audit-correlate-<event_id>`) live OUTSIDE any `sr-only`
+ *     ancestor — the regression gate
+ *   - no replay / re-execute / retry / resend control is introduced
+ *   - filter inputs are real <input> elements
+ *   - keyboard: every action button is a real <button>, focusable, with
+ *     aria-label and aria-expanded on the toggle
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -61,6 +65,18 @@ beforeEach(() => {
             ts: '2026-08-28T00:00:00+00:00'
           }
         ]
+      },
+      '/api/audit-correlate?resource_ref=kb%3Adoc%3A1': {
+        events: [
+          {
+            action: 'kb.commit',
+            actor: 'alice',
+            event_id: 'c1',
+            payload_ref: {},
+            resource_ref: 'kb:doc:1',
+            ts: '2026-08-28T00:00:00+00:00'
+          }
+        ]
       }
     })
   )
@@ -72,7 +88,7 @@ afterEach(() => {
   $transport.set(null)
 })
 
-describe('AuditPage · a11y (P1-VIS-V3)', () => {
+describe('AuditPage · a11y (V3-REMEDIATION-01)', () => {
   it('AU-A1: page has an h1 "Audit evidence" plus h2 panel titles', async () => {
     wrap(<AuditPage />)
 
@@ -94,20 +110,35 @@ describe('AuditPage · a11y (P1-VIS-V3)', () => {
     }
   })
 
-  it('AU-A3: the audit list renders inside the shared Timeline primitive (data-slot="ec-timeline")', async () => {
+  it('AU-A3: the main audit-event list is a visible interactive <ul> with stable console-audit testid + aria-label', async () => {
     wrap(<AuditPage />)
     await waitFor(() => screen.getByTestId('console-audit'))
 
-    const timeline = document.querySelector(
-      '[data-testid="console-audit"] [data-slot="ec-timeline"]'
-    )
+    const list = document.querySelector('[data-testid="console-audit"]') as HTMLElement | null
+    expect(list).toBeTruthy()
+    expect(list?.tagName.toLowerCase()).toBe('ul')
+    expect(list?.getAttribute('aria-label')).toBe('Audit events')
 
-    expect(timeline).toBeTruthy()
-    expect(timeline?.tagName.toLowerCase()).toBe('ol')
-    expect(timeline?.getAttribute('aria-label')).toBe('Audit events')
+    // Visible to sighted users — must NOT be sr-only itself.
+    expect(list?.className).not.toMatch(/\bsr-only\b/)
   })
 
-  it('AU-A4: filter inputs are real <input> elements with placeholder + value contract', async () => {
+  it('AU-A4: per-event action buttons live OUTSIDE any sr-only container (V3-R2 regression gate)', async () => {
+    wrap(<AuditPage />)
+    await waitFor(() => screen.getByTestId('console-audit'))
+
+    const toggle = screen.getByTestId('console-audit-e1')
+    const correlate = screen.getByTestId('console-audit-correlate-e1')
+
+    expect(toggle.closest('.sr-only')).toBeNull()
+    expect(correlate.closest('.sr-only')).toBeNull()
+
+    // And both must be keyboard-focusable real <button> elements.
+    expect(toggle.tagName.toLowerCase()).toBe('button')
+    expect(correlate.tagName.toLowerCase()).toBe('button')
+  })
+
+  it('AU-A5: filter inputs are real <input> elements with placeholder + value contract', async () => {
     wrap(<AuditPage />)
     await waitFor(() => screen.getByTestId('console-audit-action'))
 
@@ -119,7 +150,7 @@ describe('AuditPage · a11y (P1-VIS-V3)', () => {
     expect(actionInput?.placeholder).toBe('action (exact)')
   })
 
-  it('AU-A5: no button or link uses replay / re-execute / retry / resend vocabulary', async () => {
+  it('AU-A6: no button or link uses replay / re-execute / retry / resend vocabulary', async () => {
     wrap(<AuditPage />)
     await waitFor(() => screen.getByTestId('console-audit'))
 
@@ -129,5 +160,22 @@ describe('AuditPage · a11y (P1-VIS-V3)', () => {
       expect(screen.queryByRole('button', { name: re })).toBeNull()
       expect(screen.queryByRole('link', { name: re })).toBeNull()
     }
+  })
+
+  it('AU-A7: the evidence-chain surface (post-correlate) continues to render the shared Timeline primitive', async () => {
+    wrap(<AuditPage />)
+    await waitFor(() => screen.getByTestId('console-audit'))
+
+    const correlate = screen.getByTestId('console-audit-correlate-e1')
+    correlate.click()
+
+    await waitFor(() => screen.getByTestId('console-audit-correlate'))
+
+    const timeline = document.querySelector(
+      '[data-testid="console-audit-correlate"] [data-slot="ec-timeline"]'
+    )
+
+    expect(timeline).toBeTruthy()
+    expect(timeline?.tagName.toLowerCase()).toBe('ol')
   })
 })
