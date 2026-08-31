@@ -2,9 +2,15 @@
  * Handoff page — a11y / keyboard test (LINE F).
  *
  * Per LINE F §P8: keyboard reachable actions, focus visible, status
- * not color-only, empty/error text readable.
+ * not color-only, dialog/form labels, empty/error text readable.
  *
  * Pure render-only checks. No controller changes.
+ *
+ * Per P1-VIS-V2 (Minimal Handoff productization):
+ *   - The 4 V0 tests are the W1-C contract (preserved verbatim
+ *     except fixtures now include the new `stateLabel` VM field).
+ *   - 2 new tests cover the V2 status strip (HONEST availability
+ *     reflection + handoff count).
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -73,6 +79,7 @@ describe('Handoff a11y (LINE F)', () => {
             canClaim: true,
             canReply: false,
             canRequeue: false,
+            stateLabel: 'parked',
           },
         ]}
         handoffsError={null}
@@ -105,6 +112,7 @@ describe('Handoff a11y (LINE F)', () => {
             canClaim: false,
             canReply: false,
             canRequeue: false,
+            stateLabel: 'escalated',
           },
         ]}
         handoffsError={null}
@@ -114,5 +122,54 @@ describe('Handoff a11y (LINE F)', () => {
     expect(screen.getByText('escalated')).toBeTruthy()
     expect(screen.getByLabelText('state escalated')).toBeTruthy()
     expect(screen.getByLabelText('age 90 seconds')).toBeTruthy()
+  })
+
+  // V2 PRODUCTIZATION — narrow layout hook + scheduling meta is rendered
+  it('productized status strip exposes availability and count as accessible region', () => {
+    wrap(
+      <HandoffsView
+        available
+        handoffRowActionsSlot={() => null}
+        handoffs={[
+          {
+            msgId: 'm1',
+            text: 'help',
+            threadId: 't1',
+            agentDisplay: 'unclaimed',
+            statusDisplay: '',
+            state: 'parked',
+            ageSeconds: 30,
+            ageTone: 'warn',
+            stateTone: 'muted',
+            canClaim: true,
+            canReply: false,
+            canRequeue: false,
+            stateLabel: 'parked',
+          },
+        ]}
+        handoffsError={null}
+        handoffsIsPending={false}
+      />,
+    )
+    const strip = screen.getByTestId('console-handoffs-status')
+    expect(strip).toBeTruthy()
+    expect(strip.getAttribute('data-ec-state')).toBe('available')
+    expect(strip.textContent).toMatch(/server-authoritative/)
+    expect(strip.textContent).toMatch(/1 handoff\b/)
+  })
+
+  it('productized availability=false surfaces unavailable status strip without fabricating rows', () => {
+    wrap(
+      <HandoffsView
+        available={false}
+        handoffRowActionsSlot={() => null}
+        handoffs={[]}
+        handoffsError={null}
+        handoffsIsPending={false}
+      />,
+    )
+    const strip = screen.getByTestId('console-handoffs-status')
+    expect(strip.getAttribute('data-ec-state')).toBe('unavailable')
+    expect(strip.textContent).toMatch(/handoffs unavailable/)
   })
 })

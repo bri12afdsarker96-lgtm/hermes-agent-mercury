@@ -17,6 +17,18 @@
  *     aria-label, status aria-label, empty-text improvement,
  *     flex-wrap for narrow viewports. NO controller, NO
  *     contract change.
+ *
+ * Per P1-VIS-V2 (Minimal Handoff productization):
+ *   - Status strip: same shape as Reminder's strip — narrow-layout
+ *     accessible region exposing server availability + count.
+ *   - PageHeader status badge: <PageStatusBadge status=
+ *     {available ? 'ready' : 'partial'} /> — HONEST mapping.
+ *   - data-ec-handoff-state on each row = the server state
+ *     ('parked' / 'escalated' / etc.) for narrow-layout debugging.
+ *   - data-ec-mono on the threadId span = the design's
+ *     mono-literal pattern.
+ *   - NO additional eligibility derivation. NO advanced handoff
+ *     features. NO Business Follow-up contamination.
  */
 
 import { StatusDot } from '@hermes/plugin-sdk'
@@ -59,15 +71,36 @@ export function HandoffsView({
 }: HandoffsViewProps) {
   return (
     <div
-      className="mx-auto flex w-full max-w-[96rem] flex-col px-(--ec-page-inset-x) py-(--ec-page-inset-y)"
-      data-page-status="ready"
+      className="mx-auto flex w-full max-w-[96rem] flex-col gap-(--ec-page-inset-y) px-(--ec-page-inset-x) py-(--ec-page-inset-y)"
+      data-page-status={available ? 'ready' : 'partial'}
       data-testid="console-page-handoff"
     >
       <PageHeader
         purpose="Claim, reply and requeue human handoffs through authoritative inbox workflows."
-        status={<PageStatusBadge status="ready" />}
+        status={<PageStatusBadge status={available ? 'ready' : 'partial'} />}
         title="Human handoff"
       />
+
+      <section
+        aria-labelledby="console-handoffs-status-heading"
+        className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-(--ui-text-tertiary)"
+        data-ec-state={available ? 'available' : 'unavailable'}
+        data-testid="console-handoffs-status"
+      >
+        <h2 className="sr-only" id="console-handoffs-status-heading">
+          Handoff server availability
+        </h2>
+        <span className="inline-flex items-center gap-1">
+          <StatusDot tone={available ? 'good' : 'bad'} />
+          {available
+            ? 'server-authoritative · claim / reply / requeue post to /api/handoff-*'
+            : 'handoffs unavailable · server reports available=false'}
+        </span>
+        <span aria-hidden="true" className="hidden sm:inline">·</span>
+        <span>
+          {handoffs.length} handoff{handoffs.length === 1 ? '' : 's'}
+        </span>
+      </section>
 
       <ConsolePanel divided title="Handoff queue">
         <QueryBody
@@ -87,6 +120,7 @@ export function HandoffsView({
                 <li
                   aria-label={`handoff ${handoff.msgId}, thread ${handoff.threadId}, state ${handoff.state}${handoff.ageSeconds != null ? `, ${handoff.ageSeconds}s old` : ''}`}
                   className="flex flex-wrap items-center justify-between gap-3 border-b border-(--ui-stroke-tertiary) py-3 last:border-b-0"
+                  data-ec-handoff-state={handoff.state}
                   data-testid={`console-handoff-row-${handoff.msgId}`}
                   key={handoff.msgId}
                 >
@@ -117,7 +151,7 @@ export function HandoffsView({
                       className="inline-flex items-center gap-1"
                     >
                       <StatusDot tone={handoff.stateTone} />
-                      {handoff.state}
+                      {handoff.stateLabel}
                     </span>
                     {handoffRowActionsSlot({
                       msgId: handoff.msgId,

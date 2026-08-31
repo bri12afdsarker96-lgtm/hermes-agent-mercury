@@ -5,6 +5,13 @@
  * horizontal overflow, table/list fallback usable at narrow width.
  *
  * CSS class-string assertions only (jsdom does not run layout).
+ *
+ * Per P1-VIS-V2 (Reminders productization):
+ *   - V0 tests preserved verbatim (fixtures extended to include the
+ *     4 V2 VM fields).
+ *   - 1 new test verifies the row carries `data-ec-reminder-state`
+ *     and the timezone `data-ec-mono` span — the narrow-layout
+ *     debugging hooks used by the design system.
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -43,6 +50,20 @@ describe('Reminders responsive hooks (LINE F)', () => {
             scheduledForDisplay: 'now',
             generation: 1,
             subjectDisplay: 'biz_task:t1',
+            relativeOffset: 'in 1m',
+            relativeOffsetTone: 'good',
+            stateLabel: 'active',
+            detail: {
+              title: 'follow up',
+              stateLabel: 'active',
+              stateTone: 'good',
+              subjectDisplay: 'biz_task:t1',
+              scheduledForDisplay: 'now',
+              timezone: 'UTC',
+              ownerDisplay: '—',
+              generationLabel: 'generation 1',
+              reminderId: 'r1',
+            },
           },
         ]}
         remindersError={null}
@@ -73,5 +94,51 @@ describe('Reminders responsive hooks (LINE F)', () => {
     ) as HTMLElement
 
     expect(pageWrapper.className).toContain('max-w-[96rem]')
+  })
+
+  // V2 PRODUCTIZATION — narrow-layout hook
+  it('row carries data-ec-reminder-state and row mono-span for narrow layout debugging', () => {
+    wrap(
+      <RemindersView
+        available
+        createSlot={null}
+        reminderRowActionsSlot={() => null}
+        reminders={[
+          {
+            reminderId: 'r1',
+            title: 'follow up',
+            subjectType: 'biz_task',
+            subjectId: 't1',
+            timezone: 'UTC',
+            state: 'active',
+            tone: 'good',
+            canCancelFromState: true,
+            scheduledFor: 0,
+            scheduledForDisplay: 'now',
+            generation: 1,
+            subjectDisplay: 'biz_task:t1',
+            relativeOffset: 'in 1m',
+            relativeOffsetTone: 'good',
+            stateLabel: 'active',
+            detail: {
+              title: 'follow up',
+              stateLabel: 'active',
+              stateTone: 'good',
+              subjectDisplay: 'biz_task:t1',
+              scheduledForDisplay: 'now',
+              timezone: 'UTC',
+              ownerDisplay: '—',
+              generationLabel: 'generation 1',
+              reminderId: 'r1',
+            },
+          },
+        ]}
+        remindersError={null}
+        remindersIsPending={false}
+      />,
+    )
+    const row = screen.getByTestId('console-reminder-row-r1')
+    expect(row.getAttribute('data-ec-reminder-state')).toBe('active')
+    expect(row.querySelector('[data-ec-mono]')).toBeTruthy()
   })
 })
