@@ -3,6 +3,11 @@
  *
  * Pure-function tests for the page-handoff.view-model derivations.
  * No React, no transport, no session atom, no mocks.
+ *
+ * Per P1-VIS-V2 (Minimal Handoff productization):
+ *   - Existing tone + derive + isEmpty tests are the W1-C contract.
+ *   - New tests cover the `stateLabel` presentation addition.
+ *     No eligibility rule changes.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -165,5 +170,31 @@ describe('isHandoffsEmpty (per P21 empty semantics)', () => {
   })
   it('returns false when available=true and handoffs non-empty', () => {
     expect(isHandoffsEmpty({ available: true, handoffs: [{}] })).toBe(false)
+  })
+})
+
+// =============================================================================
+// V2 PRODUCTIZATION — stateLabel presentation
+// =============================================================================
+
+describe('deriveHandoff V2 stateLabel (presentation-only)', () => {
+  it('known states: parked → "parked", escalated → "escalated"', () => {
+    expect(deriveHandoff(H1).stateLabel).toBe('parked')
+    expect(deriveHandoff(H3).stateLabel).toBe('escalated')
+  })
+
+  it('unknown server state: stateLabel falls back to the server string itself', () => {
+    const row: HandoffRow = { ...H2, state: 'pending-merge' }
+    const v = deriveHandoff(row)
+    expect(v.stateLabel).toBe('pending-merge')
+    expect(v.stateTone).toBe('muted')
+  })
+
+  it('eligibility rules are unchanged by the stateLabel addition', () => {
+    // Same H4 case as above; re-assert eligibility invariant.
+    const v = deriveHandoff(H4)
+    expect(v.canClaim).toBe(false)
+    expect(v.canReply).toBe(false)
+    expect(v.canRequeue).toBe(true)
   })
 })

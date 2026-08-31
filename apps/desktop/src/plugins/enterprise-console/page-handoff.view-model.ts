@@ -10,6 +10,13 @@
  *   - Age → StatusTone mapping (matches pre-split)
  *   - Action eligibility from server row facts ONLY (no
  *     ownership inference, no client state machine)
+ *
+ * Per P1-VIS-V2 (Minimal Handoff productization):
+ *   - Added `stateLabel: string` field — trivial STATE_LABEL lookup
+ *     so the View can render a stable text. Mirrors the Reminder
+ *     VM addition. No change to eligibility rules.
+ *   - No new eligibility derivation. canClaim / canReply /
+ *     canRequeue continue to come ONLY from server row facts.
  */
 
 import type { StatusTone } from '@hermes/plugin-sdk'
@@ -42,6 +49,19 @@ export function ageTone(ageSeconds: null | number): StatusTone {
 }
 
 // ---------------------------------------------------------------------------
+// V2 productization — state label lookup (presentation-only)
+// ---------------------------------------------------------------------------
+
+const STATE_LABEL: Record<string, string> = {
+  parked: 'parked',
+  escalated: 'escalated',
+}
+
+function stateLabel(state: string): string {
+  return STATE_LABEL[state] ?? state
+}
+
+// ---------------------------------------------------------------------------
 // Presentation shape
 // ---------------------------------------------------------------------------
 
@@ -59,6 +79,8 @@ export interface HandoffRowView {
   canClaim: boolean
   canReply: boolean
   canRequeue: boolean
+  // V2 productization — presentation-only
+  stateLabel: string
 }
 
 export function deriveHandoff(row: HandoffRow): HandoffRowView {
@@ -81,6 +103,7 @@ export function deriveHandoff(row: HandoffRow): HandoffRowView {
     canClaim,
     canReply,
     canRequeue,
+    stateLabel: stateLabel(state),
   }
 }
 

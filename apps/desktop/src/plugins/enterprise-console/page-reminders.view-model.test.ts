@@ -2,6 +2,16 @@
  * Reminders page — ViewModel tests (W1-C §P15).
  *
  * Pure-function tests for the page-reminders.view-model derivations.
+ *
+ * Per P1-VIS-V2-REMEDIATION-01:
+ *   - The VM is now a pure derivation of server facts: no Date.now,
+ *     no nowSeconds parameter, no relativeOffset / relativeOffsetTone.
+ *   - deriveReminder and deriveReminders accept only the original
+ *     (row, fmtEpoch) / (rows, fmtEpoch) signatures.
+ *   - ReminderDetailView / detail / ownerDisplay are gone; the VM
+ *     never invented an owner value in the first place.
+ *   - The "unknown server state falls back to server string" test
+ *     survives, verifying the VM does not invent transition labels.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -79,6 +89,11 @@ describe('deriveReminder (wire → presentation)', () => {
     expect(v.scheduledFor).toBe(1700000000)
     expect(v.generation).toBe(1)
     expect(v.subjectDisplay).toBe('biz_task:biz-1')
+    // V2-R1: no relativeOffset / relativeOffsetTone in the type
+    expect((v as unknown as Record<string, unknown>).relativeOffset).toBeUndefined()
+    expect((v as unknown as Record<string, unknown>).relativeOffsetTone).toBeUndefined()
+    // V2-R2: no detail / ownerDisplay in the type
+    expect((v as unknown as Record<string, unknown>).detail).toBeUndefined()
   })
 
   it('empty title → "Untitled reminder" fallback (per pre-split)', () => {
@@ -96,6 +111,24 @@ describe('deriveReminder (wire → presentation)', () => {
     const v = deriveReminder(R3, fmtEpoch)
     expect(v.canCancelFromState).toBe(false)
     expect(v.tone).toBe('warn')
+  })
+
+  it('unknown server state → stateLabel falls back to the server string itself', () => {
+    const row: ReminderRow = {
+      ...R1,
+      reminder_id: 'rY',
+      state: 'pending-approval',
+    }
+
+    const v = deriveReminder(row, fmtEpoch)
+    expect(v.stateLabel).toBe('pending-approval')
+    expect(v.tone).toBe('muted') // unknown → muted default
+  })
+
+  it('is deterministic: same input produces same output across calls', () => {
+    const a = deriveReminder(R1, fmtEpoch)
+    const b = deriveReminder(R1, fmtEpoch)
+    expect(a).toEqual(b)
   })
 })
 

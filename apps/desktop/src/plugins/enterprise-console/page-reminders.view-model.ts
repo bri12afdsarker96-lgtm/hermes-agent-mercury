@@ -3,7 +3,7 @@
  *
  * Pure functions only. No transport, no query hooks, no session
  * atom, no permission authority, no mutation authority, no timezone
- * computation.
+ * computation, NO clock access (no Date.now / performance.now).
  *
  * Per W1-C §P15:
  *   - Wire row → presentation row mapping
@@ -11,6 +11,28 @@
  *   - Title fallback to "Untitled reminder"
  *   - canCancelFromState derived from state === 'active'
  *   - Display formatting via injected fmtEpoch
+ *
+ * Per P1-VIS-V2-REMEDIATION-01:
+ *   - REMOVED `relativeOffsetFor` + relativeOffset runtime feature.
+ *     The VM is a pure derivation of server facts; the relative-time
+ *     countdown required a client-side current-time authority, which
+ *     is forbidden by the W1C architecture. scheduledForDisplay +
+ *     timezone continue to be the P1 source of truth for time.
+ *   - REMOVED `ReminderDetailView` + `detail` + `ownerDisplay`. There
+ *     is no current Reminder product surface that consumes a detail
+ *     schema, and the VM must not pre-build a presentation contract
+ *     for future pages.
+ *   - KEPT `stateLabel` (trivial STATE_LABEL lookup; the View already
+ *     uses it as a stable presentation text independent of any
+ *     future surface).
+ *
+ * Per §P6 invariants:
+ *   - SERVER STATE > CLIENT ASSUMPTION
+ *   - VIEW CANNOT INVENT canCancel / canClaim / canReply / canRequeue
+ *   - FAILED CREATE != SUCCESS (controller concern, not VM)
+ *   - NO OPTIMISTIC REMINDER
+ *   - AVAILABLE FLAG = SERVER TRUTH (propagated via glue)
+ *   - 501 MUST REMAIN HONEST (controller concern, not VM)
  */
 
 import type { StatusTone } from '@hermes/plugin-sdk'
@@ -32,6 +54,20 @@ export function reminderTone(state: string): StatusTone {
 }
 
 // ---------------------------------------------------------------------------
+// V2 productization — state label (pure lookup)
+// ---------------------------------------------------------------------------
+
+const STATE_LABEL: Record<string, string> = {
+  active: 'active',
+  cancelled: 'cancelled',
+  exhausted: 'exhausted',
+}
+
+function stateLabel(state: string): string {
+  return STATE_LABEL[state] ?? state
+}
+
+// ---------------------------------------------------------------------------
 // Presentation shape
 // ---------------------------------------------------------------------------
 
@@ -49,6 +85,8 @@ export interface ReminderRowView {
   generation: number
   // Display
   subjectDisplay: string
+  // V2 productization — stable text for the state badge.
+  stateLabel: string
 }
 
 export function deriveReminder(
@@ -70,6 +108,7 @@ export function deriveReminder(
     scheduledFor: row.scheduled_for,
     generation: row.generation,
     subjectDisplay: `${row.subject_type}:${row.subject_id}`,
+    stateLabel: stateLabel(state),
   }
 }
 
