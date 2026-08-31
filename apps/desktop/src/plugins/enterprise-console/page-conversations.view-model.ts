@@ -145,31 +145,3 @@ export function deriveAttemptsList(
     })),
   }
 }
-// ---------------------------------------------------------------------------
-// Page-level visual productization helpers (Phase-1 Visual Baseline v1).
-//
-// Pure functions/constants only. No transport, no Date.now, no session,
-// no permission. The view consumes the formatted strings directly.
-//
-// Per P1-VIS-V1 §P5 Conversations invariant: this surface is a read-only
-// evidence ledger (inbound / outbound / delivery-attempt). It MUST NOT
-// present retry / blind-resend / release / requeue / mutation controls,
-// and `unknown_delivery` is evidence, not action authority.
-// Per P1-VIS-V1 §P7 reuse priority: ViewModel-derived strings flow into the
-// existing ConversationsView / PageHeader; no new shared component is
-// introduced.
-// ---------------------------------------------------------------------------
-
-/**
- * Conversations page purpose statement. Mirrors the Design Baseline v1
- * description while keeping the protocol-blessed English copy ("WeCom
- * conversations") and avoiding any invention of capability the controller
- * does not surface. Rendered by the view in PageHeader's `purpose` slot.
- */
-export function formatConversationsPurpose(): string {
-  return (
-    'Inspect tenant-scoped inbound and outbound message facts and delivery ' +
-    'attempt evidence. Read-only by design; no retry, release, requeue, or ' +
-    'blind-resend action is exposed from this Phase-1 surface.'
-  )
-}

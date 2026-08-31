@@ -27,13 +27,11 @@ import {
   derivePreview,
   deriveUploads,
   type EntryView,
-  formatKnowledgePurpose,
   gapTone,
   isAuthorTextValid,
   isPublishCollectionValid,
   isRejectReasonValid,
   type KbGapView,
-  KNOWLEDGE_READ_ONLY_NOTICE,
   type PreviewView,
   type UploadRowView,
   uploadTone,
@@ -372,31 +370,5 @@ describe('validation helpers (P7, P15)', () => {
       expect(isPublishCollectionValid('a'.repeat(64))).toBe(true)
       expect(isPublishCollectionValid('  colA  ')).toBe(true)
     })
-  })
-})
-describe('Knowledge visual productization helpers', () => {
-  it('formatKnowledgePurpose describes every server action without inventing capability', () => {
-    const purpose = formatKnowledgePurpose()
-    expect(purpose).toContain('Upload sources')
-    expect(purpose).toContain('preview staged chunks')
-    expect(purpose).toContain('stage candidate gaps')
-    expect(purpose).toContain('publish')
-    expect(purpose).toContain('withdraw')
-    expect(purpose).toContain('authoritative server workflows')
-    expect(purpose).not.toContain('retry')
-    expect(purpose).not.toContain('release')
-    expect(purpose).not.toContain('requeue')
-  })
-
-  it('KNOWLEDGE_READ_ONLY_NOTICE enumerates the K1-K7 invariant', () => {
-    expect(KNOWLEDGE_READ_ONLY_NOTICE).toContain('Upload')
-    expect(KNOWLEDGE_READ_ONLY_NOTICE).toContain('preview')
-    expect(KNOWLEDGE_READ_ONLY_NOTICE).toContain('publish')
-    expect(KNOWLEDGE_READ_ONLY_NOTICE).toContain('withdraw')
-    expect(KNOWLEDGE_READ_ONLY_NOTICE).toContain('manual candidate review')
-    expect(KNOWLEDGE_READ_ONLY_NOTICE).toContain('real')
-    expect(KNOWLEDGE_READ_ONLY_NOTICE).toContain('server actions')
-    expect(KNOWLEDGE_READ_ONLY_NOTICE).toContain('Failed actions stay failed')
-    expect(KNOWLEDGE_READ_ONLY_NOTICE).toContain('no rows are fabricated')
   })
 })

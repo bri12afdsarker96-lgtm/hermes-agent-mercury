@@ -24,7 +24,6 @@ import {
   deriveAttemptsList,
   deriveInboundList,
   deriveOutboundList,
-  formatConversationsPurpose,
   OUTCOME_TONE,
   STATE_TONE,
 } from './page-conversations.view-model'
@@ -190,22 +189,5 @@ describe('Phase-1 read-only contract', () => {
     expect(typeof deriveAttemptsList).toBe('function')
     expect(typeof STATE_TONE).toBe('object')
     expect(typeof OUTCOME_TONE).toBe('object')
-  })
-})
-describe('Conversations visual productization helpers', () => {
-  it('formatConversationsPurpose describes inbound/outbound/attempts evidence without exposing mutation', () => {
-    const purpose = formatConversationsPurpose()
-    expect(purpose).toContain('inbound')
-    expect(purpose).toContain('outbound')
-    expect(purpose).toContain('delivery')
-    expect(purpose).toContain('attempt evidence')
-    expect(purpose).toContain('Read-only')
-    // C5-C9 invariants: the purpose MUST enumerate the forbidden actions
-    // so a regression that adds a control above the surface would fail
-    // review at the helper layer too, not only at the contract test.
-    expect(purpose).toContain('no retry')
-    expect(purpose).toContain('release')
-    expect(purpose).toContain('requeue')
-    expect(purpose).toContain('blind-resend')
   })
 })
