@@ -14,6 +14,26 @@
  *     aria-label, status aria-label, empty-text improvement,
  *     flex-wrap for narrow viewports. NO controller, NO
  *     contract change.
+ *
+ * Per P1-VIS-V2-REMEDIATION-01:
+ *   - REMOVED the relative-offset countdown badge. The
+ *     relative-time display required a client current-time
+ *     authority in the VM, which conflicts with the W1C
+ *     pure-VM architecture. scheduledForDisplay + timezone
+ *     remain the time truth.
+ *   - REMOVED ReminderDetailView consumption (no longer on the
+ *     VM contract).
+ *   - REMOVED internal `/api/...` REST path from the visible
+ *     product copy. The status strip now reads as honest
+ *     availability language ("Reminder service available" /
+ *     "Reminder service unavailable") that mirrors the
+ *     server-derived available flag without leaking transport
+ *     detail into the visible product UI.
+ *
+ * Per §P6 invariants:
+ *   - SERVER STATE > CLIENT ASSUMPTION
+ *   - View never decides whether a reminder can be cancelled
+ *     (canCancelFromState is the VM-derived gate).
  */
 
 import { StatusDot } from '@hermes/plugin-sdk'
@@ -56,16 +76,37 @@ export function RemindersView({
 }: RemindersViewProps) {
   return (
     <div
-      className="mx-auto flex w-full max-w-[96rem] flex-col px-(--ec-page-inset-x) py-(--ec-page-inset-y)"
-      data-page-status="ready"
+      className="mx-auto flex w-full max-w-[96rem] flex-col gap-(--ec-page-inset-y) px-(--ec-page-inset-x) py-(--ec-page-inset-y)"
+      data-page-status={available ? 'ready' : 'partial'}
       data-testid="console-page-reminders"
     >
       <PageHeader
         actions={createSlot}
         purpose="Schedule and cancel server-authoritative reminders without duplicating the reminder state machine."
-        status={<PageStatusBadge status="ready" />}
+        status={<PageStatusBadge status={available ? 'ready' : 'partial'} />}
         title="Reminders"
       />
+
+      <section
+        aria-labelledby="console-reminders-status-heading"
+        className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-(--ui-text-tertiary)"
+        data-ec-state={available ? 'available' : 'unavailable'}
+        data-testid="console-reminders-status"
+      >
+        <h2 className="sr-only" id="console-reminders-status-heading">
+          Reminder service availability
+        </h2>
+        <span className="inline-flex items-center gap-1">
+          <StatusDot tone={available ? 'good' : 'bad'} />
+          {available
+            ? 'Reminder service available'
+            : 'Reminder service unavailable'}
+        </span>
+        <span aria-hidden="true" className="hidden sm:inline">·</span>
+        <span>
+          {reminders.length} reminder{reminders.length === 1 ? '' : 's'}
+        </span>
+      </section>
 
       <ConsolePanel divided title="Schedule">
         <QueryBody
@@ -84,14 +125,18 @@ export function RemindersView({
               {reminders.map((reminder) => (
                 <li
                   aria-label={`reminder ${reminder.title}, scheduled ${reminder.scheduledForDisplay} ${reminder.timezone}, state ${reminder.state}`}
-                  className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
+                  className="flex flex-wrap items-center justify-between gap-2 border-b border-(--ui-stroke-tertiary) py-2 text-sm last:border-b-0"
+                  data-ec-reminder-state={reminder.state}
                   data-testid={`console-reminder-row-${reminder.reminderId}`}
                   key={reminder.reminderId}
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium text-(--ui-text-primary)">{reminder.title}</div>
+                    <div className="truncate font-medium text-(--ui-text-primary)">
+                      {reminder.title}
+                    </div>
                     <div className="text-(--ui-text-tertiary)">
-                      {reminder.subjectDisplay} · {reminder.scheduledForDisplay} · {reminder.timezone}
+                      {reminder.subjectDisplay} · {reminder.scheduledForDisplay} ·{' '}
+                      <span data-ec-mono="">{reminder.timezone}</span>
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -100,7 +145,7 @@ export function RemindersView({
                       className="inline-flex items-center gap-1 text-xs"
                     >
                       <StatusDot tone={reminder.tone} />
-                      {reminder.state}
+                      {reminder.stateLabel}
                     </span>
                     {reminderRowActionsSlot({
                       reminderId: reminder.reminderId,
