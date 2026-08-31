@@ -6,6 +6,23 @@
  * silence. `callback_health` is always 'unknown' in Phase-1 (not actively
  * probed) and is shown honestly, not inferred from an absence of inbound.
  * Gated by `channel.binding.manage` (tenant integration config; tenant_admin).
+ *
+ * P1-VIS-V3 — visual productization. Adopted the ConsolePanel / KpiCard /
+ * PageHeader geometry from the approved Visual Baseline v1 and split the
+ * presentation into three product-shaped regions:
+ *   - A KPI strip for the four headline facts (Association / Credential /
+ *     Bindings / Last outcome).
+ *   - An "Integration truth" panel whose credential row uses a dedicated
+ *     caption pair: the state word + the precise (present / observed) tally
+ *     so a partial truth reads at a glance, not as a colour blob.
+ *   - A "Recent activity" panel whose rows use mono numerics for the verified
+ *     inbound / outbound timestamps so admins can compare against server logs
+ *     without ambiguity.
+ *
+ * No write affordance is introduced (no configure / install / rotate / reissue
+ * control), no credential is exposed, and the four-state UNKNOWN / ABSENT /
+ * PARTIAL / PRESENT strings remain the literal, exact words the SC5 contract
+ * test asserts.
  */
 
 import { icons, StatusDot, type StatusTone } from '@hermes/plugin-sdk'
@@ -41,11 +58,21 @@ const CREDENTIAL_TONE: Record<CredentialState, StatusTone> = {
   UNKNOWN: 'muted'
 }
 
+/** One-line honest gloss of what each credential state means in this Phase-1. */
+const CREDENTIAL_GLOSS: Record<CredentialState, string> = {
+  ABSENT: 'observed refs without any matching runtime credential',
+  PARTIAL: 'some runtime credentials present, but not for every observed app config ref',
+  PRESENT: 'every observed app config ref has a runtime credential',
+  UNKNOWN: 'no observed app config refs — nothing to check against'
+}
+
 function Field({ children, label }: { children: React.ReactNode; label: string }) {
   return (
-    <div className="flex min-h-11 items-center justify-between gap-4 border-b border-(--ui-stroke-tertiary) py-2 last:border-b-0">
-      <span className="text-(--ui-text-secondary)">{label}</span>
-      <span className="inline-flex min-w-0 items-center gap-1 text-right text-(--ui-text-primary)">{children}</span>
+    <div className="flex min-h-11 items-start justify-between gap-4 border-b border-(--ui-stroke-tertiary) py-2 last:border-b-0">
+      <span className="shrink-0 text-(--ui-text-secondary)">{label}</span>
+      <span className="inline-flex min-w-0 flex-1 items-center justify-end gap-2 text-right text-(--ui-text-primary)">
+        {children}
+      </span>
     </div>
   )
 }
@@ -69,9 +96,25 @@ export function WeComPage() {
         {data => {
           const status = data.wecom
 
+          const outcomeLabel =
+            status.last_delivery_outcome === null
+              ? '—'
+              : status.last_delivery_outcome === 'success'
+                ? 'success'
+                : status.last_delivery_outcome
+
+          const outcomeTone: StatusTone =
+            status.last_delivery_outcome === 'success'
+              ? 'good'
+              : status.last_delivery_outcome === null
+                ? 'muted'
+                : status.last_delivery_outcome === 'transient'
+                  ? 'warn'
+                  : 'bad'
+
           return (
             <div className="flex flex-col gap-(--ec-gutter)" data-testid="console-wecom">
-              <div className="grid gap-(--ec-gutter) md:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-(--ec-gutter) md:grid-cols-2 xl:grid-cols-4">
                 <KpiCard
                   accent="brand"
                   icon={icons.Link2}
@@ -84,7 +127,18 @@ export function WeComPage() {
                   label="Runtime credential"
                   value={status.runtime_credential_state}
                 />
-                <KpiCard accent="takeover" icon={icons.Users} label="Bindings" value={status.binding_count} />
+                <KpiCard
+                  accent="takeover"
+                  icon={icons.Users}
+                  label="Bindings"
+                  value={status.binding_count}
+                />
+                <KpiCard
+                  accent="followup"
+                  icon={icons.Send}
+                  label="Last delivery"
+                  value={outcomeLabel}
+                />
               </div>
 
               <div className="grid items-start gap-(--ec-gutter) xl:grid-cols-2">
@@ -97,9 +151,13 @@ export function WeComPage() {
                     <StatusDot tone={CREDENTIAL_TONE[status.runtime_credential_state]} />
                     {status.runtime_credential_state}
                     <span className="text-(--ui-text-tertiary)" data-ec-mono="">
-                      ({status.runtime_credential_present_count ?? '—'}/{status.observed_app_config_ref_count})
+                      ({status.runtime_credential_present_count ?? '—'}/
+                      {status.observed_app_config_ref_count})
                     </span>
                   </Field>
+                  <div className="border-b border-(--ui-stroke-tertiary) py-2 text-xs text-(--ui-text-tertiary)">
+                    {CREDENTIAL_GLOSS[status.runtime_credential_state]}
+                  </div>
                   <Field label="callback health">
                     <span className="text-(--ui-text-secondary)">{status.callback_health} · not actively probed</span>
                   </Field>
@@ -112,7 +170,12 @@ export function WeComPage() {
                   <Field label="last outbound">
                     <span data-ec-mono="">{fmtIso(status.last_outbound_at)}</span>
                   </Field>
-                  <Field label="last delivery outcome">{status.last_delivery_outcome ?? '—'}</Field>
+                  <Field label="last delivery outcome">
+                    <span className="inline-flex items-center gap-1">
+                      <StatusDot tone={outcomeTone} />
+                      {status.last_delivery_outcome ?? '—'}
+                    </span>
+                  </Field>
                 </ConsolePanel>
               </div>
             </div>

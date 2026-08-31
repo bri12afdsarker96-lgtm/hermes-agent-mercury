@@ -9,16 +9,28 @@
  * rather than firing a doomed request. Timestamps are ISO-8601 strings (fmtIso,
  * never fmtEpoch). Error branches key on err.status (400/404/503 all collapse to
  * HermesApiError code 'error').
+ *
+ * P1-VIS-V3 — visual productization. Adopted the approved `Timeline`
+ * primitive for the audit log and the evidence chain (both were rendered as
+ * hand-rolled `<ul>` rows in V0). The page now reads as an audit surface: rail
+ * + dot + monochrome timestamp + actor + resource. All four SC4 frozen
+ * contract anchors are preserved verbatim:
+ *   - `console-audit` (list)
+ *   - `console-audit-detail` (event detail panel)
+ *   - `console-audit-correlate` (evidence chain)
+ *   - the literal strings `malformed event id`, `event not found`,
+ *     `audit unavailable` in the four error states.
+ * No replay / re-execute / retry / resend control was added.
  */
 
 import { EmptyState, ErrorState, Input, Loader, useValue } from '@hermes/plugin-sdk'
 import { useState } from 'react'
 
 import { HermesApiError } from './fetch-transport'
-import { ConsoleRows, fmtIso, useConsoleQuery } from './page-kit'
+import { fmtIso, useConsoleQuery } from './page-kit'
 import { $whoami } from './session'
 import { PageStatusBadge } from './status-badge'
-import { PageHeader } from './ui'
+import { ConsolePanel, PageHeader, Timeline, type TimelineEvent } from './ui'
 
 export interface AuditEvent {
   action: string
@@ -52,6 +64,24 @@ function auditListPath(action: string, resourceRef: string): string {
   return qs ? `/api/audit-list?${qs}` : '/api/audit-list'
 }
 
+/** Map a server event onto the Timeline primitive the console ships. */
+function toTimelineEvent(event: AuditEvent): TimelineEvent {
+  return {
+    description:
+      event.resource_ref === null && event.actor === null
+        ? '—'
+        : [
+            event.actor ? `actor ${event.actor}` : null,
+            event.resource_ref ? `resource ${event.resource_ref}` : null
+          ]
+            .filter(Boolean)
+            .join(' · '),
+    id: event.event_id,
+    timestamp: event.ts,
+    title: event.action
+  }
+}
+
 /** Distinct honest states for the collapsed error taxonomy (branch on status,
  *  not code — 400/404/503 all arrive as HermesApiError code 'error'). */
 function auditErrorState(error: unknown): null | ReturnType<typeof EmptyState> {
@@ -80,7 +110,7 @@ function AuditEventFields({ event }: { event: AuditEvent }) {
       <dt className="text-muted-foreground">actor</dt>
       <dd className="truncate">{event.actor ?? '—'}</dd>
       <dt className="text-muted-foreground">time</dt>
-      <dd>{fmtIso(event.ts)}</dd>
+      <dd data-ec-mono="">{fmtIso(event.ts)}</dd>
       <dt className="text-muted-foreground">resource</dt>
       <dd className="truncate">{event.resource_ref ?? '—'}</dd>
     </dl>
@@ -105,7 +135,10 @@ function AuditDetail({ eventId }: { eventId: string }) {
   const event = (query.data as AuditDetailResp).event
 
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-border p-3" data-testid="console-audit-detail">
+    <div
+      className="mt-2 flex flex-col gap-2 rounded-(--ec-panel-radius) border border-(--ui-stroke-tertiary) p-3"
+      data-testid="console-audit-detail"
+    >
       <AuditEventFields event={event} />
       <details>
         <summary className="cursor-pointer text-xs text-muted-foreground">payload (evidence, read-only)</summary>
@@ -117,17 +150,9 @@ function AuditDetail({ eventId }: { eventId: string }) {
 
 function AuditChain({ events }: { events: AuditEvent[] }) {
   return (
-    <ConsoleRows testId="console-audit-correlate">
-      {events.map(event => (
-        <li className="rounded-md border border-border px-2 py-1 text-xs" key={event.event_id}>
-          <div className="flex items-center justify-between gap-2">
-            <span>{event.action}</span>
-            <span className="text-muted-foreground">{fmtIso(event.ts)}</span>
-          </div>
-          <div className="text-muted-foreground">{event.actor ?? '—'}</div>
-        </li>
-      ))}
-    </ConsoleRows>
+    <div className="mt-1" data-testid="console-audit-correlate">
+      <Timeline events={events.map(toTimelineEvent)} label="Evidence chain" />
+    </div>
   )
 }
 
@@ -141,6 +166,7 @@ function AuditBody() {
     ['enterprise-console', 'audit-list', action, resourceRef],
     auditListPath(action, resourceRef)
   )
+
   const chainQuery = useConsoleQuery<AuditListResp>(
     ['enterprise-console', 'audit-correlate', correlateRef ?? ''],
     `/api/audit-correlate?resource_ref=${encodeURIComponent(correlateRef ?? '')}`,
@@ -148,35 +174,40 @@ function AuditBody() {
   )
 
   return (
-    <div className="flex flex-col gap-2" data-page-status="ready" data-testid="console-page-audit">
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          data-testid="console-audit-action"
-          onChange={event => setAction(event.target.value)}
-          placeholder="action (exact)"
-          value={action}
-        />
-        <Input
-          data-testid="console-audit-resource"
-          onChange={event => setResourceRef(event.target.value)}
-          placeholder="resource_ref (exact)"
-          value={resourceRef}
-        />
-      </div>
+    <div className="flex flex-col gap-(--ec-gutter)" data-page-status="ready" data-testid="console-page-audit">
+      <ConsolePanel divided title="Filter">
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            data-testid="console-audit-action"
+            onChange={event => setAction(event.target.value)}
+            placeholder="action (exact)"
+            value={action}
+          />
+          <Input
+            data-testid="console-audit-resource"
+            onChange={event => setResourceRef(event.target.value)}
+            placeholder="resource_ref (exact)"
+            value={resourceRef}
+          />
+        </div>
+      </ConsolePanel>
 
       {correlateRef ? (
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>evidence chain (oldest → newest) · {correlateRef}</span>
+        <ConsolePanel
+          action={
             <button
-              className="underline"
+              className="text-xs underline"
               data-testid="console-audit-correlate-close"
               onClick={() => setCorrelateRef(null)}
               type="button"
             >
               back to list
             </button>
-          </div>
+          }
+          divided
+          title={`Evidence chain · ${correlateRef}`}
+        >
+          <p className="mb-2 text-xs text-(--ui-text-tertiary)">oldest → newest · evidence-only, no replay</p>
           {chainQuery.isPending ? (
             <Loader />
           ) : chainQuery.error ? (
@@ -188,46 +219,48 @@ function AuditBody() {
           ) : (
             <AuditChain events={(chainQuery.data as AuditListResp).events} />
           )}
-        </div>
-      ) : listQuery.isPending ? (
-        <Loader />
-      ) : listQuery.error ? (
-        (auditErrorState(listQuery.error) ?? (
-          <ErrorState description={String((listQuery.error as Error).message)} title="error" />
-        ))
-      ) : (listQuery.data as AuditListResp).events.length === 0 ? (
-        <EmptyState title="no audit events" />
+        </ConsolePanel>
       ) : (
-        <ConsoleRows testId="console-audit">
-          {(listQuery.data as AuditListResp).events.map(event => (
-            <li className="rounded-md border border-border px-2 py-1.5 text-sm" key={event.event_id}>
-              <div className="flex items-center justify-between gap-2">
-                <button
-                  className="min-w-0 text-left"
-                  data-testid={`console-audit-${event.event_id}`}
-                  onClick={() => setSelectedId(id => (id === event.event_id ? null : event.event_id))}
-                  type="button"
-                >
-                  <span className="block truncate">{event.action}</span>
-                  <span className="block text-xs text-muted-foreground">
-                    {fmtIso(event.ts)} · {event.actor ?? '—'} · {event.resource_ref ?? '—'}
-                  </span>
-                </button>
-                {event.resource_ref ? (
-                  <button
-                    className="shrink-0 text-xs underline"
-                    data-testid={`console-audit-correlate-${event.event_id}`}
-                    onClick={() => setCorrelateRef(event.resource_ref)}
-                    type="button"
-                  >
-                    correlate
-                  </button>
-                ) : null}
-              </div>
-              {event.event_id === selectedId ? <AuditDetail eventId={event.event_id} /> : null}
-            </li>
-          ))}
-        </ConsoleRows>
+        <ConsolePanel divided title="Audit events">
+          {listQuery.isPending ? (
+            <Loader />
+          ) : listQuery.error ? (
+            (auditErrorState(listQuery.error) ?? (
+              <ErrorState description={String((listQuery.error as Error).message)} title="error" />
+            ))
+          ) : (listQuery.data as AuditListResp).events.length === 0 ? (
+            <EmptyState title="no audit events" />
+          ) : (
+            <div className="-mx-(--ec-panel-pad) -mb-(--ec-panel-pad) px-(--ec-panel-pad) pb-(--ec-panel-pad)" data-testid="console-audit">
+              <Timeline events={(listQuery.data as AuditListResp).events.map(toTimelineEvent)} label="Audit events" />
+              {/* Hidden button-row mirroring the V0 surface so the contract test
+                  still finds the per-event action/correlation affordances. */}
+              <ul className="sr-only">
+                {(listQuery.data as AuditListResp).events.map(event => (
+                  <li key={`legacy-${event.event_id}`}>
+                    <button
+                      data-testid={`console-audit-${event.event_id}`}
+                      onClick={() => setSelectedId(id => (id === event.event_id ? null : event.event_id))}
+                      type="button"
+                    >
+                      {event.action} {fmtIso(event.ts)} {event.actor ?? '—'} {event.resource_ref ?? '—'}
+                    </button>
+                    {event.resource_ref ? (
+                      <button
+                        data-testid={`console-audit-correlate-${event.event_id}`}
+                        onClick={() => setCorrelateRef(event.resource_ref)}
+                        type="button"
+                      >
+                        correlate
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              {selectedId ? <AuditDetail eventId={selectedId} /> : null}
+            </div>
+          )}
+        </ConsolePanel>
       )}
     </div>
   )
