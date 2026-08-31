@@ -129,6 +129,7 @@ import {
 } from './desktop-uninstall'
 import { describeDevCdpDecision, resolveDevCdpPort } from './dev-cdp'
 import { installEmbedReferer } from './embed-referer'
+import { resolveEnterpriseOriginCandidate } from './enterprise-origin-candidate'
 import {
   buildAutoConnectResult,
   classifyConnectError,
@@ -13520,8 +13521,28 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
 
   const senderId = event.sender.id
 
+  // B16-OL · Trusted main-owned enterprise origin resolution.
+  //
+  //   1. process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN, when present and
+  //      non-blank, is authoritative for this process. An explicit-but-invalid
+  //      value is forwarded verbatim so the existing normalizer can fail
+  //      closed; the resolver never silently substitutes a different origin
+  //      (which would let a misconfigured launcher smuggle traffic).
+  //   2. When the explicit process env is absent/blank, fall back to the
+  //      live HKCU\Environment value on Windows via the existing
+  //      readWindowsUserEnvVar seam. GUI apps launched from Explorer inherit
+  //      a stale env snapshot, so a value set via `setx` after login is
+  //      invisible to process.env; the registry read closes that gap.
+  //      Off-Windows the helper returns null without spawning.
   const enterpriseOrigin = normalizeEnterpriseApiOriginOrNull(
-    process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN
+    resolveEnterpriseOriginCandidate({
+      processEnv: process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN,
+      // Lazy callback: the resolver only invokes this when the explicit
+      // process env is absent or blank, so explicit non-blank values
+      // never trigger a `reg` spawn.
+      windowsUserEnvReader: () =>
+        readWindowsUserEnvVar('HERMES_DESKTOP_ENTERPRISE_ORIGIN')
+    })
   )
 
   if (!enterpriseOrigin) {
