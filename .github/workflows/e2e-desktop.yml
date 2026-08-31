@@ -13,6 +13,11 @@ on:
         required: false
         type: number
         default: 20
+      xvfb_screen:
+        description: Xvfb screen geometry (e.g. 1280x1024x24) for scoped reusable E2E callers.
+        required: false
+        type: string
+        default: 1280x1024x24
     outputs:
       review_status:
         description: Screenshot and visual-diff status for the CI review comment.
@@ -119,11 +124,11 @@ jobs:
           TEST_PATH='${{ inputs.test_path }}'
           if [ "${{ github.ref_name }}" = "main" ]; then
             echo "On main — generating/updating baseline screenshots"
-            npm run build && xvfb-run -a --server-args="-screen 0 1280x1024x24" \
+            npm run build && xvfb-run -a --server-args="-screen 0 ${{ inputs.xvfb_screen }}" \
               npx playwright test ${TEST_PATH:+"$TEST_PATH"} --reporter=list --update-snapshots
           else
             echo "On PR — comparing against cached baselines"
-            npm run build && xvfb-run -a --server-args="-screen 0 1280x1024x24" \
+            npm run build && xvfb-run -a --server-args="-screen 0 ${{ inputs.xvfb_screen }}" \
               npx playwright test ${TEST_PATH:+"$TEST_PATH"} --reporter=list
           fi
         env:

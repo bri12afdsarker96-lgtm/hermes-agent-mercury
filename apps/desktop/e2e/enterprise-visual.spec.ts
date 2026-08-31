@@ -13,9 +13,21 @@
  * `npx playwright test e2e/enterprise-visual.spec.ts --update-snapshots`.
  * The Linux baselines were committed only after the first hard missing-baseline
  * run produced all four actuals and those exact actuals were manually reviewed.
+ *
+ * REMEDIATION-02 edits (scope: harness-only):
+ *   1. Deterministic viewport application: bounded retry (max 3) of setBounds
+ *      and setContentSize, with an explicit throw on failure reporting
+ *      target vs actual window.innerWidth/innerHeight. The screenshot is
+ *      never taken when the inner size does not match the target.
+ *   2. Update-notification suppression: the transient `Update ready`
+ *      overlay can appear above the Enterprise route during cold-boot.
+ *      We dismiss it via the existing Radix dialog close button (the same
+ *      `aria-label="Close"` the dialog renders by default) and then assert
+ *      that no open dialog with the `Update ready` title remains. No CSS
+ *      hide, no DOM removal, no product source change.
  */
 
-import { type ElectronApplication } from '@playwright/test'
+import { type ElectronApplication, type Page } from '@playwright/test'
 
 import { type MockBackendFixture, setupMockBackend } from './fixtures'
 import { expect, test } from './test'
@@ -52,6 +64,7 @@ const ENTERPRISE_RESPONSES = {
   },
 } as const
 
+// Default viewport set (all four enabled).
 const EVIDENCE_VIEWPORTS = [
   { height: 720, width: 1280 },
   { height: 900, width: 1440 },
@@ -102,45 +115,102 @@ async function installEnterpriseEvidenceServer(app: ElectronApplication): Promis
   )
 }
 
-async function setContentViewport(
+// Bounded viewport application. Forces both the Electron BrowserWindow content
+// size AND the Playwright page viewport to match the requested width/height,
+// with a small bounded retry (max 3 attempts). On failure, throws with
+// explicit target vs actual evidence so the failing viewport is reported
+// instead of being silently screenshot at a wrong size.
+const MAX_VIEWPORT_RESIZE_ATTEMPTS = 3
+
+async function applyViewportOrThrow(
   app: ElectronApplication,
+  page: Page,
   width: number,
   height: number,
 ): Promise<void> {
-  // On cold CI runners Electron's first-window restoration (DEFAULT_WIDTH=1220
-  // / DEFAULT_HEIGHT=800 in window-state.ts) sometimes fights the per-test
-  // viewport resize. setBounds is the authoritative call (it forces the
-  // OS-level window resize, including the rare shrink-to-fit case), but
-  // xvfb has historically ignored setBounds for the 1280×720 viewport
-  // when starting from a 1220×800 restored state. We therefore attempt
-  // setBounds first and fall back to setContentSize if the resize did
-  // not actually take effect. The trailing 250ms wait gives the renderer
-  // one paint frame to relayout before the screenshot.
-  await app.evaluate(
-    async ({ BrowserWindow }, size) => {
+  for (let attempt = 1; attempt <= MAX_VIEWPORT_RESIZE_ATTEMPTS; attempt++) {
+    // First set the Playwright page viewport (renderer-side, controls
+    // page-level viewport that toHaveScreenshot reads).
+    await page.setViewportSize({ height, width })
+
+    // Then drive the Electron BrowserWindow content size to match.
+    await app.evaluate(
+      async ({ BrowserWindow }, size) => {
+        const win = BrowserWindow.getAllWindows()[0]
+        if (!win) {
+          throw new Error('Enterprise visual evidence window is unavailable')
+        }
+        win.unmaximize()
+        win.setMinimumSize(640, 480)
+        // setBounds first (forces OS-level resize).
+        win.setBounds({ x: 0, y: 0, width: size.width, height: size.height })
+        // Confirm and fall back to setContentSize if needed.
+        const after = win.getContentSize()
+        if (after[0] !== size.width || after[1] !== size.height) {
+          win.setContentSize(size.width, size.height, false)
+        }
+        // Give the renderer one paint frame to relayout. The Main process does
+        // not have requestAnimationFrame, so use a small setTimeout.
+        await new Promise<void>((resolve) => setTimeout(resolve, 100))
+      },
+      { height, width },
+    )
+
+    // Re-set Playwright viewport AFTER Electron resize in case the resize
+    // pushed the page viewport back to its default.
+    await page.setViewportSize({ height, width })
+
+    const actualApp = await app.evaluate(({ BrowserWindow }) => {
       const win = BrowserWindow.getAllWindows()[0]
+      const [w, h] = win ? win.getContentSize() : [0, 0]
+      return { height: h, width: w }
+    })
+    const actualPage = await page.evaluate(() => ({
+      height: window.innerHeight,
+      width: window.innerWidth,
+    }))
 
-      if (!win) {
-        throw new Error('Enterprise visual evidence window is unavailable')
-      }
+    // Both Electron content size AND renderer inner size must match the target.
+    // A mismatch means window-state restoration is fighting the resize.
+    if (
+      actualApp.width === width &&
+      actualApp.height === height &&
+      actualPage.width === width &&
+      actualPage.height === height
+    ) {
+      return
+    }
 
-      win.unmaximize()
-      win.setMinimumSize(640, 480)
-      win.setBounds({ x: 0, y: 0, width: size.width, height: size.height })
+    if (attempt === MAX_VIEWPORT_RESIZE_ATTEMPTS) {
+      throw new Error(
+        `Enterprise visual viewport resize failed: target=${width}x${height} actual_app=${actualApp.width}x${actualApp.height} actual_page=${actualPage.width}x${actualPage.height} after ${MAX_VIEWPORT_RESIZE_ATTEMPTS} attempts`,
+      )
+    }
+  }
+}
 
-      // Confirm the resize actually took effect. setBounds is a no-op on
-      // some Linux xvfb + Electron cold-boot combinations (the window
-      // keeps its DEFAULT_WIDTH=1220 size). If the innerSize still does
-      // not match, retry once via setContentSize.
-      const after = win.getContentSize()
-
-      if (after[0] !== size.width || after[1] !== size.height) {
-        win.setContentSize(size.width, size.height, false)
-      }
-    },
-    { height, width },
-  )
-  await new Promise(resolve => setTimeout(resolve, 250))
+// Pre-screenshot cleanup: dismiss any transient Update-ready notification that
+// might overlay the Enterprise route during cold-boot. Uses the existing Radix
+// dialog close button (aria-label="Close"); no CSS hide, no DOM removal, no
+// product source change. Bounded timeout keeps the test deterministic.
+async function dismissTransientUpdateOverlay(page: Page): Promise<void> {
+  const updateTitle = page.getByRole('dialog').filter({ hasText: 'Update ready' }).first()
+  let visible = false
+  try {
+    visible = await updateTitle.isVisible({ timeout: 5_000 })
+  } catch {
+    visible = false
+  }
+  if (!visible) {
+    return
+  }
+  // The Radix dialog primitive renders a default close button with
+  // aria-label="Close". Click it instead of relying on Escape, because
+  // Escape can race against the dialog open animation on cold boot.
+  const closeButton = page.getByRole('button', { name: 'Close', exact: true }).first()
+  await closeButton.click({ timeout: 5_000 })
+  // Assert the update overlay is absent before any screenshot.
+  await expect(updateTitle).not.toBeVisible({ timeout: 5_000 })
 }
 
 let fixture: MockBackendFixture | null = null
@@ -160,6 +230,10 @@ test.beforeAll(async () => {
   await expect(enterpriseNav).toBeVisible({ timeout: 15_000 })
   await enterpriseNav.click()
   await expect(fixture.page.getByTestId('console-page-dashboard')).toBeVisible({ timeout: 15_000 })
+
+  // Suppress the transient `Update ready` overlay before any viewport proof
+  // begins, so the four viewports share the same notification-free baseline.
+  await dismissTransientUpdateOverlay(fixture.page)
 })
 
 test.afterAll(async () => {
@@ -187,16 +261,30 @@ for (const { height, width } of EVIDENCE_VIEWPORTS) {
   test(`operator home has hard visual baseline at ${width}x${height}`, async () => {
     const { app, page } = fixture!
 
-    await setContentViewport(app, width, height)
+    // Force the Electron window content size AND the Playwright page viewport
+    // to the requested viewport with bounded retries. Throws on failure so
+    // the test fails fast with target vs actual evidence instead of producing
+    // a 1220x800 PNG at a 1280x720 name.
+    await applyViewportOrThrow(app, page, width, height)
+
+    // Renderer-side confirmation that the innerWidth/innerHeight match the
+    // requested viewport. This catches window-state restoration races that
+    // BrowserWindow.getContentSize does not always observe.
     await expect
       .poll(() => page.evaluate(() => ({ height: window.innerHeight, width: window.innerWidth })))
       .toEqual({ height, width })
+
     await page.evaluate(async () => {
       await document.fonts.ready
       await new Promise<void>((resolve) =>
         requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
       )
     })
+
+    // Re-dismiss any notification that may have re-appeared (defence in depth;
+    // bounded so the screenshot is never silently skipped if the overlay is
+    // stuck on screen).
+    await dismissTransientUpdateOverlay(page)
 
     await expect(page).toHaveScreenshot(`enterprise-operator-home-${width}x${height}.png`, {
       animations: 'disabled',
