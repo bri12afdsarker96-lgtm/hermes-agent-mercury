@@ -97,7 +97,10 @@ export interface Sandbox {
   cleanup: () => void
 }
 
-export function createSandbox(prefix: string): Sandbox {
+export function createSandbox(
+  prefix: string,
+  options?: { initialWindowSize?: { width: number; height: number } },
+): Sandbox {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `hermes-e2e-${prefix}-${Math.random()}`))
   const hermesHome = path.join(root, 'hermes-home')
   const userDataDir = path.join(root, 'electron-user-data')
@@ -113,7 +116,10 @@ export function createSandbox(prefix: string): Sandbox {
   fs.writeFileSync(
     path.join(userDataDir, 'window-state.json'),
     JSON.stringify(
-      { x: 0, y: 0, width: 1220, height: 800, isMaximized: false },
+      (function () {
+        const size = options?.initialWindowSize ?? { width: 1220, height: 800 }
+        return { x: 0, y: 0, width: size.width, height: size.height, isMaximized: false }
+      })(),
       null,
       2,
     ),
@@ -319,6 +325,7 @@ export async function launchDesktop(
   options: {
     beforeFirstWindow?: (app: ElectronApplication) => Promise<void>
     headless?: boolean
+    installErrorGuard?: boolean
   } = {},
 ): Promise<{ app: ElectronApplication; page: Page }> {
   assertDistBuilt()
@@ -344,8 +351,12 @@ export async function launchDesktop(
   const page = await app.firstWindow()
 
   // Install the error-banner guard so any [role="alert"] that appears
-  // during a test is collected and surfaced in afterEach.
-  installErrorBannerGuard(page)
+  // during a test is collected and surfaced in afterEach. The Visual
+  // Evidence spec opts out of the global guard and runs its own bounded
+  // role=alert assertion owned by the spec.
+  if (options.installErrorGuard !== false) {
+    installErrorBannerGuard(page)
+  }
 
   return { app, page }
 }
@@ -387,6 +398,17 @@ export interface MockBackendOptions {
   /** Run Electron with Chromium's headless compositor. */
   headless?: boolean
   mockServer?: MockServerOptions
+  /**
+   * Override the initial Electron window size written to the sandbox
+   * `window-state.json`. Default preserves 1220x800 for all other suites.
+   */
+  initialWindowSize?: { width: number; height: number }
+  /**
+   * Install the generic role=alert afterEach error guard. Default
+   * preserves `true` for all other suites. Enterprise Visual Evidence
+   * opts out and replaces it with its own bounded role=alert check.
+   */
+  installErrorGuard?: boolean
 }
 
 export async function setupMockBackend(options: MockBackendOptions = {}): Promise<MockBackendFixture> {
@@ -394,7 +416,9 @@ export async function setupMockBackend(options: MockBackendOptions = {}): Promis
   const mock = await startMockServer(options.mockServer)
 
   // 2. Create sandbox + write config
-  const sandbox = createSandbox('mock')
+  const sandbox = createSandbox('mock', {
+    initialWindowSize: options.initialWindowSize,
+  })
   writeMockProviderConfig(
     sandbox.hermesHome,
     mock.url,
@@ -409,6 +433,7 @@ export async function setupMockBackend(options: MockBackendOptions = {}): Promis
   const { app, page } = await launchDesktop(env, {
     beforeFirstWindow: options.beforeFirstWindow,
     headless: options.headless,
+    installErrorGuard: options.installErrorGuard,
   })
 
   return {
