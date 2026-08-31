@@ -5,7 +5,10 @@
 // These tests pin down the seam established by enterprise-origin-candidate.ts:
 // they prove the resolver never silently substitutes an alternative origin for
 // an explicit-but-invalid process.env value, and that the Windows HKCU
-// fallback is only consulted when the explicit process env is absent/blank.
+// fallback reader is only invoked when the explicit process env is
+// absent/blank. Every T1-T7 case directly counts how many times the reader
+// callback was invoked, which is the only way to guard the lazy contract
+// against future regressions that re-introduce an eager read.
 // The helper is pure (no I/O, no IPC, no `reg` spawn), so the full
 // resolution policy is exercisable from a Linux runner — which the in-place
 // IPC handler in main.ts cannot be without a Windows-only CI.
@@ -25,206 +28,252 @@ const VALID_LOOPBACK_HTTP = 'http://127.0.0.1:8080'
 const OTHER_VALID_HTTPS = 'https://other-origin.example.invalid'
 const INVALID_NON_LOOPBACK_HTTP = 'http://enterprise.example.invalid'
 
+// Spy factory: returns a function pair — `reader` (the callback the helper
+// will invoke) and `count` (a closure-captured call counter the test can
+// assert on). Using a closure keeps the spy free of any vitest mocking
+// machinery, so the test exercises the real seam shape main.ts will use.
+function makeSpyReader(returnValue: string | null): {
+  reader: () => string | null
+  count: () => number
+} {
+
+  let calls = 0
+
+  return {
+
+    reader: () => {
+      calls += 1
+
+      return returnValue
+    },
+    count: () => calls
+  }
+}
+
 describe('resolveEnterpriseOriginCandidate · T1 process env valid HTTPS wins', () => {
-  test('explicit valid HTTPS returns the explicit value verbatim', () => {
-    assert.equal(
-      resolveEnterpriseOriginCandidate({
-        processEnv: VALID_HTTPS,
-        windowsUserEnv: OTHER_VALID_HTTPS
-      }),
-      VALID_HTTPS
-    )
+  test('explicit valid HTTPS returns the explicit value verbatim, registry reader NOT called', () => {
+    const spy = makeSpyReader(OTHER_VALID_HTTPS)
+
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: VALID_HTTPS,
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, VALID_HTTPS)
+    assert.equal(spy.count(), 0)
   })
 
-  test('explicit valid HTTPS wins even when registry value is absent', () => {
-    assert.equal(
-      resolveEnterpriseOriginCandidate({
-        processEnv: VALID_HTTPS,
-        windowsUserEnv: null
-      }),
-      VALID_HTTPS
-    )
+  test('explicit valid HTTPS wins even when registry reader exists', () => {
+    const spy = makeSpyReader(null)
+
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: VALID_HTTPS,
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, VALID_HTTPS)
+    assert.equal(spy.count(), 0)
   })
 })
 
 describe('resolveEnterpriseOriginCandidate · T2 process env valid loopback HTTP remains permitted by existing policy', () => {
-  test('explicit loopback HTTP returns the explicit value verbatim', () => {
-    assert.equal(
-      resolveEnterpriseOriginCandidate({
-        processEnv: VALID_LOOPBACK_HTTP,
-        windowsUserEnv: VALID_HTTPS
-      }),
-      VALID_LOOPBACK_HTTP
-    )
+  test('explicit loopback HTTP returns verbatim, registry reader NOT called', () => {
+    const spy = makeSpyReader(VALID_HTTPS)
+
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: VALID_LOOPBACK_HTTP,
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, VALID_LOOPBACK_HTTP)
+    assert.equal(spy.count(), 0)
   })
 
-  test('explicit loopback HTTP returns the explicit value when registry is null', () => {
-    assert.equal(
-      resolveEnterpriseOriginCandidate({
-        processEnv: VALID_LOOPBACK_HTTP,
-        windowsUserEnv: null
-      }),
-      VALID_LOOPBACK_HTTP
-    )
+  test('explicit loopback HTTP wins when registry reader returns null', () => {
+    const spy = makeSpyReader(null)
+
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: VALID_LOOPBACK_HTTP,
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, VALID_LOOPBACK_HTTP)
+    assert.equal(spy.count(), 0)
   })
 })
 
-describe('resolveEnterpriseOriginCandidate · T3 process env explicit invalid non-loopback HTTP fails closed AND does NOT fall back to registry', () => {
-  test('invalid explicit non-loopback HTTP returns the explicit string (validation is downstream)', () => {
+describe('resolveEnterpriseOriginCandidate · T3 explicit invalid non-loopback HTTP fails closed AND does NOT fall back to registry', () => {
+  test('invalid explicit non-loopback HTTP: raw explicit string selected, registry reader NOT called', () => {
     // The resolver itself only picks a candidate; validation lives in
     // normalizeEnterpriseApiOriginOrNull. The fail-closed guarantee we
-    // pin here is that we MUST NOT silently substitute the registry value
-    // when the explicit value is present-and-non-blank. The downstream
-    // normalizer will reject `http://enterprise.example.invalid` because
-    // it is non-loopback and not https; that rejection is what produces the
-    // observed `null` at the IPC layer. This test guards the seam
-    // boundary: the resolver itself must not preempt validation by
-    // switching to a different candidate.
-    assert.equal(
-      resolveEnterpriseOriginCandidate({
-        processEnv: INVALID_NON_LOOPBACK_HTTP,
-        windowsUserEnv: VALID_HTTPS
-      }),
-      INVALID_NON_LOOPBACK_HTTP
-    )
-  })
+    // pin here is twofold:
+    //   (a) the registry reader MUST NOT be invoked at all when the
+    //       explicit channel produced any non-blank string;
+    //   (b) the explicit value is returned verbatim so the downstream
+    //       normalizer can fail closed, instead of letting the registry
+    //       value "rescue" the misconfigured process env.
+    const spy = makeSpyReader(VALID_HTTPS)
 
-  test('invalid explicit value is never replaced by the registry fallback', () => {
-    // Mirrors the in-process scenario: process.env holds a misconfigured
-    // http:// origin while the live HKCU environment has a valid https://
-    // value. The resolver must keep the explicit string so the downstream
-    // normalizer can fail closed, instead of letting the registry value
-    // "rescue" the misconfigured process env.
-    const picked = resolveEnterpriseOriginCandidate({
+    const out = resolveEnterpriseOriginCandidate({
       processEnv: INVALID_NON_LOOPBACK_HTTP,
-      windowsUserEnv: VALID_HTTPS
+      windowsUserEnvReader: spy.reader
     })
 
-    assert.notEqual(picked, VALID_HTTPS)
-    assert.notEqual(picked, OTHER_VALID_HTTPS)
-    assert.equal(picked, INVALID_NON_LOOPBACK_HTTP)
+    assert.equal(out, INVALID_NON_LOOPBACK_HTTP)
+    assert.notEqual(out, VALID_HTTPS)
+    assert.notEqual(out, OTHER_VALID_HTTPS)
+    assert.equal(spy.count(), 0)
   })
 })
 
 describe('resolveEnterpriseOriginCandidate · T4 process env absent + Windows HKCU valid HTTPS resolves', () => {
-  test('undefined process env + valid registry HTTPS returns the registry value', () => {
-    assert.equal(
-      resolveEnterpriseOriginCandidate({
-        processEnv: undefined,
-        windowsUserEnv: VALID_HTTPS
-      }),
-      VALID_HTTPS
-    )
+  test('undefined process env + valid registry HTTPS: registry reader called exactly once, value returned', () => {
+    const spy = makeSpyReader(VALID_HTTPS)
+
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: undefined,
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, VALID_HTTPS)
+    assert.equal(spy.count(), 1)
   })
 
-  test('null process env + valid registry HTTPS returns the registry value', () => {
-    assert.equal(
-      resolveEnterpriseOriginCandidate({
-        processEnv: null,
-        windowsUserEnv: VALID_HTTPS
-      }),
-      VALID_HTTPS
-    )
+  test('null process env + valid registry HTTPS: registry reader called exactly once, value returned', () => {
+    const spy = makeSpyReader(VALID_HTTPS)
+
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: null,
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, VALID_HTTPS)
+    assert.equal(spy.count(), 1)
   })
 })
 
 describe('resolveEnterpriseOriginCandidate · T5 process env blank + Windows HKCU valid HTTPS resolves', () => {
-  test('empty-string process env + valid registry HTTPS returns the registry value', () => {
-    assert.equal(
-      resolveEnterpriseOriginCandidate({
-        processEnv: '',
-        windowsUserEnv: VALID_HTTPS
-      }),
-      VALID_HTTPS
-    )
+  test('empty-string process env + valid registry HTTPS: registry reader called exactly once', () => {
+    const spy = makeSpyReader(VALID_HTTPS)
+
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: '',
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, VALID_HTTPS)
+    assert.equal(spy.count(), 1)
   })
 
-  test('whitespace-only process env + valid registry HTTPS returns the registry value', () => {
-    assert.equal(
-      resolveEnterpriseOriginCandidate({
-        processEnv: '   \t  ',
-        windowsUserEnv: VALID_HTTPS
-      }),
-      VALID_HTTPS
-    )
+  test('whitespace-only process env + valid registry HTTPS: registry reader called exactly once', () => {
+    const spy = makeSpyReader(VALID_HTTPS)
+
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: '   \t  ',
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, VALID_HTTPS)
+    assert.equal(spy.count(), 1)
   })
 
-  test('non-string process env is treated as absent and falls back to registry', () => {
+  test('non-string process env treated as absent: registry reader called exactly once', () => {
     // process.env typed as string|undefined, but the seam must not blow up
     // if a defensive caller passes a value coerced from JSON / config that
     // is not actually a string.
-    assert.equal(
-      resolveEnterpriseOriginCandidate({
-        processEnv: 42,
-        windowsUserEnv: VALID_HTTPS
-      }),
-      VALID_HTTPS
-    )
+    const spy = makeSpyReader(VALID_HTTPS)
 
-    assert.equal(
-      resolveEnterpriseOriginCandidate({
-        processEnv: { unexpected: 'object' },
-        windowsUserEnv: VALID_HTTPS
-      }),
-      VALID_HTTPS
-    )
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: 42,
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, VALID_HTTPS)
+
+    assert.equal(spy.count(), 1)
+
+    const spyObj = makeSpyReader(VALID_HTTPS)
+
+    const outObj = resolveEnterpriseOriginCandidate({
+      processEnv: { unexpected: 'object' },
+      windowsUserEnvReader: spyObj.reader
+    })
+
+    assert.equal(outObj, VALID_HTTPS)
+    assert.equal(spyObj.count(), 1)
   })
 })
 
 describe('resolveEnterpriseOriginCandidate · T6 both absent → null', () => {
-  test('undefined process env + null registry returns null', () => {
-    assert.equal(
-      resolveEnterpriseOriginCandidate({
-        processEnv: undefined,
-        windowsUserEnv: null
-      }),
-      null
-    )
+  test('undefined process env + null registry: reader called exactly once, returns null', () => {
+    const spy = makeSpyReader(null)
+
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: undefined,
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, null)
+    assert.equal(spy.count(), 1)
   })
 
-  test('blank process env + null registry returns null', () => {
-    assert.equal(
-      resolveEnterpriseOriginCandidate({
-        processEnv: '',
-        windowsUserEnv: null
-      }),
-      null
-    )
+  test('blank process env + null registry: reader called exactly once, returns null', () => {
+    const spy = makeSpyReader(null)
+
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: '',
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, null)
+    assert.equal(spy.count(), 1)
   })
 
-  test('whitespace process env + null registry returns null', () => {
-    assert.equal(
-      resolveEnterpriseOriginCandidate({
-        processEnv: '   ',
-        windowsUserEnv: null
-      }),
-      null
-    )
+  test('whitespace process env + null registry: reader called exactly once, returns null', () => {
+    const spy = makeSpyReader(null)
+
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: '   ',
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, null)
+    assert.equal(spy.count(), 1)
   })
 
-  test('blank process env + whitespace registry returns null', () => {
-    assert.equal(
-      resolveEnterpriseOriginCandidate({
-        processEnv: '',
-        windowsUserEnv: '   '
-      }),
-      null
-    )
+  test('blank process env + whitespace registry: reader called exactly once, returns null', () => {
+    const spy = makeSpyReader('   ')
+
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: '',
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, null)
+    assert.equal(spy.count(), 1)
+  })
+
+  test('both absent + no reader at all: returns null without invoking anything', () => {
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: undefined,
+      windowsUserEnvReader: undefined
+    })
+
+    assert.equal(out, null)
   })
 })
 
-describe('resolveEnterpriseOriginCandidate · T7 registry invalid HTTP non-loopback returns the registry value (downstream validator fails it closed)', () => {
-  test('registry carries the invalid value to downstream normalization', () => {
-    // Same fail-closed contract as T3, applied to the registry channel:
-    // the resolver must surface the raw candidate so the existing
-    // normalizer can reject it. The resolver is not the policy.
-    assert.equal(
-      resolveEnterpriseOriginCandidate({
-        processEnv: undefined,
-        windowsUserEnv: INVALID_NON_LOOPBACK_HTTP
-      }),
-      INVALID_NON_LOOPBACK_HTTP
-    )
+describe('resolveEnterpriseOriginCandidate · T7 registry invalid non-loopback HTTP returns the registry value (downstream validator fails it closed)', () => {
+  test('registry carries the invalid value to downstream normalization, reader called exactly once', () => {
+    const spy = makeSpyReader(INVALID_NON_LOOPBACK_HTTP)
+
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: undefined,
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, INVALID_NON_LOOPBACK_HTTP)
+    assert.equal(spy.count(), 1)
   })
 })
 
@@ -235,43 +284,49 @@ describe('resolveEnterpriseOriginCandidate · T8 off-Windows: no `reg` spawn, re
     // returns null off-Windows (see windows-user-env.test.ts: "returns null
     // off Windows without spawning"). When wired through main.ts, that
     // null flows into resolveEnterpriseOriginCandidate unchanged.
-    assert.equal(
-      resolveEnterpriseOriginCandidate({
-        processEnv: undefined,
-        windowsUserEnv: null
-      }),
-      null
-    )
+    const spy = makeSpyReader(null)
+
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: undefined,
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, null)
+    assert.equal(spy.count(), 1)
   })
 })
 
 describe('resolveEnterpriseOriginCandidate · T9 renderer is never involved', () => {
   test('signature accepts no IPC/renderer parameter and has no implicit event source', () => {
     // Structural guarantee: the helper takes only the two candidate
-    // strings. There is no `event.sender`, no IPC channel, no
+    // accessors. There is no `event.sender`, no IPC channel, no
     // Electron.WebContents anywhere in the type signature. This test
     // would fail to compile if a renderer-coupled source were added.
     const acceptedKeys: ReadonlyArray<keyof Parameters<typeof resolveEnterpriseOriginCandidate>[0]> = [
       'processEnv',
-      'windowsUserEnv'
+      'windowsUserEnvReader'
     ]
 
-    assert.deepEqual(acceptedKeys, ['processEnv', 'windowsUserEnv'])
+    assert.deepEqual(acceptedKeys, ['processEnv', 'windowsUserEnvReader'])
   })
 })
 
 describe('resolveEnterpriseOriginCandidate · T10 no bearer/token returned or persisted by the seam', () => {
   test('return value is the picked URL candidate or null — never a credential object', () => {
-    const picked = resolveEnterpriseOriginCandidate({
+    const spy = makeSpyReader(VALID_HTTPS)
+
+    const out = resolveEnterpriseOriginCandidate({
       processEnv: VALID_HTTPS,
-      windowsUserEnv: VALID_HTTPS
+      windowsUserEnvReader: spy.reader
     })
 
-    assert.equal(typeof picked, 'string')
-    assert.equal(picked, VALID_HTTPS)
+    assert.equal(typeof out, 'string')
+    assert.equal(out, VALID_HTTPS)
     // No object shape is ever produced, which means there is nowhere for a
     // bearer or token to be smuggled through the seam.
-    assert.notEqual(typeof picked, 'object')
+    assert.notEqual(typeof out, 'object')
+    // Explicit env wins → reader NOT called.
+    assert.equal(spy.count(), 0)
   })
 
   test('return value cannot contain userinfo credentials', () => {
@@ -282,13 +337,14 @@ describe('resolveEnterpriseOriginCandidate · T10 no bearer/token returned or pe
     // that a credentialed input is forwarded verbatim (validation
     // happens one step later in the normalizer).
     const credentialed = 'https://user:pass@enterprise.example.invalid'
+    const spy = makeSpyReader(null)
 
-    assert.equal(
-      resolveEnterpriseOriginCandidate({
-        processEnv: credentialed,
-        windowsUserEnv: null
-      }),
-      credentialed
-    )
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: credentialed,
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, credentialed)
+    assert.equal(spy.count(), 0)
   })
 })

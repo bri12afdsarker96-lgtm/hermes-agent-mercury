@@ -129,6 +129,7 @@ import {
 } from './desktop-uninstall'
 import { describeDevCdpDecision, resolveDevCdpPort } from './dev-cdp'
 import { installEmbedReferer } from './embed-referer'
+import { resolveEnterpriseOriginCandidate } from './enterprise-origin-candidate'
 import {
   buildAutoConnectResult,
   classifyConnectError,
@@ -140,7 +141,6 @@ import {
   sanitizeMultipartContentType,
   uploadByteLength
 } from './enterprise-transport'
-import { resolveEnterpriseOriginCandidate } from './enterprise-origin-candidate'
 import { createEventDeduper } from './event-dedupe'
 import {
   buildTerminalScript,
@@ -13537,7 +13537,11 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
   const enterpriseOrigin = normalizeEnterpriseApiOriginOrNull(
     resolveEnterpriseOriginCandidate({
       processEnv: process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN,
-      windowsUserEnv: readWindowsUserEnvVar('HERMES_DESKTOP_ENTERPRISE_ORIGIN')
+      // Lazy callback: the resolver only invokes this when the explicit
+      // process env is absent or blank, so explicit non-blank values
+      // never trigger a `reg` spawn.
+      windowsUserEnvReader: () =>
+        readWindowsUserEnvVar('HERMES_DESKTOP_ENTERPRISE_ORIGIN')
     })
   )
 

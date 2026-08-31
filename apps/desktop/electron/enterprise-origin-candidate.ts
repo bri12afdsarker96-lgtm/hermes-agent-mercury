@@ -44,11 +44,18 @@ export interface EnterpriseOriginCandidateSource {
   processEnv?: unknown
 
   /**
-   * The live Windows HKCU\Environment value, as resolved by
-   * readWindowsUserEnvVar. Pass `null` to model "absent or off-Windows";
-   * the seam never spawns `reg` itself.
+   * LAZY accessor for the live Windows HKCU\Environment value, as
+   * resolved by readWindowsUserEnvVar. The helper invokes this callback
+   * at most once, and only when `processEnv` is absent or blank. Pass
+   * `undefined` to model "no Windows fallback available at all"; pass a
+   * zero-arg function whose return value models the live registry read.
+   *
+   * Invariant (proved by tests): the callback MUST NOT be invoked when
+   * `processEnv` resolves to a non-blank string. This matters because
+   * the Windows helper spawns `reg` and the GUI process is allowed to
+   * skip that work entirely when the explicit env is already present.
    */
-  windowsUserEnv?: string | null
+  windowsUserEnvReader?: () => string | null
 }
 
 /**
@@ -63,12 +70,13 @@ export interface EnterpriseOriginCandidateSource {
  * Fail-closed guarantees (callers MUST NOT bypass):
  *
  *   - When `processEnv` is a non-blank string, it is returned verbatim
- *     (validation downstream decides null vs URL). `windowsUserEnv` is
- *     never consulted, even when the explicit value would later be
- *     rejected by the normalizer.
- *   - When `processEnv` is absent/blank, `windowsUserEnv` is returned
- *     (which may itself be null off-Windows or when the registry value is
- *     missing).
+ *     (validation downstream decides null vs URL). The
+ *     `windowsUserEnvReader` callback is NOT invoked, even when the
+ *     explicit value would later be rejected by the normalizer. This
+ *     is the lazy contract: zero `reg` spawns when explicit env wins.
+ *   - When `processEnv` is absent/blank, `windowsUserEnvReader` is
+ *     invoked at most once; its return value is returned (which may
+ *     itself be null off-Windows or when the registry value is missing).
  *   - When neither source yields a non-blank string, returns `null`.
  *
  * Returns `null` on `null`/`undefined`/non-string inputs — never throws.
@@ -82,10 +90,17 @@ export function resolveEnterpriseOriginCandidate(
     // Explicit, non-blank process env is authoritative. Validation lives
     // downstream in normalizeEnterpriseApiOriginOrNull; we must NOT mask a
     // would-be validation failure by silently switching to the registry.
+    // Crucially, we must NOT call the registry reader here either — the
+    // whole point of the lazy seam is to skip the `reg` spawn whenever
+    // the explicit channel already produced a candidate.
     return explicit
   }
 
-  const fallback = normalizeCandidateString(source?.windowsUserEnv)
+  // processEnv was absent/blank — only now consult the registry reader.
+  // Guard with optional chaining so callers that pass `undefined`
+  // (no Windows fallback available) cleanly resolve to `null`.
+  const fallback = normalizeCandidateString(source?.windowsUserEnvReader?.())
+
   return fallback
 }
 
@@ -94,6 +109,8 @@ function normalizeCandidateString(value: unknown): string | null {
     return null
   }
 
+
   const trimmed = value.trim()
+
   return trimmed === '' ? null : trimmed
 }
