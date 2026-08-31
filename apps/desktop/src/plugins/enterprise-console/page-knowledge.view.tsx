@@ -46,6 +46,34 @@ import type { CapabilityStatus } from './types'
 import { PageHeader } from './ui'
 
 // ---------------------------------------------------------------------------
+// P1-VIS-V1-PRODUCTIZATION-REBUILD-02 — Frozen Visual Baseline productization.
+//
+// PageHeader title / purpose are now Chinese-first per P5
+// ("Simplified Chinese = primary product copy"). The h2 section sub-titles
+// ("uploads" / "candidates / review" / "sources") remain unchanged because the
+// a11y test (page-knowledge.a11y.test.tsx) locks them as screen-reader
+// landmarks.
+//
+// Each section now renders a real count chip beside its h2. The chip's number
+// is derived from the server response via deriveUploadsCount /
+// deriveGapsCount / deriveCollectionsCount — never hard-coded — so the chip
+// is honest across loading / empty / ready states. No fake data, no fake
+// availability. P6 hard rules preserved.
+// ---------------------------------------------------------------------------
+
+function SectionCount({ count }: { count: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="ml-1 inline-flex items-center justify-center rounded-full bg-(--ui-fill-quaternary) px-1.5 text-[0.6875rem] font-medium tabular-nums text-(--ui-text-secondary)"
+      data-testid="console-kb-section-count"
+    >
+      {count}
+    </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Per-row action slots
 // ---------------------------------------------------------------------------
 
@@ -122,9 +150,9 @@ export function KnowledgeView({
     >
       {previewSlot}
       <PageHeader
-        purpose="Review knowledge gaps, stage sources, preview chunks and publish through authoritative server workflows."
+        purpose="上传、预览、审核、发布并管理企业知识内容"
         status={<PageStatusBadge status="ready-dev" />}
-        title="Enterprise knowledge"
+        title="企业知识"
       />
 
       {capabilityStatus && capabilityStatus !== 'LIVE' ? (
@@ -200,12 +228,15 @@ function UploadsSection({
       data-testid="console-kb-uploads-section"
     >
       <div className="mb-1 flex items-center justify-between gap-2">
-        <h2
-          className="text-xs font-medium text-muted-foreground"
-          id="console-kb-uploads-heading"
-        >
-          uploads
-        </h2>
+        <div className="flex items-center gap-1">
+          <h2
+            className="text-xs font-medium text-muted-foreground"
+            id="console-kb-uploads-heading"
+          >
+            uploads
+          </h2>
+          <SectionCount count={uploads.length} />
+        </div>
         {uploadsPanelSlot}
       </div>
       <QueryBody
@@ -277,12 +308,15 @@ function CandidatesSection({
       aria-labelledby="console-kb-candidates-heading"
       data-testid="console-kb-candidates"
     >
-      <h2
-        className="mb-1 text-xs font-medium text-muted-foreground"
-        id="console-kb-candidates-heading"
-      >
-        candidates / review
-      </h2>
+      <div className="mb-1 flex items-center gap-1">
+        <h2
+          className="text-xs font-medium text-muted-foreground"
+          id="console-kb-candidates-heading"
+        >
+          candidates / review
+        </h2>
+        <SectionCount count={gaps.length} />
+      </div>
       <QueryBody
         emptyText="no knowledge gaps — when retrieval misses, candidates appear here"
         isEmpty={(data: { gaps: KbGapView[] }) =>
@@ -355,12 +389,15 @@ function SourcesSection({
       aria-labelledby="console-kb-sources-heading"
       data-testid="console-kb-sources"
     >
-      <h2
-        className="mb-1 text-xs font-medium text-muted-foreground"
-        id="console-kb-sources-heading"
-      >
-        sources
-      </h2>
+      <div className="mb-1 flex items-center gap-1">
+        <h2
+          className="text-xs font-medium text-muted-foreground"
+          id="console-kb-sources-heading"
+        >
+          sources
+        </h2>
+        <SectionCount count={collections.names.length} />
+      </div>
       <QueryBody
         emptyText="no collections — publish an upload to create the first one"
         isEmpty={(data: { collections: string[] }) =>

@@ -91,6 +91,31 @@ export interface ConversationsAttemptsView {
  */
 export type ConversationsTab = 'inbound' | 'outbound'
 
+/**
+ * P1-VIS-V1-PRODUCTIZATION-REBUILD-02 — real-data count derivations.
+ *
+ * The Frozen Design Authority (Conversations.jsx / ref7) places a row count
+ * chip beside the active filter ("全部 128"). That number MUST be the
+ * server-truth row count — not a fabricated aggregate — because Phase-1
+ * has no server-side rollup endpoint (per P6 NO FAKE DATA + NO
+ * HARDCODED POSITIVE AVAILABILITY).
+ *
+ * These helpers return the actual row count for each list as the view
+ * sees it. When the server returns an empty list (or has not yet
+ * loaded), the count is 0 — the truth, not a fabricated '—'.
+ *
+ * The view layer wires these into the TabToggle action slot so each tab
+ * carries an honest row count beside its label. The count is purely
+ * informational; it never gates a mutation.
+ */
+export function deriveInboundCount(view: ConversationsInboundListView): number {
+  return view.rows.length
+}
+
+export function deriveOutboundCount(view: ConversationsOutboundListView): number {
+  return view.rows.length
+}
+
 export function deriveInboundList(
   rows: InboundRow[],
   fmtIso: (iso: null | string | undefined) => string

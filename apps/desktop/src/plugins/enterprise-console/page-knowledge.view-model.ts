@@ -244,6 +244,32 @@ export function deriveCollections(
 }
 
 // ---------------------------------------------------------------------------
+// P1-VIS-V1-PRODUCTIZATION-REBUILD-02 — real-data count derivations.
+//
+// The Frozen Design Authority (Knowledge.jsx / ref6) renders a count chip on
+// each panel ("待发布上传 · 3", "已发布知识 · 4", "知识候选 · 2"). The counts
+// MUST come from the server response, not from a hard-coded number — per P6
+// "NO HARDCODED POSITIVE AVAILABILITY" and "NO FAKE DATA".
+//
+// These three pure derivations expose the honest row counts so the view can
+// render the panel count chip without inventing numbers. When the server
+// returns an empty list (or has not yet loaded), the count is 0 — which is
+// the truth, not a fabricated "—".
+// ---------------------------------------------------------------------------
+
+export function deriveUploadsCount(rows: UploadRowView[]): number {
+  return rows.length
+}
+
+export function deriveGapsCount(rows: KbGapView[]): number {
+  return rows.length
+}
+
+export function deriveCollectionsCount(view: CollectionsView): number {
+  return view.names.length
+}
+
+// ---------------------------------------------------------------------------
 // Publish validation (mirrors the pre-split page-knowledge.tsx exactly)
 // ---------------------------------------------------------------------------
 
