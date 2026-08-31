@@ -22,10 +22,13 @@ import type { CollectionsResp, EntriesResp, KbGap, PreviewResp, UploadRow } from
 import {
   type CollectionsView,
   deriveCollections,
+  deriveCollectionsCount,
   deriveEntries,
+  deriveGapsCount,
   deriveKbGaps,
   derivePreview,
   deriveUploads,
+  deriveUploadsCount,
   type EntryView,
   gapTone,
   isAuthorTextValid,
@@ -370,5 +373,46 @@ describe('validation helpers (P7, P15)', () => {
       expect(isPublishCollectionValid('a'.repeat(64))).toBe(true)
       expect(isPublishCollectionValid('  colA  ')).toBe(true)
     })
+  })
+})
+
+/**
+ * P1-VIS-V1-PRODUCTIZATION-REBUILD-02 — count chip is real-data, never
+ * fabricated. Proves that deriveUploadsCount / deriveGapsCount /
+ * deriveCollectionsCount are pure pass-throughs to the underlying row
+ * length so the SectionCount chip cannot drift from the rows actually
+ * rendered below.
+ */
+describe('deriveUploadsCount (P1-VIS-V1 real-data count)', () => {
+  it('equals the derived row count', () => {
+    const rows = deriveUploads([U_STAGED, U_EDITED], fmtEpoch)
+    expect(deriveUploadsCount(rows)).toBe(2)
+  })
+
+  it('is 0 for an empty uploads list', () => {
+    expect(deriveUploadsCount([])).toBe(0)
+  })
+})
+
+describe('deriveGapsCount (P1-VIS-V1 real-data count)', () => {
+  it('equals the derived row count', () => {
+    const rows = deriveKbGaps([G1, G2], fmtEpoch)
+    expect(deriveGapsCount(rows)).toBe(2)
+  })
+
+  it('is 0 for an empty gaps list', () => {
+    expect(deriveGapsCount([])).toBe(0)
+  })
+})
+
+describe('deriveCollectionsCount (P1-VIS-V1 real-data count)', () => {
+  it('equals the names array length', () => {
+    const data: CollectionsResp = { collections: ['c1', 'c2', 'c3'] }
+    const view = deriveCollections(data) as CollectionsView
+    expect(deriveCollectionsCount(view)).toBe(3)
+  })
+
+  it('is 0 for an empty collections view', () => {
+    expect(deriveCollectionsCount(deriveCollections(null))).toBe(0)
   })
 })

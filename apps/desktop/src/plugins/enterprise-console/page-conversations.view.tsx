@@ -15,6 +15,20 @@
  *   - §P20: NO extra `t('status.moduleBody')` paragraph is rendered —
  *     that paragraph was not in the pre-split page.
  *   - §P21: `ConsoleRows` is reused for inbound / outbound / attempts.
+ *
+ * P1-VIS-V1-PRODUCTIZATION-REBUILD-02:
+ *   - PageHeader title / purpose are now Chinese-first per P5
+ *     ("Simplified Chinese = primary product copy").
+ *   - TabToggle now renders a real-data count chip beside the active
+ *     tab. The chip's number is derived from the server response via
+ *     deriveInboundCount / deriveOutboundCount — never hard-coded.
+ *   - ConsolePanel action slot now shows the honest attempts count when
+ *     an outbound row is selected.
+ *   - The trailing "Delivery attempts are evidence only..." paragraph
+ *     is V0 baseline product copy (REM01 §P4 left untouched) and stays
+ *     byte-identical.
+ *   - Read-only invariant preserved: no retry / release / requeue /
+ *     blind-resend controls are introduced (P9 C6-C10).
  */
 
 import { StatusDot, type StatusTone } from '@hermes/plugin-sdk'
@@ -26,6 +40,8 @@ import {
   type ConversationsInboundListView,
   type ConversationsOutboundListView,
   type ConversationsTab,
+  deriveInboundCount,
+  deriveOutboundCount,
   type InboundView,
   type OutboundView,
   OUTCOME_TONE,
@@ -37,6 +53,18 @@ import {
 } from './page-kit'
 import { PageStatusBadge } from './status-badge'
 import { ConsolePanel, PageHeader } from './ui'
+
+function ListCountChip({ count }: { count: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="ml-1 inline-flex items-center justify-center rounded-full bg-(--ui-fill-quaternary) px-1.5 text-[0.6875rem] font-medium tabular-nums text-(--ui-text-secondary)"
+      data-testid="console-conv-count-chip"
+    >
+      {count}
+    </span>
+  )
+}
 
 interface InboundListProps {
   list: ConversationsInboundListView
@@ -198,9 +226,11 @@ export function OutboundListView({
 interface TabToggleProps {
   tab: ConversationsTab
   onChange: (next: ConversationsTab) => void
+  inboundCount: number
+  outboundCount: number
 }
 
-function TabToggle({ tab, onChange }: TabToggleProps) {
+function TabToggle({ tab, onChange, inboundCount, outboundCount }: TabToggleProps) {
   return (
     <div
       aria-label="Conversation direction"
@@ -212,8 +242,8 @@ function TabToggle({ tab, onChange }: TabToggleProps) {
           aria-selected={tab === value}
           className={
             tab === value
-              ? 'rounded-md bg-(--ui-bg-card) px-3 py-1.5 font-medium text-(--ui-text-primary) shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-(--ui-accent)'
-              : 'rounded-md px-3 py-1.5 text-(--ui-text-secondary) outline-none hover:text-(--ui-text-primary) focus-visible:ring-2 focus-visible:ring-(--ui-accent)'
+              ? 'inline-flex items-center gap-1 rounded-md bg-(--ui-bg-card) px-3 py-1.5 font-medium text-(--ui-text-primary) shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-(--ui-accent)'
+              : 'inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-(--ui-text-secondary) outline-none hover:text-(--ui-text-primary) focus-visible:ring-2 focus-visible:ring-(--ui-accent)'
           }
           data-testid={`console-conv-tab-${value}`}
           key={value}
@@ -222,6 +252,7 @@ function TabToggle({ tab, onChange }: TabToggleProps) {
           type="button"
         >
           {value}
+          <ListCountChip count={value === 'inbound' ? inboundCount : outboundCount} />
         </button>
       ))}
     </div>
@@ -260,13 +291,20 @@ export function ConversationsView({
       data-testid="console-page-conversations"
     >
       <PageHeader
-        purpose="Inspect tenant-scoped inbound and outbound message facts and delivery attempts. Read-only by design."
+        purpose="查看企业微信消息处理、回复状态、异常与人工接管情况"
         status={<PageStatusBadge status="ready" />}
-        title="WeCom conversations"
+        title="企业会话"
       />
 
       <ConsolePanel
-        action={<TabToggle onChange={onChangeTab} tab={tab} />}
+        action={
+          <TabToggle
+            inboundCount={deriveInboundCount(inbound)}
+            onChange={onChangeTab}
+            outboundCount={deriveOutboundCount(outbound)}
+            tab={tab}
+          />
+        }
         divided
         title={tab === 'inbound' ? 'Inbound messages' : 'Outbound messages'}
       >

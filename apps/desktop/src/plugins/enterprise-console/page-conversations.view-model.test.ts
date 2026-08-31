@@ -22,7 +22,9 @@ import type {
 } from './page-conversations.controller'
 import {
   deriveAttemptsList,
+  deriveInboundCount,
   deriveInboundList,
+  deriveOutboundCount,
   deriveOutboundList,
   OUTCOME_TONE,
   STATE_TONE,
@@ -189,5 +191,33 @@ describe('Phase-1 read-only contract', () => {
     expect(typeof deriveAttemptsList).toBe('function')
     expect(typeof STATE_TONE).toBe('object')
     expect(typeof OUTCOME_TONE).toBe('object')
+  })
+})
+
+/**
+ * P1-VIS-V1-PRODUCTIZATION-REBUILD-02 — count chip is real-data, never
+ * fabricated. Proves that deriveInboundCount / deriveOutboundCount are
+ * pure pass-throughs to view.rows.length so the TabToggle chip cannot
+ * drift from the actual rows rendered below.
+ */
+describe('deriveInboundCount (P1-VIS-V1 real-data count)', () => {
+  it('equals the row count for a populated inbound view', () => {
+    const vm = deriveInboundList([baseInbound, { ...baseInbound, inbound_id: 'in-2' }], fmtIso)
+    expect(deriveInboundCount(vm)).toBe(2)
+  })
+
+  it('is 0 for an empty inbound view', () => {
+    expect(deriveInboundCount(deriveInboundList([], fmtIso))).toBe(0)
+  })
+})
+
+describe('deriveOutboundCount (P1-VIS-V1 real-data count)', () => {
+  it('equals the row count for a populated outbound view', () => {
+    const vm = deriveOutboundList([baseOutbound, { ...baseOutbound, internal_message_id: 'im-2' }], fmtIso)
+    expect(deriveOutboundCount(vm)).toBe(2)
+  })
+
+  it('is 0 for an empty outbound view', () => {
+    expect(deriveOutboundCount(deriveOutboundList([], fmtIso))).toBe(0)
   })
 })
