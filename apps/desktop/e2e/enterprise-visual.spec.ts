@@ -29,6 +29,16 @@
  *   5. Print deterministic viewport+log markers before screenshot so the
  *      natural job log itself proves dimensions and screenshot success.
  *
+ * REMEDIATION-04 edits (scope: harness-only, single file):
+ *   Per-test fixture ownership. The prior beforeAll/afterAll shared a single
+ *   Electron fixture across all four viewports, so the Electron BrowserContext
+ *   stayed live after each test body returned. Playwright's didFinishTest then
+ *   finalised tracing (via fix-electron-tracing.ts) on that still-live context
+ *   and stalled ~300s per viewport. Each test now creates its own fixture,
+ *   closes it in a finally block BEFORE the test body returns (so the context
+ *   leaves electronContexts on close), and sets spec-local retries=0 plus a
+ *   bounded 120s timeout. No tracing / config / fixtures / workflow change.
+ *
  * No product source / test.ts / playwright.config.ts / fixtures beyond the
  * two `MockBackendOptions`-threaded additions / workflow touched.
  */
@@ -244,17 +254,19 @@ async function assertNoErrorAlert(page: Page): Promise<void> {
   }
 }
 
-let fixture: MockBackendFixture | null = null
+// ─── Spec-local fixture ownership (REMEDIATION-04) ─────────────────────
+// Each viewport test owns its Electron lifecycle end-to-end: create the
+// fixture, navigate to the Enterprise dashboard, dismiss the transient
+// overlay, prove + screenshot the viewport, then close the app BEFORE the
+// test body returns. The finally-block cleanup is the fix for the ~300s
+// post-screenshot stall: closing the Electron app closes its BrowserContext,
+// which fix-electron-tracing.ts removes from electronContexts on close, so
+// Playwright's didFinishTest no longer tries to finalise tracing on a live
+// Electron context.
+const VISUAL_TEST_TIMEOUT_MS = 120_000
 
-// Per-test timeout cap (60s). PR29 implicit 300s global produced
-// ~300s spacing per failed viewport; REM-03 caps this at 60s per test so
-// any lifecycle stall fails fast instead of consuming the 15-min job
-// budget. CI retries disabled for this spec.
-test.setTimeout(60_000)
-
-test.beforeAll(async () => {
-  test.setTimeout(180_000)
-  fixture = await setupMockBackend({
+async function setupEnterpriseVisualFixture(): Promise<MockBackendFixture> {
+  const fixture = await setupMockBackend({
     beforeFirstWindow: installEnterpriseEvidenceServer,
     // REM-03: do not pass `headless: true` so the renderer runs in a real
     // Xvfb-backed Chromium compositor instead of headless mode; the prior
@@ -274,25 +286,40 @@ test.beforeAll(async () => {
   await enterpriseNav.click()
   await expect(fixture.page.getByTestId('console-page-dashboard')).toBeVisible({ timeout: 15_000 })
 
-  // Suppress the transient `Update ready` overlay before any viewport proof
-  // begins, so the four viewports share the same notification-free baseline.
+  // Suppress the transient `Update ready` overlay before the viewport proof
+  // begins, so the screenshot captures a notification-free baseline.
   await dismissTransientUpdateOverlay(fixture.page)
-})
 
-test.afterAll(async () => {
-  await fixture?.cleanup()
-  fixture = null
-})
+  return fixture
+}
 
-// One test per evidence viewport. Originally these were a single
-// serialised test that ran all four viewports inside one test body, which
-// exceeded any single-test timeout on cold CI runners (each viewport
-// costs ~1 minute of real wall-clock — 4 viewports serialised ≈ 4
-// minutes, well past even 5-minute test timeouts). Splitting into four
-// independent tests means each one fits comfortably under the default
-// 90_000ms test timeout, and a single-viewport regression points at
-// the exact viewport that broke without a binary search through a
-// shared test body.
+async function cleanupEnterpriseVisualFixture(
+  fixture: MockBackendFixture | null,
+  label: string,
+): Promise<void> {
+  if (!fixture) {
+    return
+  }
+  // Authoritative natural-log marker: prove the Electron app (and its
+  // BrowserContext) closes BEFORE the test body returns.
+  // eslint-disable-next-line no-console
+  console.log(`VISUAL_VIEWPORT_CLEANUP_START target=${label}`)
+  await fixture.cleanup()
+  // eslint-disable-next-line no-console
+  console.log(`VISUAL_VIEWPORT_CLEANUP_DONE target=${label}`)
+}
+
+// Spec-local retries=0 (global CI retries stay 1) and a bounded per-test
+// timeout. The global 300_000ms timeout is what previously masked the ~300s
+// post-screenshot stall as a per-test timeout; REM-04 owns a 120s budget per
+// test because each test now performs its own cold Electron launch + close.
+test.describe.configure({ mode: 'serial', retries: 0, timeout: VISUAL_TEST_TIMEOUT_MS })
+
+// One test per evidence viewport, each with its own fixture lifecycle.
+// Originally a single serialised test ran all four viewports inside one test
+// body, which exceeded any single-test timeout on cold CI runners (each
+// viewport costs ~1 minute of real wall-clock). Four independent tests point
+// a single-viewport regression at the exact viewport that broke.
 //
 // The four baselines already exist (commit 8d39946903 / 2c07f6762
 // from W5 foundation work) and Playwright locates them by
@@ -300,64 +327,71 @@ test.afterAll(async () => {
 // uses the same snapshot name (`enterprise-operator-home-${w}x${h}.png`),
 // each test gets a UNIQUE title so the four baselines are matched
 // 1:1 against the four tests.
-test.describe.configure({ mode: 'serial' })
-
 for (const { height, width } of EVIDENCE_VIEWPORTS) {
   test(`operator home has hard visual baseline at ${width}x${height}`, async () => {
-    const { app, page } = fixture!
+    let fixture: MockBackendFixture | null = null
+    try {
+      fixture = await setupEnterpriseVisualFixture()
+      const { app, page } = fixture
 
-    // Force the Electron window content size AND the Playwright page viewport
-    // to the requested viewport with bounded retries. Throws on failure so
-    // the test fails fast with target vs actual evidence instead of producing
-    // a 1220x800 PNG at a 1280x720 name.
-    await applyViewportOrThrow(app, page, width, height)
+      // Force the Electron window content size AND the Playwright page viewport
+      // to the requested viewport with bounded retries. Throws on failure so
+      // the test fails fast with target vs actual evidence instead of producing
+      // a wrong-size PNG at a correct-size name.
+      await applyViewportOrThrow(app, page, width, height)
 
-    // Renderer-side confirmation that the innerWidth/innerHeight match the
-    // requested viewport. This catches window-state restoration races that
-    // BrowserWindow.getContentSize does not always observe.
-    await expect
-      .poll(() => page.evaluate(() => ({ height: window.innerHeight, width: window.innerWidth })))
-      .toEqual({ height, width })
+      // Renderer-side confirmation that the innerWidth/innerHeight match the
+      // requested viewport. This catches window-state restoration races that
+      // BrowserWindow.getContentSize does not always observe.
+      await expect
+        .poll(() => page.evaluate(() => ({ height: window.innerHeight, width: window.innerWidth })))
+        .toEqual({ height, width })
 
-    await page.evaluate(async () => {
-      await document.fonts.ready
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      await page.evaluate(async () => {
+        await document.fonts.ready
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        )
+      })
+
+      // Re-dismiss any notification that may have re-appeared (defence in depth;
+      // bounded so the screenshot is never silently skipped if the overlay is
+      // stuck on screen).
+      await dismissTransientUpdateOverlay(page)
+
+      // Spec-owned role=alert check replaces the generic fixture-installed
+      // afterEach guard for this spec only. Do not suppress real errors.
+      await assertNoErrorAlert(page)
+
+      // Authoritative natural-log viewport marker: prove dimensions BEFORE
+      // screenshot so the GitHub job log itself proves the readiness state.
+      const readyActualApp = await app.evaluate(({ BrowserWindow }) => {
+        const win = BrowserWindow.getAllWindows()[0]
+        const [w, h] = win ? win.getContentSize() : [0, 0]
+        return { height: h, width: w }
+      })
+      const readyActualPage = await page.evaluate(() => ({
+        height: window.innerHeight,
+        width: window.innerWidth,
+      }))
+      // eslint-disable-next-line no-console
+      console.log(
+        `VISUAL_VIEWPORT_READY target=${width}x${height} electron=${readyActualApp.width}x${readyActualApp.height} renderer=${readyActualPage.width}x${readyActualPage.height}`,
       )
-    })
 
-    // Re-dismiss any notification that may have re-appeared (defence in depth;
-    // bounded so the screenshot is never silently skipped if the overlay is
-    // stuck on screen).
-    await dismissTransientUpdateOverlay(page)
+      await expect(page).toHaveScreenshot(`enterprise-operator-home-${width}x${height}.png`, {
+        animations: 'disabled',
+        caret: 'hide',
+        timeout: 30_000,
+      })
 
-    // Spec-owned role=alert check replaces the generic fixture-installed
-    // afterEach guard for this spec only. Do not suppress real errors.
-    await assertNoErrorAlert(page)
-
-    // Authoritative natural-log viewport marker: prove dimensions BEFORE
-    // screenshot so the GitHub job log itself proves the readiness state.
-    const readyActualApp = await app.evaluate(({ BrowserWindow }) => {
-      const win = BrowserWindow.getAllWindows()[0]
-      const [w, h] = win ? win.getContentSize() : [0, 0]
-      return { height: h, width: w }
-    })
-    const readyActualPage = await page.evaluate(() => ({
-      height: window.innerHeight,
-      width: window.innerWidth,
-    }))
-    // eslint-disable-next-line no-console
-    console.log(
-      `VISUAL_VIEWPORT_READY target=${width}x${height} electron=${readyActualApp.width}x${readyActualApp.height} renderer=${readyActualPage.width}x${readyActualPage.height}`,
-    )
-
-    await expect(page).toHaveScreenshot(`enterprise-operator-home-${width}x${height}.png`, {
-      animations: 'disabled',
-      caret: 'hide',
-      timeout: 30_000,
-    })
-
-    // eslint-disable-next-line no-console
-    console.log(`VISUAL_VIEWPORT_SCREENSHOT_PASS target=${width}x${height}`)
+      // eslint-disable-next-line no-console
+      console.log(`VISUAL_VIEWPORT_SCREENSHOT_PASS target=${width}x${height}`)
+    } finally {
+      // Close the Electron app BEFORE the test body returns, even on failure.
+      await cleanupEnterpriseVisualFixture(fixture, `${width}x${height}`)
+      // eslint-disable-next-line no-console
+      console.log(`VISUAL_VIEWPORT_TEST_COMPLETE target=${width}x${height}`)
+    }
   })
 }
