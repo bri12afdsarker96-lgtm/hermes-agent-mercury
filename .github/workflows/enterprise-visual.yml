@@ -19,3 +19,4 @@ jobs:
     with:
       test_path: e2e/enterprise-visual.spec.ts
       timeout_minutes: 35
+      xvfb_screen: 1920x1200x24
