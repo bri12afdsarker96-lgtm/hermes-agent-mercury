@@ -18,5 +18,5 @@ jobs:
     uses: ./.github/workflows/e2e-desktop.yml
     with:
       test_path: e2e/enterprise-visual.spec.ts
-      timeout_minutes: 35
+      timeout_minutes: 15
       xvfb_screen: 1920x1200x24

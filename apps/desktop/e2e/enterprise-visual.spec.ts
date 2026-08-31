@@ -14,17 +14,23 @@
  * The Linux baselines were committed only after the first hard missing-baseline
  * run produced all four actuals and those exact actuals were manually reviewed.
  *
- * REMEDIATION-02 edits (scope: harness-only):
- *   1. Deterministic viewport application: bounded retry (max 3) of setBounds
- *      and setContentSize, with an explicit throw on failure reporting
- *      target vs actual window.innerWidth/innerHeight. The screenshot is
- *      never taken when the inner size does not match the target.
- *   2. Update-notification suppression: the transient `Update ready`
- *      overlay can appear above the Enterprise route during cold-boot.
- *      We dismiss it via the existing Radix dialog close button (the same
- *      `aria-label="Close"` the dialog renders by default) and then assert
- *      that no open dialog with the `Update ready` title remains. No CSS
- *      hide, no DOM removal, no product source change.
+ * REMEDIATION-03 edits (scope: harness-only):
+ *   1. Lifecycle cap: per-test timeout 60_000 ms (was the implicit 300_000 ms
+ *      global); CI retries 0 (set in this file's test.describe.configure).
+ *   2. Request initial fixture window size 1280x720 (was the prior 1220x800
+ *      fixture seed). The dedicated visual harness owns its initial Electron
+ *      window size so the per-test resize no longer fights a different
+ *      Electron-side state.json.
+ *   3. Opt out of the generic `installErrorBannerGuard` afterEach (the spec
+ *      owns its own bounded role=alert assertion).
+ *   4. Fix the Update-ready dismiss locator against the observed natural
+ *      DOM (`role="status"` containing "Update ready"; dismiss button
+ *      accessible name "Dismiss notification"). Do not use `role="dialog"`.
+ *   5. Print deterministic viewport+log markers before screenshot so the
+ *      natural job log itself proves dimensions and screenshot success.
+ *
+ * No product source / test.ts / playwright.config.ts / fixtures beyond the
+ * two `MockBackendOptions`-threaded additions / workflow touched.
  */
 
 import { type ElectronApplication, type Page } from '@playwright/test'
@@ -189,37 +195,74 @@ async function applyViewportOrThrow(
   }
 }
 
-// Pre-screenshot cleanup: dismiss any transient Update-ready notification that
-// might overlay the Enterprise route during cold-boot. Uses the existing Radix
-// dialog close button (aria-label="Close"); no CSS hide, no DOM removal, no
-// product source change. Bounded timeout keeps the test deterministic.
+// Spec-owned Update-ready dismissal. Targets the observed natural DOM:
+// the Update ready notification is rendered as `role="status"` (NOT
+// `role="dialog"`), the Notifications region is `role="region"` with
+// `aria-label="Notifications"`, and the dismiss button's accessible name
+// is the i18n string "Dismiss notification". No CSS hide, no DOM removal.
 async function dismissTransientUpdateOverlay(page: Page): Promise<void> {
-  const updateTitle = page.getByRole('dialog').filter({ hasText: 'Update ready' }).first()
+  const updateStatus = page
+    .getByRole('status')
+    .filter({ hasText: 'Update ready' })
+    .first()
   let visible = false
   try {
-    visible = await updateTitle.isVisible({ timeout: 5_000 })
+    visible = await updateStatus.isVisible({ timeout: 5_000 })
   } catch {
     visible = false
   }
   if (!visible) {
     return
   }
-  // The Radix dialog primitive renders a default close button with
-  // aria-label="Close". Click it instead of relying on Escape, because
-  // Escape can race against the dialog open animation on cold boot.
-  const closeButton = page.getByRole('button', { name: 'Close', exact: true }).first()
-  await closeButton.click({ timeout: 5_000 })
-  // Assert the update overlay is absent before any screenshot.
-  await expect(updateTitle).not.toBeVisible({ timeout: 5_000 })
+  // Observed natural DOM: the dismiss button has accessible name
+  // "Dismiss notification" (i18n string). Click it and assert the
+  // status is gone before screenshot.
+  const dismissButton = page
+    .getByRole('button', { name: 'Dismiss notification', exact: true })
+    .first()
+  await dismissButton.click({ timeout: 5_000 })
+  await expect(updateStatus).not.toBeVisible({ timeout: 5_000 })
+}
+
+// Spec-owned bounded error-alert check. Replaces the generic
+// installErrorBannerGuard afterEach for this spec; same semantics on
+// error-kind notifications (which use role="alert"), but scoped to this
+// suite and visible to the test report.
+async function assertNoErrorAlert(page: Page): Promise<void> {
+  const alerts = page.locator('[role="alert"]:visible')
+  const count = await alerts.count()
+  if (count > 0) {
+    const texts: string[] = []
+    for (let i = 0; i < count; i++) {
+      const t = await alerts.nth(i).innerText().catch(() => '')
+      if (t) texts.push(t.trim())
+    }
+    throw new Error(
+      `Enterprise visual evidence detected [role="alert"] count=${count}\n` +
+        texts.map(t => `  • ${t}`).join('\n'),
+    )
+  }
 }
 
 let fixture: MockBackendFixture | null = null
+
+// Per-test timeout cap (60s). PR29 implicit 300s global produced
+// ~300s spacing per failed viewport; REM-03 caps this at 60s per test so
+// any lifecycle stall fails fast instead of consuming the 15-min job
+// budget. CI retries disabled for this spec.
+test.setTimeout(60_000)
 
 test.beforeAll(async () => {
   test.setTimeout(180_000)
   fixture = await setupMockBackend({
     beforeFirstWindow: installEnterpriseEvidenceServer,
-    headless: true,
+    // REM-03: do not pass `headless: true` so the renderer runs in a real
+    // Xvfb-backed Chromium compositor instead of headless mode; the prior
+    // headless flag interacted badly with the fixture window-state seed.
+    initialWindowSize: { width: 1280, height: 720 },
+    // REM-03: opt out of the generic installErrorBannerGuard; this spec
+    // runs its own bounded role=alert assertion via assertNoErrorAlert.
+    installErrorGuard: false,
   })
 
   // This evidence route is not the chat composer. Generic waitForAppReady waits
@@ -257,6 +300,8 @@ test.afterAll(async () => {
 // uses the same snapshot name (`enterprise-operator-home-${w}x${h}.png`),
 // each test gets a UNIQUE title so the four baselines are matched
 // 1:1 against the four tests.
+test.describe.configure({ mode: 'serial' })
+
 for (const { height, width } of EVIDENCE_VIEWPORTS) {
   test(`operator home has hard visual baseline at ${width}x${height}`, async () => {
     const { app, page } = fixture!
@@ -286,10 +331,33 @@ for (const { height, width } of EVIDENCE_VIEWPORTS) {
     // stuck on screen).
     await dismissTransientUpdateOverlay(page)
 
+    // Spec-owned role=alert check replaces the generic fixture-installed
+    // afterEach guard for this spec only. Do not suppress real errors.
+    await assertNoErrorAlert(page)
+
+    // Authoritative natural-log viewport marker: prove dimensions BEFORE
+    // screenshot so the GitHub job log itself proves the readiness state.
+    const readyActualApp = await app.evaluate(({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0]
+      const [w, h] = win ? win.getContentSize() : [0, 0]
+      return { height: h, width: w }
+    })
+    const readyActualPage = await page.evaluate(() => ({
+      height: window.innerHeight,
+      width: window.innerWidth,
+    }))
+    // eslint-disable-next-line no-console
+    console.log(
+      `VISUAL_VIEWPORT_READY target=${width}x${height} electron=${readyActualApp.width}x${readyActualApp.height} renderer=${readyActualPage.width}x${readyActualPage.height}`,
+    )
+
     await expect(page).toHaveScreenshot(`enterprise-operator-home-${width}x${height}.png`, {
       animations: 'disabled',
       caret: 'hide',
       timeout: 30_000,
     })
+
+    // eslint-disable-next-line no-console
+    console.log(`VISUAL_VIEWPORT_SCREENSHOT_PASS target=${width}x${height}`)
   })
 }
