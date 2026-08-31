@@ -6,11 +6,12 @@
  *
  * Pure render-only checks. No controller changes.
  *
- * Per P1-VIS-V2 (Minimal Handoff productization):
- *   - The 4 V0 tests are the W1-C contract (preserved verbatim
- *     except fixtures now include the new `stateLabel` VM field).
- *   - 2 new tests cover the V2 status strip (HONEST availability
- *     reflection + handoff count).
+ * Per P1-VIS-V2-REMEDIATION-01:
+ *   - The 4 V0 tests are the W1-C contract preserved verbatim.
+ *   - 2 status-strip tests updated: text now asserts the honest
+ *     product copy "Handoff service available/unavailable" — no
+ *     `/api/handoff-*` developer paths leak into the visible product
+ *     UI.
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -39,9 +40,6 @@ describe('Handoff a11y (LINE F)', () => {
         handoffsIsPending={false}
       />,
     )
-    // Per ConsolePanel contract: title="..." renders <h2>{title}</h2>.
-    // The page-level PageHeader above is <h1>, so this is the only h2
-    // named "Handoff queue" on the page.
     const heading = screen.getByRole('heading', { level: 2, name: 'Handoff queue' })
     expect(heading).toBeTruthy()
     expect(heading.tagName.toLowerCase()).toBe('h2')
@@ -124,8 +122,9 @@ describe('Handoff a11y (LINE F)', () => {
     expect(screen.getByLabelText('age 90 seconds')).toBeTruthy()
   })
 
-  // V2 PRODUCTIZATION — narrow layout hook + scheduling meta is rendered
-  it('productized status strip exposes availability and count as accessible region', () => {
+  // V2-R3 remediation — visible product copy is honest availability
+  // language; no internal /api/ paths leak into the visible product UI.
+  it('productized status strip uses honest availability copy (available)', () => {
     wrap(
       <HandoffsView
         available
@@ -154,11 +153,12 @@ describe('Handoff a11y (LINE F)', () => {
     const strip = screen.getByTestId('console-handoffs-status')
     expect(strip).toBeTruthy()
     expect(strip.getAttribute('data-ec-state')).toBe('available')
-    expect(strip.textContent).toMatch(/server-authoritative/)
+    expect(strip.textContent).toMatch(/Handoff service available/)
     expect(strip.textContent).toMatch(/1 handoff\b/)
+    expect(strip.textContent).not.toMatch(/\/api\//)
   })
 
-  it('productized availability=false surfaces unavailable status strip without fabricating rows', () => {
+  it('productized status strip uses honest availability copy (unavailable)', () => {
     wrap(
       <HandoffsView
         available={false}
@@ -170,6 +170,7 @@ describe('Handoff a11y (LINE F)', () => {
     )
     const strip = screen.getByTestId('console-handoffs-status')
     expect(strip.getAttribute('data-ec-state')).toBe('unavailable')
-    expect(strip.textContent).toMatch(/handoffs unavailable/)
+    expect(strip.textContent).toMatch(/Handoff service unavailable/)
+    expect(strip.textContent).not.toMatch(/\/api\//)
   })
 })

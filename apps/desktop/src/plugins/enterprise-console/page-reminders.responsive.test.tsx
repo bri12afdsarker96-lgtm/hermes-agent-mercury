@@ -6,12 +6,14 @@
  *
  * CSS class-string assertions only (jsdom does not run layout).
  *
- * Per P1-VIS-V2 (Reminders productization):
- *   - V0 tests preserved verbatim (fixtures extended to include the
- *     4 V2 VM fields).
- *   - 1 new test verifies the row carries `data-ec-reminder-state`
- *     and the timezone `data-ec-mono` span — the narrow-layout
- *     debugging hooks used by the design system.
+ * Per P1-VIS-V2-REMEDIATION-01:
+ *   - V0 tests preserved verbatim (fixtures slimmed to the V2 VM
+ *     fields the View still consumes; removed relativeOffset and
+ *     detail fields are gone).
+ *   - 1 test verifies the row carries `data-ec-reminder-state` and
+ *     the timezone `data-ec-mono` span — the narrow-layout debugging
+ *     hooks used by the design system.
+ *   - The relative-offset hook is REMOVED from the row layout.
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -50,20 +52,7 @@ describe('Reminders responsive hooks (LINE F)', () => {
             scheduledForDisplay: 'now',
             generation: 1,
             subjectDisplay: 'biz_task:t1',
-            relativeOffset: 'in 1m',
-            relativeOffsetTone: 'good',
             stateLabel: 'active',
-            detail: {
-              title: 'follow up',
-              stateLabel: 'active',
-              stateTone: 'good',
-              subjectDisplay: 'biz_task:t1',
-              scheduledForDisplay: 'now',
-              timezone: 'UTC',
-              ownerDisplay: '—',
-              generationLabel: 'generation 1',
-              reminderId: 'r1',
-            },
           },
         ]}
         remindersError={null}
@@ -117,20 +106,7 @@ describe('Reminders responsive hooks (LINE F)', () => {
             scheduledForDisplay: 'now',
             generation: 1,
             subjectDisplay: 'biz_task:t1',
-            relativeOffset: 'in 1m',
-            relativeOffsetTone: 'good',
             stateLabel: 'active',
-            detail: {
-              title: 'follow up',
-              stateLabel: 'active',
-              stateTone: 'good',
-              subjectDisplay: 'biz_task:t1',
-              scheduledForDisplay: 'now',
-              timezone: 'UTC',
-              ownerDisplay: '—',
-              generationLabel: 'generation 1',
-              reminderId: 'r1',
-            },
           },
         ]}
         remindersError={null}

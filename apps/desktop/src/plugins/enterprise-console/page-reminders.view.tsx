@@ -15,19 +15,25 @@
  *     flex-wrap for narrow viewports. NO controller, NO
  *     contract change.
  *
- * Per P1-VIS-V2 (Reminders productization):
- *   - Status strip: a presentation-only narrow-layout region
- *     exposing server availability + reminder count. Uses
- *     `data-ec-state={available | unavailable}` so design-system
- *     layout hooks can target it without leaking business meaning.
- *   - PageHeader status badge: <PageStatusBadge status=
- *     {available ? 'ready' : 'partial'} /> — HONEST mapping that
- *     mirrors the propagated available flag (NEVER fabricated).
- *   - data-ec-reminder-state on each row = the row's server state
- *     ('active' / 'cancelled' / 'exhausted') for narrow-layout
- *     debugging. Distinct from data-page-status.
- *   - data-ec-mono on the timezone span = the design's
- *     mono-literal pattern (mirrors Handoff view).
+ * Per P1-VIS-V2-REMEDIATION-01:
+ *   - REMOVED the relative-offset countdown badge. The
+ *     relative-time display required a client current-time
+ *     authority in the VM, which conflicts with the W1C
+ *     pure-VM architecture. scheduledForDisplay + timezone
+ *     remain the time truth.
+ *   - REMOVED ReminderDetailView consumption (no longer on the
+ *     VM contract).
+ *   - REMOVED internal `/api/...` REST path from the visible
+ *     product copy. The status strip now reads as honest
+ *     availability language ("Reminder service available" /
+ *     "Reminder service unavailable") that mirrors the
+ *     server-derived available flag without leaking transport
+ *     detail into the visible product UI.
+ *
+ * Per §P6 invariants:
+ *   - SERVER STATE > CLIENT ASSUMPTION
+ *   - View never decides whether a reminder can be cancelled
+ *     (canCancelFromState is the VM-derived gate).
  */
 
 import { StatusDot } from '@hermes/plugin-sdk'
@@ -76,7 +82,7 @@ export function RemindersView({
     >
       <PageHeader
         actions={createSlot}
-        purpose="Server-authoritative reminders. Scheduled time and state come from the Hermes scheduler — the view never decides whether a reminder can be cancelled."
+        purpose="Schedule and cancel server-authoritative reminders without duplicating the reminder state machine."
         status={<PageStatusBadge status={available ? 'ready' : 'partial'} />}
         title="Reminders"
       />
@@ -88,13 +94,13 @@ export function RemindersView({
         data-testid="console-reminders-status"
       >
         <h2 className="sr-only" id="console-reminders-status-heading">
-          Reminder server availability
+          Reminder service availability
         </h2>
         <span className="inline-flex items-center gap-1">
           <StatusDot tone={available ? 'good' : 'bad'} />
           {available
-            ? 'server-authoritative · cancel posts to /api/reminder-cancel'
-            : 'reminders unavailable · server reports available=false'}
+            ? 'Reminder service available'
+            : 'Reminder service unavailable'}
         </span>
         <span aria-hidden="true" className="hidden sm:inline">·</span>
         <span>
@@ -134,16 +140,6 @@ export function RemindersView({
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    {reminder.relativeOffset ? (
-                      <span
-                        aria-label={`scheduling ${reminder.relativeOffset}`}
-                        className="inline-flex items-center gap-1 text-(--ui-text-tertiary)"
-                        data-testid={`console-reminder-offset-${reminder.reminderId}`}
-                      >
-                        <StatusDot tone={reminder.relativeOffsetTone} />
-                        {reminder.relativeOffset}
-                      </span>
-                    ) : null}
                     <span
                       aria-label={`state ${reminder.state}`}
                       className="inline-flex items-center gap-1 text-xs"

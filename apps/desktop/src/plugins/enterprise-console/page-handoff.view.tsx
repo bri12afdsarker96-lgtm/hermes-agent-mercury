@@ -18,17 +18,20 @@
  *     flex-wrap for narrow viewports. NO controller, NO
  *     contract change.
  *
- * Per P1-VIS-V2 (Minimal Handoff productization):
- *   - Status strip: same shape as Reminder's strip — narrow-layout
- *     accessible region exposing server availability + count.
- *   - PageHeader status badge: <PageStatusBadge status=
- *     {available ? 'ready' : 'partial'} /> — HONEST mapping.
- *   - data-ec-handoff-state on each row = the server state
- *     ('parked' / 'escalated' / etc.) for narrow-layout debugging.
- *   - data-ec-mono on the threadId span = the design's
- *     mono-literal pattern.
+ * Per P1-VIS-V2-REMEDIATION-01:
+ *   - REMOVED internal `/api/handoff-*` REST path from the
+ *     visible product copy. The status strip now reads as
+ *     honest availability language ("Handoff service available" /
+ *     "Handoff service unavailable") that mirrors the
+ *     server-derived available flag without leaking transport
+ *     detail into the visible product UI.
  *   - NO additional eligibility derivation. NO advanced handoff
  *     features. NO Business Follow-up contamination.
+ *
+ * Per §P6 invariants:
+ *   - SERVER STATE > CLIENT ASSUMPTION
+ *   - Three independent eligibility flags come from server row
+ *     facts (glue is the only composer).
  */
 
 import { StatusDot } from '@hermes/plugin-sdk'
@@ -88,13 +91,13 @@ export function HandoffsView({
         data-testid="console-handoffs-status"
       >
         <h2 className="sr-only" id="console-handoffs-status-heading">
-          Handoff server availability
+          Handoff service availability
         </h2>
         <span className="inline-flex items-center gap-1">
           <StatusDot tone={available ? 'good' : 'bad'} />
           {available
-            ? 'server-authoritative · claim / reply / requeue post to /api/handoff-*'
-            : 'handoffs unavailable · server reports available=false'}
+            ? 'Handoff service available'
+            : 'Handoff service unavailable'}
         </span>
         <span aria-hidden="true" className="hidden sm:inline">·</span>
         <span>

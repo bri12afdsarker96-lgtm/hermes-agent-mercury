@@ -6,13 +6,17 @@
  *
  * Pure render-only checks. No controller changes.
  *
- * Per P1-VIS-V2 (Reminders productization):
- *   - The 4 V0 tests are the W1-C contract (preserved verbatim
- *     except fixtures now include the 4 V2 VM fields the View
- *     consumes).
- *   - 2 new tests cover the V2 status strip (HONEST availability
- *     reflection + reminder count) and the narrow-layout
- *     `scheduling in X` badge.
+ * Per P1-VIS-V2-REMEDIATION-01:
+ *   - The 4 V0 tests are the W1-C contract (preserved verbatim except
+ *     fixtures now only include the 2 V2 VM fields the View still
+ *     consumes: stateLabel + scheduledForDisplay + timezone etc.; the
+ *     removed relativeOffset/relativeOffsetTone/detail fields are gone
+ *     from the VM contract).
+ *   - 2 status-strip tests updated: text now asserts the honest
+ *     product copy "Reminder service available/unavailable" — no
+ *     `/api/...` developer path on the visible product UI.
+ *   - The relative-offset scheduling badge test is REMOVED (the
+ *     runtime feature is gone).
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -42,9 +46,6 @@ describe('Reminders a11y (LINE F)', () => {
         remindersIsPending={false}
       />,
     )
-    // Per ConsolePanel contract: title="..." renders <h2>{title}</h2>.
-    // The page-level PageHeader above is <h1>, so this is the only h2
-    // named "Schedule" on the page.
     const heading = screen.getByRole('heading', { level: 2, name: 'Schedule' })
     expect(heading).toBeTruthy()
     expect(heading.tagName.toLowerCase()).toBe('h2')
@@ -84,20 +85,7 @@ describe('Reminders a11y (LINE F)', () => {
             scheduledForDisplay: 'now',
             generation: 1,
             subjectDisplay: 'biz_task:t1',
-            relativeOffset: 'in 1m',
-            relativeOffsetTone: 'good',
             stateLabel: 'active',
-            detail: {
-              title: 'follow up',
-              stateLabel: 'active',
-              stateTone: 'good',
-              subjectDisplay: 'biz_task:t1',
-              scheduledForDisplay: 'now',
-              timezone: 'UTC',
-              ownerDisplay: '—',
-              generationLabel: 'generation 1',
-              reminderId: 'r1',
-            },
           },
         ]}
         remindersError={null}
@@ -130,20 +118,7 @@ describe('Reminders a11y (LINE F)', () => {
             scheduledForDisplay: 'later',
             generation: 1,
             subjectDisplay: 'biz_task:t2',
-            relativeOffset: '',
-            relativeOffsetTone: 'muted',
             stateLabel: 'cancelled',
-            detail: {
-              title: 'next',
-              stateLabel: 'cancelled',
-              stateTone: 'muted',
-              subjectDisplay: 'biz_task:t2',
-              scheduledForDisplay: 'later',
-              timezone: 'UTC',
-              ownerDisplay: '—',
-              generationLabel: 'generation 1',
-              reminderId: 'r2',
-            },
           },
         ]}
         remindersError={null}
@@ -155,8 +130,9 @@ describe('Reminders a11y (LINE F)', () => {
     expect(stateBadge).toBeTruthy()
   })
 
-  // V2 PRODUCTIZATION — narrow layout hook + scheduling meta is rendered
-  it('productized status strip exposes availability and count as accessible region', () => {
+  // V2-R3 remediation — visible product copy is honest availability
+  // language; no internal /api/ paths leak into the visible product UI.
+  it('productized status strip uses honest availability copy (available)', () => {
     wrap(
       <RemindersView
         available
@@ -176,20 +152,7 @@ describe('Reminders a11y (LINE F)', () => {
             scheduledForDisplay: 'now',
             generation: 1,
             subjectDisplay: 'biz_task:t1',
-            relativeOffset: 'in 1m',
-            relativeOffsetTone: 'good',
             stateLabel: 'active',
-            detail: {
-              title: 'follow up',
-              stateLabel: 'active',
-              stateTone: 'good',
-              subjectDisplay: 'biz_task:t1',
-              scheduledForDisplay: 'now',
-              timezone: 'UTC',
-              ownerDisplay: '—',
-              generationLabel: 'generation 1',
-              reminderId: 'r1',
-            },
           },
         ]}
         remindersError={null}
@@ -199,13 +162,13 @@ describe('Reminders a11y (LINE F)', () => {
     const strip = screen.getByTestId('console-reminders-status')
     expect(strip).toBeTruthy()
     expect(strip.getAttribute('data-ec-state')).toBe('available')
-    expect(strip.textContent).toMatch(/server-authoritative/)
+    expect(strip.textContent).toMatch(/Reminder service available/)
     expect(strip.textContent).toMatch(/1 reminder\b/)
-    // Relative offset badge is exposed with aria-label + StatusDot
-    expect(screen.getByLabelText('scheduling in 1m')).toBeTruthy()
+    // No /api/... REST path on visible product UI
+    expect(strip.textContent).not.toMatch(/\/api\//)
   })
 
-  it('productized availability=false surfaces unavailable status strip without fabricating rows', () => {
+  it('productized status strip uses honest availability copy (unavailable)', () => {
     wrap(
       <RemindersView
         available={false}
@@ -218,6 +181,7 @@ describe('Reminders a11y (LINE F)', () => {
     )
     const strip = screen.getByTestId('console-reminders-status')
     expect(strip.getAttribute('data-ec-state')).toBe('unavailable')
-    expect(strip.textContent).toMatch(/reminders unavailable/)
+    expect(strip.textContent).toMatch(/Reminder service unavailable/)
+    expect(strip.textContent).not.toMatch(/\/api\//)
   })
 })
