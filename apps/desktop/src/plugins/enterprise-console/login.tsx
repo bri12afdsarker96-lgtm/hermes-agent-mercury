@@ -139,6 +139,7 @@ export function EnterpriseLogin() {
             aria-live="polite"
             className="flex items-start gap-3 rounded-(--ec-panel-radius) border border-(--ui-stroke-secondary) bg-(--ui-bg-card) px-4 py-3"
             data-testid="enterprise-login-session"
+            role="status"
           >
             <span
               aria-hidden="true"
