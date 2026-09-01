@@ -21,6 +21,7 @@ import { HashRouter } from 'react-router'
 import App from './app'
 import { RootErrorBoundary } from './components/error-boundary'
 import { HapticsProvider } from './components/haptics-provider'
+import { RootRouteTakeover } from './components/root-route-takeover'
 import { RootTooltipProvider } from './components/ui/tooltip'
 import { I18nProvider } from './i18n'
 import { installClipboardShim } from './lib/clipboard'
@@ -79,6 +80,13 @@ if (winParam === 'overlay') {
                     both freeze for seconds despite the main thread being free.
                     Disabling transitions makes navigate() commit at default priority. */}
                   <HashRouter useTransitions={false}>
+                    {/* R4-A TRUE_ROOT_PRODUCT_TAKEOVER: redirect fresh launches to the
+                        enterprise console so Hermes-企业助手 is the primary default
+                        product chrome. Honors the existing native-login/session seam;
+                        an unauthenticated state renders ConsoleShell's honest
+                        disconnected bootstrap; an authenticated state renders the
+                        full enterprise shell on /console. */}
+                    <RootRouteTakeover />
                     <App />
                   </HashRouter>
                 </RootTooltipProvider>

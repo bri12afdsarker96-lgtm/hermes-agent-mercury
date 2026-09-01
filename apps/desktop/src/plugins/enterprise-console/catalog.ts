@@ -19,6 +19,9 @@ export interface ConsolePage {
   controlStatus: ControlStatus
   /** For blocked/partial: what the server is missing, for the operator. */
   gap?: string
+  /** Hide the nav row entirely — surface stays reachable via internal link but
+   *  is not part of the authenticated primary nav. Default false. */
+  hidden?: boolean
   /** Hide the nav row entirely when the viewer lacks `permission` (for
    *  tenant_admin-only surfaces where even the row should not appear). Default
    *  behavior otherwise: the row shows and the content is a DeniedPage. */
@@ -111,12 +114,14 @@ export const CONSOLE_PAGES: ConsolePage[] = [
   {
     capability: 'metrics',
     controlStatus: 'ready',
+    hidden: true, // P1.5: alerts is a legacy module, not part of the 10 P1 auth nav.
     id: 'alerts',
     labelKey: 'page.alerts',
     permission: 'metrics.view',
     status: 'ready'
   },
-  { controlStatus: 'ready', id: 'provider', labelKey: 'page.provider', permission: 'provider.set', status: 'ready' },
+  { controlStatus: 'ready', hidden: true, // P1.5: provider settings are a legacy / scope-narrow surface.
+    id: 'provider', labelKey: 'page.provider', permission: 'provider.set', status: 'ready' },
   {
     // Budget config reads via /api/tenant-profile (tenant.profile.read — NOT
     // metrics.view, which operators also hold and would wrongly pass the gate).
