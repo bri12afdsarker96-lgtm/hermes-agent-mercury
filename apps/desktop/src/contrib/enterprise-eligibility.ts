@@ -3,13 +3,13 @@
  * whether the bundled Enterprise Console plugin is available, plus a tiny
  * registry so the generic plugin loader stays plugin-agnostic.
  *
- * `$enterpriseAvailable` is a one-way projection of the (main-process-owned)
- * enterprise session: `true` once an authenticated enterprise session exists,
- * `false` otherwise. It carries NO bearer and NO secret — only a boolean — and
- * is never persisted (it is live session state). The desktop shell feeds it
- * once the federated whoami resolves (that wiring lands with the federation
- * contract); until then it stays `false`, so the console stays hidden exactly
- * as the `defaultEnabled: false` floor does today.
+ * `$enterpriseAvailable` is a product-ownership flag, not a session signal
+ * anymore (REM-02): the console is the PRIMARY desktop product frame — its
+ * route must exist on a fresh cold start so the RootRouteTakeover lands on
+ * the Design-System Login bootstrap before any session exists. It carries NO
+ * bearer and NO secret — only a boolean — and is never persisted. The user's
+ * explicit Plugins toggle still wins over it (the loader composes the atom
+ * with the persisted decision).
  *
  * The plugin lifecycle itself is untouched: `bindEligibility` (plugins-store)
  * drives the EXISTING activate/deactivate handles from this atom composed with

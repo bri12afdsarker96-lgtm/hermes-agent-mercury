@@ -6,8 +6,10 @@
  * server owns identity / tenant / permission / capability; the console only
  * presents them).
  *
- * Ships OFF by default (`defaultEnabled: false`): it inventories in
- * Settings ▸ Plugins and registers nothing until the operator flips the switch.
+ * It is the PRIMARY product surface: active by default (the shell pins
+ * `$enterpriseAvailable` true so the plugin registers before any session
+ * exists), with the unauthenticated first paint being the Design-System Login
+ * bootstrap (login.tsx). The user's explicit Plugins toggle still wins.
  */
 
 import {
@@ -59,7 +61,11 @@ const plugin: HermesPlugin = {
       {
         id: 'page',
         area: ROUTES_AREA,
-        data: { path: '/console' } satisfies RouteContribution,
+        // fullWindow: the enterprise product page owns the whole window — the
+        // app's session sidebar + statusbar stand down while /console is active
+        // (the ConsoleShell carries its own AppSidebar / TopHeader / StatusBar),
+        // so the upstream chat chrome is not the primary product frame.
+        data: { fullWindow: true, path: '/console' } satisfies RouteContribution,
         render: () => <ConsoleShell />
       },
       {

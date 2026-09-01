@@ -85,17 +85,37 @@ export const ROUTES_AREA = 'routes'
 export interface RouteContribution {
   /** Absolute path, e.g. `/kanban`. One segment; no params. */
   path: string
+  /**
+   * The page owns the FULL WINDOW: while this route is active the app's
+   * session sidebar and statusbar chrome stand down (via the same hidden-pane
+   * mechanism as the titlebar sidebar toggle) so the page's own chrome is the
+   * primary product frame. They return the moment the route changes. Used by
+   * the enterprise product route, whose ConsoleShell supplies its own
+   * AppSidebar / TopHeader / StatusBar.
+   */
+  fullWindow?: boolean
 }
 
-export function contributedRoutes(): Array<{ key: string; path: string; title?: string; render: () => ReactNode }> {
+export function contributedRoutes(): Array<{
+  fullWindow?: boolean
+  key: string
+  path: string
+  render: () => ReactNode
+  title?: string
+}> {
   return registry
     .getArea(ROUTES_AREA)
-    .map(c => ({
-      key: `${c.source ?? 'core'}:${c.id}`,
-      path: (c.data as RouteContribution | undefined)?.path ?? '',
-      title: c.title,
-      render: c.render!
-    }))
+    .map(c => {
+      const data = c.data as RouteContribution | undefined
+
+      return {
+        fullWindow: data?.fullWindow,
+        key: `${c.source ?? 'core'}:${c.id}`,
+        path: data?.path ?? '',
+        title: c.title,
+        render: c.render!
+      }
+    })
     .filter(route => Boolean(route.path.startsWith('/') && route.render) && !RESERVED_PATHS.has(route.path))
 }
 
