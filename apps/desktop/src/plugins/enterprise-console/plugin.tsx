@@ -24,7 +24,7 @@ import {
 import { ConsoleShell } from './console'
 import { ENTERPRISE_CONSOLE_LOCALES } from './i18n'
 import { hasIpcBridge, IpcHermesTransport } from './ipc-transport'
-import { $sessionState, bindSession, setAutoTransportFactory } from './session'
+import { bindSession, setAutoTransportFactory } from './session'
 
 const plugin: HermesPlugin = {
   id: 'enterprise-console',
@@ -49,28 +49,11 @@ const plugin: HermesPlugin = {
     // in-memory session + identity on unload/disable.
     ctx.onDispose(bindSession(ctx.storage))
 
-    // Root product takeover (R4-A): make Hermes-企业助手 the primary default
-    // product experience for fresh unauthenticated AND authenticated sessions.
-    // When unauthenticated, ConsoleShell renders an honest 'enterprise
-    // session unavailable' state (no fake login, no direct bearer). When
-    // authenticated, it renders the full enterprise shell on Overview.
-    // The upstream chat surface remains reachable but is no longer the
-    // default landing.
-    let didTakeOver = false
-    const tryTakeover = () => {
-      if (didTakeOver) {return}
-      if (typeof window === 'undefined') {return}
-      const h = window.location.hash
-      if (h === '' || h === '#/' || h === '#/new' || h === '#/chat') {
-        didTakeOver = true
-        host.navigate('/console')
-      }
-    }
-    const unsubscribeSession = $sessionState.subscribe(() => tryTakeover())
-    ctx.onDispose(unsubscribeSession)
-    // Also attempt on next tick so an empty/native-no-session bootstrap
-    // still lands the user on the enterprise shell immediately.
-    setTimeout(tryTakeover, 0)
+    // Root product takeover is owned by <RootRouteTakeover /> mounted at the
+    // root HashRouter in main.tsx (single owner, runs before any commit). Do
+    // not re-trigger it from here — duplicate owners race on the hash rewrite
+    // and can leave the user on /chat with the enterprise console never
+    // finishing its mount.
 
     ctx.registerMany([
       {

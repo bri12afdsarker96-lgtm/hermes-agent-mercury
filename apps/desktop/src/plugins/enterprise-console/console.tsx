@@ -178,8 +178,14 @@ export function ConsoleShell() {
   // Nav rows for surfaces flagged hideWhenUnpermitted (e.g. audit, tenant_admin
   // only) are omitted entirely for viewers who lack the permission — the row
   // does not merely deny in content. Other pages keep the row + DeniedPage.
+  // P1.5 / legacy surfaces (e.g. provider, alerts) are also excluded via the
+  // `hidden` flag so the primary product nav holds exactly the 10 P1 active
+  // rows. Login/Session bootstrap is a separate top-level state, not a nav
+  // row; the 11th P1 surface.
   const navPages = CONSOLE_PAGES.filter(
-    page => !(page.hideWhenUnpermitted && page.permission && !hasPermission(who, page.permission))
+    page =>
+      !page.hidden &&
+      !(page.hideWhenUnpermitted && page.permission && !hasPermission(who, page.permission))
   )
 
   const active = navPages.find(page => page.id === activeId) ?? navPages[0]
