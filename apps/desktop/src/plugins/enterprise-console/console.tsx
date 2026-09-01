@@ -156,8 +156,8 @@ export function ConsoleShell() {
     return (
       <div
         className="flex h-full flex-col"
-        data-testid="enterprise-console"
         data-session-state="disconnected"
+        data-testid="enterprise-console"
       >
         <div className="flex h-14 shrink-0 items-center border-b border-border px-3">
           <BrandMark />
