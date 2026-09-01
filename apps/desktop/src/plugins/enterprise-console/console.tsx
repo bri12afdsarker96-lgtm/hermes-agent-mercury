@@ -16,7 +16,6 @@
 import { atom, Button, usePluginI18n, useValue } from '@hermes/plugin-sdk'
 import type { ComponentType } from 'react'
 
-import { BrandMark } from '@/components/brand-mark'
 import { hasPermission } from './capabilities'
 import { CONSOLE_PAGES, type ConsolePage } from './catalog'
 import { AlertsPage } from './page-alerts'
@@ -78,6 +77,22 @@ function renderPage(page: ConsolePage, who: Whoami) {
   }
 
   return <PendingPage page={page} />
+}
+
+/** Brand lockup: wing mark + product wordmark. The plugin SDK boundary
+ *  (no-restricted-imports) prevents importing the shell's shared BrandMark,
+ *  so the enterprise console keeps its own minimal lockup. */
+const assetPath = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, '')}`
+
+function BrandMark() {
+  return (
+    <div aria-label="Hermes-企业助手" className="flex min-w-0 items-center gap-2 px-1">
+      <img alt="" aria-hidden="true" className="h-6 w-auto shrink-0" src={assetPath('brand/hermes-mark.svg')} />
+      <span aria-hidden="true" className="truncate text-[13px] font-medium tracking-wide text-[--ui-text-primary]">
+        Hermes-企业助手
+      </span>
+    </div>
+  )
 }
 
 /** Enterprise TopHeader: tenant + role + principal + disconnect. */
@@ -161,7 +176,7 @@ export function ConsoleShell() {
           data-testid="console-nav"
         >
           <div className="flex h-14 shrink-0 items-center border-b border-border px-1">
-            <BrandMark variant="lockup" />
+            <BrandMark />
           </div>
           {navPages.map(page => (
             <button
