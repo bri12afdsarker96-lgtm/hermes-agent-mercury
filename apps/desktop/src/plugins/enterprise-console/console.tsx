@@ -16,6 +16,7 @@
 import { atom, Button, usePluginI18n, useValue } from '@hermes/plugin-sdk'
 import type { ComponentType } from 'react'
 
+import { BrandMark } from '@/components/brand-mark'
 import { hasPermission } from './capabilities'
 import { CONSOLE_PAGES, type ConsolePage } from './catalog'
 import { AlertsPage } from './page-alerts'
@@ -79,30 +80,6 @@ function renderPage(page: ConsolePage, who: Whoami) {
   return <PendingPage page={page} />
 }
 
-/** Brand lockup: wing mark + product wordmark. Presentation only. */
-const assetPath = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, '')}`
-
-function BrandMark({ collapsed }: { collapsed: boolean }) {
-  return (
-    <div className="flex min-w-0 items-center gap-2 px-1" aria-label="Hermes-企业助手">
-      <img
-        alt=""
-        aria-hidden="true"
-        className="h-6 w-auto shrink-0"
-        src={assetPath('brand/hermes-mark.svg')}
-      />
-      {!collapsed && (
-        <span
-          aria-hidden="true"
-          className="truncate text-[13px] font-medium tracking-wide text-[--ui-text-primary]"
-        >
-          Hermes-企业助手
-        </span>
-      )}
-    </div>
-  )
-}
-
 /** Enterprise TopHeader: tenant + role + principal + disconnect. */
 function EnterpriseHeader({ who }: { who: Whoami }) {
   const t = usePluginI18n('enterprise-console')
@@ -137,9 +114,9 @@ function EnterpriseHeader({ who }: { who: Whoami }) {
 function EnterpriseStatusBar({ who }: { who: Whoami }) {
   return (
     <footer className="flex h-10 shrink-0 items-center gap-3 border-t border-border bg-[--ui-bg-chrome] px-4 text-[11px] text-[--ui-text-secondary]">
-      <span className="inline-flex items-center gap-1.5 rounded bg-[--status-success-bg] px-2 py-0.5 text-[--status-success-fg]">
+      <span className="inline-flex items-center gap-1.5 rounded bg-[--status-info-bg] px-2 py-0.5 text-[--status-info-fg]">
         <span aria-hidden="true">●</span>
-        系统运行正常
+        已连接
       </span>
       <span className="inline-flex items-center gap-1.5 rounded border border-[--ui-stroke-secondary] bg-[--ui-bg-surface] px-2 py-0.5">
         <span className="text-[--ui-text-tertiary]">身份</span>
@@ -184,7 +161,7 @@ export function ConsoleShell() {
           data-testid="console-nav"
         >
           <div className="flex h-14 shrink-0 items-center border-b border-border px-1">
-            <BrandMark collapsed={false} />
+            <BrandMark variant="lockup" />
           </div>
           {navPages.map(page => (
             <button

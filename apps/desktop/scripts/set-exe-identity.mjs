@@ -69,7 +69,7 @@ async function stampExeIdentity(exe, desktopRoot = resolve(import.meta.dirname, 
     }
   })
 
-  console.log('[set-exe-identity] done — hermes_Agent icon + identity stamped')
+  console.log('[set-exe-identity] done — Hermes-企业助手 icon + identity stamped')
 }
 
 export { stampExeIdentity }
