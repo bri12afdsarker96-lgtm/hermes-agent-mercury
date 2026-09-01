@@ -13,11 +13,13 @@
  * renderer holds no bearer (main owns the session).
  */
 
-import { atom, Button, usePluginI18n, useValue } from '@hermes/plugin-sdk'
+import { atom, Button, host, icons, usePluginI18n, useValue } from '@hermes/plugin-sdk'
 import type { ComponentType } from 'react'
 
+import { BrandMark } from './brand-mark'
 import { hasPermission } from './capabilities'
 import { CONSOLE_PAGES, type ConsolePage } from './catalog'
+import { EnterpriseLogin } from './login'
 import { AlertsPage } from './page-alerts'
 import { AuditPage } from './page-audit'
 import { ConversationsPage } from './page-conversations'
@@ -79,23 +81,11 @@ function renderPage(page: ConsolePage, who: Whoami) {
   return <PendingPage page={page} />
 }
 
-/** Brand lockup: wing mark + product wordmark. The plugin SDK boundary
- *  (no-restricted-imports) prevents importing the shell's shared BrandMark,
- *  so the enterprise console keeps its own minimal lockup. */
-const assetPath = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, '')}`
-
-function BrandMark() {
-  return (
-    <div aria-label="Hermes-企业助手" className="flex min-w-0 items-center gap-2 px-1">
-      <img alt="" aria-hidden="true" className="h-6 w-auto shrink-0" src={assetPath('brand/hermes-mark.svg')} />
-      <span aria-hidden="true" className="truncate text-[13px] font-medium tracking-wide text-[--ui-text-primary]">
-        Hermes-企业助手
-      </span>
-    </div>
-  )
-}
-
-/** Enterprise TopHeader: tenant + role + principal + disconnect. */
+/** Enterprise TopHeader: tenant + role + principal + disconnect, plus the
+ *  Enterprise Assistant entry — the ONE doorway back to the existing Hermes
+ *  chat runtime (R5-D). The runtime itself is unchanged; the button reuses
+ *  the app's own navigation seam so the assistant presentation never needs a
+ *  second engine or a second transport. */
 function EnterpriseHeader({ who }: { who: Whoami }) {
   const t = usePluginI18n('enterprise-console')
 
@@ -108,6 +98,15 @@ function EnterpriseHeader({ who }: { who: Whoami }) {
         </span>
       </div>
       <div className="flex min-w-0 items-center justify-end gap-2 text-xs text-muted-foreground">
+        <Button
+          data-testid="console-open-assistant"
+          onClick={() => host.navigate('/')}
+          size="sm"
+          variant="ghost"
+        >
+          <icons.Brain className="size-4" stroke={2} />
+          {t('assistant.open')}
+        </Button>
         <span className="max-w-40 truncate" data-testid="console-header-principal" title={who.name}>
           {who.name}
         </span>
@@ -149,28 +148,17 @@ export function ConsoleShell() {
   const activeId = useValue($activePage)
 
   if (!who) {
-    // Honest disconnected bootstrap state: Hermes-企业助手 enterprise shell
-    // with a clear 'session unavailable' notice. No fake login form — the
-    // native MAIN process owns the bearer; the user must complete the
-    // desktop account sign-in for the enterprise session to establish.
+    // Design-System Login bootstrap (R5-B): the enterprise Login surface
+    // bridges to the main-owned native auth seam. NO fake login — the
+    // renderer holds no credential; the primary action re-probes the native
+    // session and the FSM reports the honest state.
     return (
       <div
         className="flex h-full flex-col"
         data-session-state="disconnected"
         data-testid="enterprise-console"
       >
-        <div className="flex h-14 shrink-0 items-center border-b border-border px-3">
-          <BrandMark />
-        </div>
-        <main className="flex min-h-0 flex-1 items-center justify-center p-8" data-testid="console-session-unavailable">
-          <div className="max-w-md rounded-lg border border-border bg-[--ui-bg-surface] p-6 text-sm text-[--ui-text-secondary]">
-            <div className="mb-2 flex items-center gap-2 text-[--ui-text-primary]">
-              <span aria-hidden="true">●</span>
-              <span className="font-medium">未连接</span>
-            </div>
-            <p>enterprise session unavailable — sign in to the desktop account and retry.</p>
-          </div>
-        </main>
+        <EnterpriseLogin />
       </div>
     )
   }

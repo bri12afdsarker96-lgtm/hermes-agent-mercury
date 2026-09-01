@@ -1,7 +1,8 @@
+import { host } from '@hermes/plugin-sdk'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CONSOLE_PAGES } from './catalog'
 import { $activePage, ConsoleShell } from './console'
@@ -55,17 +56,53 @@ describe('ConsoleShell', () => {
     $whoami.set(null)
     renderShell()
 
-    expect(screen.queryByTestId('console-session-unavailable')).not.toBeNull()
-    expect(screen.queryByTestId('enterprise-console')).toBeNull()
+    // The disconnected bootstrap carries the enterprise-console testid so the
+    // root takeover's first paint is provable, but the authenticated nav must
+    // NOT exist before the native session is established.
+    expect(screen.getByTestId('enterprise-console').getAttribute('data-session-state')).toBe('disconnected')
+    expect(screen.queryByTestId('console-nav')).toBeNull()
+    // R5-B: the Design-System Login surface is the unauthenticated first paint.
+    expect(screen.queryByTestId('enterprise-login')).not.toBeNull()
   })
 
-  it('renders a nav row for every Phase-1 page once connected (admin sees all)', () => {
+  it('renders a nav row for every non-legacy Phase-1 page once connected (admin sees all)', () => {
     $whoami.set(who({ effective_permissions: ['*'] }))
     renderShell()
 
-    for (const page of CONSOLE_PAGES) {
+    for (const page of CONSOLE_PAGES.filter(page => !page.hidden)) {
       expect(screen.queryByTestId(`console-nav-${page.id}`)).not.toBeNull()
     }
+
+    // Legacy / P1.5 surfaces (provider, alerts) are excluded from the primary
+    // authenticated nav — they are not P1 auth rows.
+    for (const page of CONSOLE_PAGES.filter(page => page.hidden)) {
+      expect(screen.queryByTestId(`console-nav-${page.id}`)).toBeNull()
+    }
+  })
+
+  it('renders exactly the 10 P1 primary nav rows for an operator (audit row is admin-only)', () => {
+    $whoami.set(
+      who({
+        effective_permissions: [
+          'metrics.view',
+          'channel.binding.manage',
+          'principal.crud',
+          'conversation.read',
+          'biztask.read',
+          'followup.read',
+          'reminder.read',
+          'kb.author',
+          'inbox.list',
+          'tenant.profile.read'
+        ]
+      })
+    )
+    renderShell()
+
+    expect(screen.getAllByTestId(/^console-nav-/)).toHaveLength(10)
+    expect(screen.queryByTestId('console-nav-audit')).toBeNull()
+    expect(screen.queryByTestId('console-nav-provider')).toBeNull()
+    expect(screen.queryByTestId('console-nav-alerts')).toBeNull()
   })
 
   it('reflects an honest PARTIAL server-gap page, never a fake feature', () => {
@@ -92,6 +129,17 @@ describe('ConsoleShell', () => {
     renderShell()
 
     expect(screen.queryByTestId('console-nav-audit')).not.toBeNull()
+  })
+
+  it('re-homes the Enterprise Assistant through the EXISTING chat route (runtime reuse, no second engine)', () => {
+    const navigateSpy = vi.spyOn(host, 'navigate').mockImplementation(() => undefined)
+    $whoami.set(who({ effective_permissions: ['*'] }))
+    renderShell()
+
+    fireEvent.click(screen.getByTestId('console-open-assistant'))
+
+    expect(navigateSpy).toHaveBeenCalledWith('/')
+    navigateSpy.mockRestore()
   })
 
   it('denies a page in the UI when the session lacks its permission', () => {
