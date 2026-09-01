@@ -15,8 +15,8 @@ import {
   host,
   PALETTE_AREA,
   type PaletteContribution,
-  ROUTES_AREA,
   type RouteContribution,
+  ROUTES_AREA,
   SIDEBAR_NAV_AREA,
   type SidebarNavContribution
 } from '@hermes/plugin-sdk'
@@ -24,7 +24,7 @@ import {
 import { ConsoleShell } from './console'
 import { ENTERPRISE_CONSOLE_LOCALES } from './i18n'
 import { hasIpcBridge, IpcHermesTransport } from './ipc-transport'
-import { bindSession, setAutoTransportFactory, $sessionState } from './session'
+import { bindSession, $sessionState, setAutoTransportFactory } from './session'
 
 const plugin: HermesPlugin = {
   id: 'enterprise-console',
