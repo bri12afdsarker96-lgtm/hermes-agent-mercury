@@ -30,7 +30,7 @@ const plugin: HermesPlugin = {
   id: 'enterprise-console',
   name: 'Enterprise Console',
   description: 'Phase-1 operator console for a Hermes server — dashboard, tasks, knowledge, handoff, and more.',
-  defaultEnabled: false,
+  defaultEnabled: true,
   register(ctx) {
     ctx.i18n.register(ENTERPRISE_CONSOLE_LOCALES)
 
