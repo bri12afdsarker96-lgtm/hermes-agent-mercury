@@ -15,8 +15,8 @@ import {
   host,
   PALETTE_AREA,
   type PaletteContribution,
-  type RouteContribution,
   ROUTES_AREA,
+  type RouteContribution,
   SIDEBAR_NAV_AREA,
   type SidebarNavContribution
 } from '@hermes/plugin-sdk'
@@ -24,7 +24,7 @@ import {
 import { ConsoleShell } from './console'
 import { ENTERPRISE_CONSOLE_LOCALES } from './i18n'
 import { hasIpcBridge, IpcHermesTransport } from './ipc-transport'
-import { bindSession, setAutoTransportFactory } from './session'
+import { bindSession, setAutoTransportFactory, $sessionState } from './session'
 
 const plugin: HermesPlugin = {
   id: 'enterprise-console',
@@ -48,6 +48,21 @@ const plugin: HermesPlugin = {
     // Persist only the (non-secret) server URL; the disposer wipes the
     // in-memory session + identity on unload/disable.
     ctx.onDispose(bindSession(ctx.storage))
+
+    // Root product takeover: once the native-bridged session is AUTHENTICATED,
+    // navigate to the enterprise console on the first transition. This makes
+    // Hermes-企业助手 the primary default product experience (the upstream
+    // chat surface remains reachable but is no longer the default landing).
+    let didTakeOver = false
+    const unsubscribeSession = $sessionState.subscribe(state => {
+      if (state === 'AUTHENTICATED' && !didTakeOver) {
+        didTakeOver = true
+        if (typeof window !== 'undefined' && (window.location.hash === '' || window.location.hash === '#/' || window.location.hash === '#/new')) {
+          host.navigate('/console')
+        }
+      }
+    })
+    ctx.onDispose(unsubscribeSession)
 
     ctx.registerMany([
       {
