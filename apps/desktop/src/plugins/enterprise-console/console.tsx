@@ -149,11 +149,28 @@ export function ConsoleShell() {
   const activeId = useValue($activePage)
 
   if (!who) {
-    // Production console access is native one-login only. Never render a
-    // renderer token form as a fallback: the main process owns the bearer.
+    // Honest disconnected bootstrap state: Hermes-企业助手 enterprise shell
+    // with a clear 'session unavailable' notice. No fake login form — the
+    // native MAIN process owns the bearer; the user must complete the
+    // desktop account sign-in for the enterprise session to establish.
     return (
-      <div className="mx-auto mt-16 max-w-sm text-sm text-muted-foreground" data-testid="console-session-unavailable">
-        enterprise session unavailable — sign in to the desktop account and retry
+      <div
+        className="flex h-full flex-col"
+        data-testid="enterprise-console"
+        data-session-state="disconnected"
+      >
+        <div className="flex h-14 shrink-0 items-center border-b border-border px-3">
+          <BrandMark />
+        </div>
+        <main className="flex min-h-0 flex-1 items-center justify-center p-8" data-testid="console-session-unavailable">
+          <div className="max-w-md rounded-lg border border-border bg-[--ui-bg-surface] p-6 text-sm text-[--ui-text-secondary]">
+            <div className="mb-2 flex items-center gap-2 text-[--ui-text-primary]">
+              <span aria-hidden="true">●</span>
+              <span className="font-medium">未连接</span>
+            </div>
+            <p>enterprise session unavailable — sign in to the desktop account and retry.</p>
+          </div>
+        </main>
       </div>
     )
   }

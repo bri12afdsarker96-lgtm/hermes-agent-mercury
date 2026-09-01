@@ -49,20 +49,28 @@ const plugin: HermesPlugin = {
     // in-memory session + identity on unload/disable.
     ctx.onDispose(bindSession(ctx.storage))
 
-    // Root product takeover: once the native-bridged session is AUTHENTICATED,
-    // navigate to the enterprise console on the first transition. This makes
-    // Hermes-企业助手 the primary default product experience (the upstream
-    // chat surface remains reachable but is no longer the default landing).
+    // Root product takeover (R4-A): make Hermes-企业助手 the primary default
+    // product experience for fresh unauthenticated AND authenticated sessions.
+    // When unauthenticated, ConsoleShell renders an honest 'enterprise
+    // session unavailable' state (no fake login, no direct bearer). When
+    // authenticated, it renders the full enterprise shell on Overview.
+    // The upstream chat surface remains reachable but is no longer the
+    // default landing.
     let didTakeOver = false
-    const unsubscribeSession = $sessionState.subscribe(state => {
-      if (state === 'AUTHENTICATED' && !didTakeOver) {
+    const tryTakeover = () => {
+      if (didTakeOver) {return}
+      if (typeof window === 'undefined') {return}
+      const h = window.location.hash
+      if (h === '' || h === '#/' || h === '#/new' || h === '#/chat') {
         didTakeOver = true
-        if (typeof window !== 'undefined' && (window.location.hash === '' || window.location.hash === '#/' || window.location.hash === '#/new')) {
-          host.navigate('/console')
-        }
+        host.navigate('/console')
       }
-    })
+    }
+    const unsubscribeSession = $sessionState.subscribe(() => tryTakeover())
     ctx.onDispose(unsubscribeSession)
+    // Also attempt on next tick so an empty/native-no-session bootstrap
+    // still lands the user on the enterprise shell immediately.
+    setTimeout(tryTakeover, 0)
 
     ctx.registerMany([
       {
