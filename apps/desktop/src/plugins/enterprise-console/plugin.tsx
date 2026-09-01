@@ -24,7 +24,7 @@ import {
 import { ConsoleShell } from './console'
 import { ENTERPRISE_CONSOLE_LOCALES } from './i18n'
 import { hasIpcBridge, IpcHermesTransport } from './ipc-transport'
-import { bindSession, $sessionState, setAutoTransportFactory } from './session'
+import { $sessionState, bindSession, setAutoTransportFactory } from './session'
 
 const plugin: HermesPlugin = {
   id: 'enterprise-console',
