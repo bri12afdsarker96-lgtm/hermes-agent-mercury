@@ -62,7 +62,8 @@ Desktop 只能复用 Hermes 的 runtime 与基础能力；产品 UI 必须继续
 - PR #135 head：`04820be472cb5b4d85c2a622047e03a6eba2365c`
 - PR base：`claude/p3-m4a-server-console-phase1-01`
 - PR #135 当前自然 CI：8 项成功（Linux/Windows pytest、WeCom、dataplane-pg）。
-- Server 工作树存在一项未跟踪内容。开始任何 Server 写入前，先运行 `git status --porcelain -z` 确认其真实路径、归属和是否应保留；不允许把它纳入本阶段提交。
+- 本地 Server checkout **落后**远端 PR head 三个提交（`5602445`、`b82c4bd`、`04820be`），不存在已提交但未推送的 Server commit；接手人应以 GitHub 远端分支为准。
+- Server 工作树存在一个未跟踪本地提示文件 `选`（69 bytes，创建于 2026-08-16）：`环境已就绪。想让控制台看到真机 - 2（同 WiFi）或 4（走流量/公网）。` 它不是源代码、配置或交接资产，必须保留在本地且**不得提交/推送**。开始任何 Server 写入前仍需运行 `git status --porcelain -z` 核对工作树。
 
 ### 2.3 关键服务端 Gate
 
