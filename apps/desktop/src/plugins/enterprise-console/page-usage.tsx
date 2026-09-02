@@ -33,16 +33,102 @@
  * per-tenant figure.
  */
 
-import { icons, StatusDot } from '@hermes/plugin-sdk'
+import { icons, Input, StatusDot, useValue } from '@hermes/plugin-sdk'
+import { useState } from 'react'
 
+import { FormAction } from './actions'
+import { hasPermission } from './capabilities'
 import { QueryBody, useConsoleQuery } from './page-kit'
+import { $whoami } from './session'
 import { PageStatusBadge } from './status-badge'
+import { useTransport } from './transport'
 import { ConsolePanel, KpiCard, PageHeader } from './ui'
 
-interface TenantProfileResp {
+export interface TenantProfileResp {
   fields: { llm?: { daily_budget_tokens?: number } }
   tenant_id: string
   version: number
+}
+
+interface BudgetDraft {
+  /** `null` means deliberately restore the server's default fallback. */
+  value: null | number
+  valid: boolean
+}
+
+function budgetDraft(text: string): BudgetDraft {
+  const trimmed = text.trim()
+
+  if (!trimmed) {
+    return { valid: true, value: null }
+  }
+
+  const value = Number(trimmed)
+
+  return {
+    valid: Number.isSafeInteger(value) && value >= 0,
+    value: Number.isSafeInteger(value) && value >= 0 ? value : null
+  }
+}
+
+function initialBudgetDraft(profile: TenantProfileResp): string {
+  const budget = profile.fields?.llm?.daily_budget_tokens
+
+  return budget == null ? '' : String(budget)
+}
+
+/**
+ * Server-authoritative tenant budget edit. The page never changes its own
+ * cached value: it posts the profile's current version and invalidates the
+ * profile query only after a successful server response. A 409 remains inside
+ * FormAction so the operator can retry from an authoritative refresh.
+ */
+function BudgetEditor({ profile }: { profile: TenantProfileResp }) {
+  const transport = useTransport()
+  const [draftText, setDraftText] = useState(() => initialBudgetDraft(profile))
+  const draft = budgetDraft(draftText)
+
+  return (
+    <FormAction
+      canSubmit={draft.valid}
+      invalidateKey={['enterprise-console', 'tenant-profile']}
+      onOpenChange={open => {
+        if (open) {
+          setDraftText(initialBudgetDraft(profile))
+        }
+      }}
+      permission="tenant.profile.write"
+      submit={() =>
+        transport.post('/api/tenant-profile', {
+          expected_version: profile.version,
+          fields: { llm: { daily_budget_tokens: draft.value } },
+          tenant_id: profile.tenant_id
+        })
+      }
+      submitLabel="Save budget"
+      testId="console-budget-edit"
+      title="Edit daily token budget"
+      trigger="Edit budget"
+    >
+      <label className="flex flex-col gap-1 text-sm text-(--ui-text-primary)" htmlFor="console-budget-input">
+        Daily token budget
+        <Input
+          aria-describedby="console-budget-edit-help"
+          data-testid="console-budget-input"
+          id="console-budget-input"
+          min="0"
+          onChange={event => setDraftText(event.target.value)}
+          placeholder="Empty: server default · 0: unlimited"
+          step="1"
+          type="number"
+          value={draftText}
+        />
+      </label>
+      <p className="text-xs text-(--ui-text-tertiary)" id="console-budget-edit-help">
+        Leave empty to restore the server default. Use 0 for an explicit unlimited budget.
+      </p>
+    </FormAction>
+  )
 }
 
 function budgetLabel(tokens: number | undefined): string {
@@ -73,6 +159,7 @@ function budgetSourceTone(tokens: number | undefined): 'good' | 'muted' {
 
 export function UsagePage() {
   const query = useConsoleQuery<TenantProfileResp>(['enterprise-console', 'tenant-profile'], '/api/tenant-profile')
+  const canEditBudget = hasPermission(useValue($whoami), 'tenant.profile.write')
 
   return (
     <div
@@ -86,10 +173,7 @@ export function UsagePage() {
         title="Usage & budget"
       />
 
-      <QueryBody
-        emptyText="no tenant profile — daily budget authority is unavailable on this server"
-        query={query}
-      >
+      <QueryBody emptyText="no tenant profile — daily budget authority is unavailable on this server" query={query}>
         {data => {
           const budget = budgetLabel(data.fields?.llm?.daily_budget_tokens)
           const source = budgetSourceLabel(data.fields?.llm?.daily_budget_tokens)
@@ -106,35 +190,22 @@ export function UsagePage() {
                   Budget figures
                 </h2>
                 <div data-testid="console-budget-value">
-                  <KpiCard
-                    accent="knowledge"
-                    icon={icons.CreditCard}
-                    label="Daily token budget"
-                    value={budget}
-                  />
+                  <KpiCard accent="knowledge" icon={icons.CreditCard} label="Daily token budget" value={budget} />
                 </div>
                 <div data-testid="console-budget-realtime">
-                  <KpiCard
-                    accent="brand"
-                    icon={icons.BarChart3}
-                    label="Real-time usage"
-                    value={null}
-                  />
+                  <KpiCard accent="brand" icon={icons.BarChart3} label="Real-time usage" value={null} />
                 </div>
               </section>
 
               <div className="mt-(--ec-gutter)" data-testid="console-budget-source">
-                <ConsolePanel divided title="Budget source">
+                <ConsolePanel
+                  action={canEditBudget ? <BudgetEditor profile={data} /> : undefined}
+                  divided
+                  title="Budget source"
+                >
                   <p className="text-(--ui-text-secondary)">
-                    The daily-token-budget figure above comes from the
-                    {' '}
-                    <span data-ec-mono="">tenant profile</span>
-                    {' '}
-                    when one is pinned, otherwise the
-                    {' '}
-                    <span data-ec-mono="">server env default</span>
-                    {' '}
-                    is used.
+                    The daily-token-budget figure above comes from the <span data-ec-mono="">tenant profile</span> when
+                    one is pinned, otherwise the <span data-ec-mono="">server env default</span> is used.
                   </p>
                   <p
                     className="mt-2 inline-flex items-center gap-2 text-(--ui-text-primary)"
@@ -151,15 +222,13 @@ export function UsagePage() {
       </QueryBody>
 
       <ConsolePanel className="mt-(--ec-gutter)" title="Availability">
-        <p
-          aria-live="polite"
-          className="text-(--ui-text-secondary)"
-          role="status"
-        >
-          Budget configuration is authoritative from the tenant profile. Real-time token usage and spend have no server endpoint yet, so no figure or trend is inferred.
+        <p aria-live="polite" className="text-(--ui-text-secondary)" role="status">
+          Budget configuration is authoritative from the tenant profile. Real-time token usage and spend have no server
+          endpoint yet, so no figure or trend is inferred.
         </p>
         <p className="mt-2 text-xs text-(--ui-text-tertiary)" data-testid="console-budget-note">
-          Edit budget · period chips · Provider breakdown are honest gaps until the server exposes the corresponding routes. The page never invents a number to fill the slot.
+          Budget editing is available only to sessions with tenant.profile.write. Real-time usage, period comparison and
+          Provider breakdown remain honest gaps until the server exposes their corresponding routes.
         </p>
       </ConsolePanel>
     </div>
