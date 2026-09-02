@@ -606,6 +606,11 @@
 .hesc-audit-card {
   margin-top: 16px;
 }
+.hesc-workflows-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.15fr);
+  gap: 16px;
+}
 .hesc-action {
   border: 1px solid var(--blue-200);
   border-radius: 7px;
@@ -670,6 +675,9 @@
     grid-template-columns: 1fr;
   }
   .hesc-governance-grid {
+    grid-template-columns: 1fr;
+  }
+  .hesc-workflows-grid {
     grid-template-columns: 1fr;
   }
   .hesc-main {
