@@ -384,6 +384,23 @@
   justify-content: space-between;
   gap: 16px;
 }
+
+.hesc-filter-control {
+  align-items: center;
+  color: var(--quiet);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.hesc-filter-control select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--ink);
+  font: inherit;
+  padding: 5px 7px;
+}
 .hesc-table-wrap {
   overflow: auto;
   margin-top: 12px;

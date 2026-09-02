@@ -68,12 +68,18 @@ function requestStateLabel(state: LoadState): string {
   return '等待企业服务连接'
 }
 
+function stateRequestPath(basePath: string, state: string): string {
+  return state ? `${basePath}?state=${encodeURIComponent(state)}` : basePath
+}
+
 export function ConversationsPage({ runtime }: { runtime: EnterpriseClientRuntime | null }) {
   const [attempts, setAttempts] = useState<DeliveryAttempt[]>([])
   const [attemptsState, setAttemptsState] = useState<LoadState>('unavailable')
   const [error, setError] = useState<string | null>(null)
   const [inbound, setInbound] = useState<InboundConversation[]>([])
+  const [inboundStateFilter, setInboundStateFilter] = useState('')
   const [outbound, setOutbound] = useState<OutboundConversation[]>([])
+  const [outboundStateFilter, setOutboundStateFilter] = useState('')
   const [selectedOutboundId, setSelectedOutboundId] = useState<string | null>(null)
   const [state, setState] = useState<LoadState>('unavailable')
 
@@ -94,8 +100,8 @@ export function ConversationsPage({ runtime }: { runtime: EnterpriseClientRuntim
     setError(null)
     setState('loading')
     void Promise.all([
-      runtime.get<InboundResponse>('/api/conversations-inbound'),
-      runtime.get<OutboundResponse>('/api/conversations-outbound')
+      runtime.get<InboundResponse>(stateRequestPath('/api/conversations-inbound', inboundStateFilter)),
+      runtime.get<OutboundResponse>(stateRequestPath('/api/conversations-outbound', outboundStateFilter))
     ])
       .then(([inboundResponse, outboundResponse]) => {
         if (!active) {
@@ -126,7 +132,7 @@ export function ConversationsPage({ runtime }: { runtime: EnterpriseClientRuntim
     return () => {
       active = false
     }
-  }, [runtime])
+  }, [inboundStateFilter, outboundStateFilter, runtime])
 
   useEffect(() => {
     let active = true
@@ -169,6 +175,14 @@ export function ConversationsPage({ runtime }: { runtime: EnterpriseClientRuntim
     }
   }, [runtime, selectedOutboundId])
 
+  const inboundStates = Array.from(
+    new Set([...inbound.map(row => row.state), inboundStateFilter].filter((value): value is string => Boolean(value)))
+  )
+
+  const outboundStates = Array.from(
+    new Set([...outbound.map(row => row.state), outboundStateFilter].filter((value): value is string => Boolean(value)))
+  )
+
   return (
     <section className="hesc-page" data-testid="enterprise-client-conversations">
       <header className="hesc-page-header">
@@ -195,7 +209,24 @@ export function ConversationsPage({ runtime }: { runtime: EnterpriseClientRuntim
 
       <div className="hesc-conversations-grid">
         <article className="hesc-card">
-          <h2 className="hesc-section-title">入站消息事实</h2>
+          <div className="hesc-section-heading">
+            <h2 className="hesc-section-title">入站消息事实</h2>
+            <label className="hesc-filter-control">
+              状态
+              <select
+                aria-label="筛选入站消息状态"
+                onChange={event => setInboundStateFilter(event.target.value)}
+                value={inboundStateFilter}
+              >
+                <option value="">全部状态</option>
+                {inboundStates.map(value => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
           {state === 'loading' ? <p className="hesc-muted-copy">正在读取服务端入站账本…</p> : null}
           {state === 'ready' && inbound.length === 0 ? (
             <p className="hesc-muted-copy">当前权限范围内没有入站消息事实。</p>
@@ -229,7 +260,24 @@ export function ConversationsPage({ runtime }: { runtime: EnterpriseClientRuntim
         </article>
 
         <article className="hesc-card">
-          <h2 className="hesc-section-title">出站投递事实</h2>
+          <div className="hesc-section-heading">
+            <h2 className="hesc-section-title">出站投递事实</h2>
+            <label className="hesc-filter-control">
+              状态
+              <select
+                aria-label="筛选出站消息状态"
+                onChange={event => setOutboundStateFilter(event.target.value)}
+                value={outboundStateFilter}
+              >
+                <option value="">全部状态</option>
+                {outboundStates.map(value => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
           {state === 'loading' ? <p className="hesc-muted-copy">正在读取服务端出站账本…</p> : null}
           {state === 'ready' && outbound.length === 0 ? (
             <p className="hesc-muted-copy">当前权限范围内没有出站投递事实。</p>
