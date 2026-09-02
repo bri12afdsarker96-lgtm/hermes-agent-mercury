@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { KnowledgeGapsPanel } from './knowledge-gaps-panel'
 import type { EnterpriseClientRuntime } from './runtime'
 
 interface CollectionsResponse {
@@ -203,6 +204,8 @@ export function KnowledgePage({ runtime }: { runtime: EnterpriseClientRuntime | 
           ) : null}
         </article>
       </div>
+
+      <KnowledgeGapsPanel runtime={runtime} />
     </section>
   )
 }
