@@ -80,12 +80,17 @@ describe('Login a11y (P1 Responsive/A11y)', () => {
     expect(document.activeElement).toBe(retry)
   })
 
-  it('activates the native-session reprobe on Enter from the focused button', () => {
+  it('primary action is a native button wired to the native-session reprobe seam', () => {
     render(<EnterpriseLogin />)
 
     const primary = screen.getByTestId('enterprise-login-primary')
+    // Static proof covers focus reachability + native-button click wiring.
+    // Real Enter/Space activation is proven by the rendered keyboard trace
+    // (isolated packaged CDP probe), NOT by a synthetic keyDown followed by
+    // an unrelated click — that pairing would let the click alone satisfy
+    // the assertion and never proves the key caused the action.
     primary.focus()
-    fireEvent.keyDown(primary, { code: 'Enter', key: 'Enter' })
+    expect(document.activeElement).toBe(primary)
     fireEvent.click(primary)
 
     expect(reprobeMock).toHaveBeenCalled()
