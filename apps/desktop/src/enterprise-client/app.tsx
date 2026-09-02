@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AssistantPage } from './assistant-page'
 import { ConversationsPage } from './conversations-page'
 import { GovernancePage } from './governance-page'
+import { HandoffsPage } from './handoffs-page'
 import { KnowledgePage } from './knowledge-page'
 import {
   connectEnterpriseClient,
@@ -16,7 +17,7 @@ import {
 import { WorkflowsPage } from './workflows-page'
 
 type ConnectionState = 'error' | 'loading' | 'ready' | 'unavailable'
-type WorkspaceId = 'assistant' | 'conversations' | 'governance' | 'knowledge' | 'reminders' | 'workbench'
+type WorkspaceId = 'assistant' | 'conversations' | 'governance' | 'handoffs' | 'knowledge' | 'reminders' | 'workbench'
 
 interface ClientSnapshot {
   health: EnterpriseHealth
@@ -35,9 +36,10 @@ const WORKSPACES: WorkspaceDefinition[] = [
   { description: '连接状态与运营概览', glyph: '01', id: 'workbench', label: '工作台' },
   { description: '基于 Hermes runtime 的智能协作', glyph: '02', id: 'assistant', label: '智能助手' },
   { description: '企业渠道与人工协同', glyph: '03', id: 'conversations', label: '会话中心' },
-  { description: '企业知识与检索工作流', glyph: '04', id: 'knowledge', label: '知识空间' },
-  { description: '提醒、任务和业务跟进', glyph: '05', id: 'reminders', label: '工作流' },
-  { description: '身份、权限与审计', glyph: '06', id: 'governance', label: '治理中心' }
+  { description: '经授权的人工坐席交接', glyph: '04', id: 'handoffs', label: '人工协同' },
+  { description: '企业知识与检索工作流', glyph: '05', id: 'knowledge', label: '知识空间' },
+  { description: '提醒、任务和业务跟进', glyph: '06', id: 'reminders', label: '工作流' },
+  { description: '身份、权限与审计', glyph: '07', id: 'governance', label: '治理中心' }
 ]
 
 function humanConnectionState(state: ConnectionState): string {
@@ -278,12 +280,16 @@ export function EnterpriseClientApp() {
         {activeWorkspace === 'workbench' ? <Workbench snapshot={snapshot} state={connectionState} /> : null}
         {activeWorkspace === 'assistant' ? <AssistantPage /> : null}
         {activeWorkspace === 'conversations' ? <ConversationsPage runtime={runtimeRef.current} /> : null}
+        {activeWorkspace === 'handoffs' ? (
+          <HandoffsPage principalId={snapshot?.identity.principal_id} runtime={runtimeRef.current} />
+        ) : null}
         {activeWorkspace === 'governance' ? <GovernancePage runtime={runtimeRef.current} /> : null}
         {activeWorkspace === 'knowledge' ? <KnowledgePage runtime={runtimeRef.current} /> : null}
         {activeWorkspace === 'reminders' ? <WorkflowsPage runtime={runtimeRef.current} /> : null}
         {activeWorkspace !== 'assistant' &&
         activeWorkspace !== 'conversations' &&
         activeWorkspace !== 'governance' &&
+        activeWorkspace !== 'handoffs' &&
         activeWorkspace !== 'knowledge' &&
         activeWorkspace !== 'reminders' &&
         activeWorkspace !== 'workbench' ? (
