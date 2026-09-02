@@ -37,6 +37,7 @@ export class EnterpriseClientError extends Error {
 export interface EnterpriseClientRuntime {
   disconnect(): Promise<void>
   get<T>(path: string): Promise<T>
+  post?<T>(path: string, body: unknown): Promise<T>
 }
 
 export async function connectEnterpriseClient(): Promise<EnterpriseClientRuntime> {
@@ -60,6 +61,15 @@ export async function connectEnterpriseClient(): Promise<EnterpriseClientRuntime
     },
     async get<T>(path: string) {
       const response = await bridge.request({ method: 'GET', path, sessionId })
+
+      if (response.kind !== 'ok') {
+        throw new EnterpriseClientError(response.message)
+      }
+
+      return response.data as T
+    },
+    async post<T>(path: string, body: unknown) {
+      const response = await bridge.request({ body, method: 'POST', path, sessionId })
 
       if (response.kind !== 'ok') {
         throw new EnterpriseClientError(response.message)

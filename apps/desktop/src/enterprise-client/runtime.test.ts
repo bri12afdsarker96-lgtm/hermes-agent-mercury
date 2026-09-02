@@ -38,6 +38,14 @@ describe('Enterprise client runtime adapter', () => {
       sessionId: 'opaque-session'
     })
 
+    await expect(runtime.post!('/api/handoff-claim', { msg_id: 'handoff-1' })).resolves.toEqual({ ok: true })
+    expect(bridge.request).toHaveBeenCalledWith({
+      body: { msg_id: 'handoff-1' },
+      method: 'POST',
+      path: '/api/handoff-claim',
+      sessionId: 'opaque-session'
+    })
+
     await runtime.disconnect()
     expect(bridge.disconnect).toHaveBeenCalledWith('opaque-session')
   })
