@@ -13472,7 +13472,7 @@ ipcMain.handle('hermes:api', async (_event, request) => {
   return handleHermesApiRequest(request).finally(releaseProfileDeletion)
 })
 
-// ── Enterprise Console transport (P3-M4A) ────────────────────────────────────
+// ── Enterprise Client transport ──────────────────────────────────────────────
 // The bearer for an EXTERNAL Hermes web server lives HERE, in the main process,
 // per renderer (WebContents) — never persisted, never returned to any renderer.
 // Each connect mints an opaque sessionId bound to the sender; every request /
@@ -13480,14 +13480,14 @@ ipcMain.handle('hermes:api', async (_event, request) => {
 // transport can neither borrow a newer credential nor tear down a newer session.
 // Requests are constrained to `/api/*` and injected in main via the existing
 // `fetchJson` engine (no browser Origin — the server's strict-Origin / no-CORS
-// posture stays intact). Consumed by the console plugin's IpcHermesTransport.
+// posture stays intact). Consumed by the independent client's runtime adapter.
 const enterpriseSessions = new EnterpriseSessionStore()
 const enterpriseWiredSenders = new Set<number>()
 
 /** Only the primary desktop shell may establish or use an enterprise session.
  * Overlay, quick-entry, and helper windows share the preload but are not
- * console-capable renderers; sender/session fencing alone is insufficient. */
-function isEnterpriseConsoleSender(sender: WebContents): boolean {
+ * client-capable renderers; sender/session fencing alone is insufficient. */
+function isEnterpriseClientSender(sender: WebContents): boolean {
   return !sender.isDestroyed() && mainWindow?.webContents.id === sender.id
 }
 
@@ -13515,7 +13515,7 @@ function destroyAllEnterpriseSessions(): void {
 //     the configured trusted origin is forbidden.
 // Idempotent per sender; returns only {ok, sessionId, baseUrl} (bearer stripped).
 ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
-  if (!isEnterpriseConsoleSender(event.sender)) {
+  if (!isEnterpriseClientSender(event.sender)) {
     return { code: 'forbidden_sender', message: 'enterprise session unavailable', ok: false }
   }
 
@@ -13597,7 +13597,7 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
 })
 
 ipcMain.handle('hermes:enterprise:disconnect', (event, payload) => {
-  if (!isEnterpriseConsoleSender(event.sender)) {
+  if (!isEnterpriseClientSender(event.sender)) {
     return { ok: false }
   }
 
@@ -13607,7 +13607,7 @@ ipcMain.handle('hermes:enterprise:disconnect', (event, payload) => {
 })
 
 ipcMain.handle('hermes:enterprise:request', async (event, req) => {
-  if (!isEnterpriseConsoleSender(event.sender)) {
+  if (!isEnterpriseClientSender(event.sender)) {
     return { code: 'forbidden_sender', kind: 'error', message: 'not connected', status: 0 }
   }
 
@@ -13658,7 +13658,7 @@ ipcMain.handle('hermes:enterprise:request', async (event, req) => {
 // Multipart upload (knowledge-upload) — same fencing + path guard as request;
 // reuses fetchJson's existing multipart (`options.upload`, field name "file").
 ipcMain.handle('hermes:enterprise:upload', async (event, req) => {
-  if (!isEnterpriseConsoleSender(event.sender)) {
+  if (!isEnterpriseClientSender(event.sender)) {
     return { code: 'forbidden_sender', kind: 'error', message: 'not connected', status: 0 }
   }
 
