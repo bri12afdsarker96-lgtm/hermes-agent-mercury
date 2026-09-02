@@ -86,6 +86,22 @@ describe('Enterprise client runtime adapter', () => {
     })
   })
 
+  it('reports only an explicit 401 to the shell session owner', async () => {
+    const onAuthenticationRequired = vi.fn()
+    const bridge = installBridge({ code: 'http', kind: 'error', message: 'request failed (401)', status: 401 })
+    const runtime = await connectEnterpriseClient({ onAuthenticationRequired })
+
+    await expect(runtime.get('/api/whoami')).rejects.toMatchObject({ kind: 'authentication_required', status: 401 })
+    expect(onAuthenticationRequired).toHaveBeenCalledTimes(1)
+    expect(onAuthenticationRequired).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'authentication_required', status: 401 })
+    )
+
+    bridge.request.mockResolvedValueOnce({ code: 'http', kind: 'error', message: 'request failed (403)', status: 403 })
+    await expect(runtime.get('/api/audit-list')).rejects.toMatchObject({ kind: 'forbidden', status: 403 })
+    expect(onAuthenticationRequired).toHaveBeenCalledTimes(1)
+  })
+
   it('classifies a bridge transport failure without exposing its implementation detail', async () => {
     const bridge = installBridge()
     bridge.request.mockRejectedValueOnce(new Error('https://internal.example.invalid: connection refused'))
