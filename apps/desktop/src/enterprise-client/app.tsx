@@ -2,6 +2,7 @@ import './enterprise-client.css'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { AssistantPage } from './assistant-page'
 import { KnowledgePage } from './knowledge-page'
 import {
   connectEnterpriseClient,
@@ -272,8 +273,9 @@ export function EnterpriseClientApp() {
 
       <main className="hesc-main">
         {activeWorkspace === 'workbench' ? <Workbench snapshot={snapshot} state={connectionState} /> : null}
+        {activeWorkspace === 'assistant' ? <AssistantPage /> : null}
         {activeWorkspace === 'knowledge' ? <KnowledgePage runtime={runtimeRef.current} /> : null}
-        {activeWorkspace !== 'knowledge' && activeWorkspace !== 'workbench' ? (
+        {activeWorkspace !== 'assistant' && activeWorkspace !== 'knowledge' && activeWorkspace !== 'workbench' ? (
           <WorkspacePlaceholder workspace={activeDefinition} />
         ) : null}
         {error ? (
