@@ -19,6 +19,10 @@ describe('WorkflowsPage', () => {
         return { history: [{ event_type: 'created', to_status: 'created' }] }
       }
 
+      if (path === '/api/followup-detail?followup_id=fu-1') {
+        return { followup: { followup_id: 'fu-1', owner_principal_id: 'operator-1' } }
+      }
+
       throw new Error(`unexpected path: ${path}`)
     })
 
@@ -32,6 +36,7 @@ describe('WorkflowsPage', () => {
     expect(await screen.findByText('9 月回款')).toBeTruthy()
     expect((await screen.findAllByText('created')).length).toBeGreaterThan(0)
     expect(get).toHaveBeenCalledWith('/api/followup-list')
+    expect(get).toHaveBeenCalledWith('/api/followup-detail?followup_id=fu-1')
     expect(get).toHaveBeenCalledWith('/api/followup-history?followup_id=fu-1')
   })
 })
