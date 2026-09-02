@@ -17,7 +17,9 @@ interface AuditResponse {
 type LoadState = 'error' | 'loading' | 'ready' | 'unavailable'
 
 function timestamp(value: string | undefined): string {
-  if (!value) return '—'
+  if (!value) {
+    return '—'
+  }
 
   const date = new Date(value)
 
@@ -27,9 +29,17 @@ function timestamp(value: string | undefined): string {
 }
 
 function stateLabel(state: LoadState): string {
-  if (state === 'loading') return '正在读取'
-  if (state === 'ready') return '已连接'
-  if (state === 'error') return '读取失败'
+  if (state === 'loading') {
+    return '正在读取'
+  }
+
+  if (state === 'ready') {
+    return '已连接'
+  }
+
+  if (state === 'error') {
+    return '读取失败'
+  }
 
   return '等待企业服务连接'
 }
@@ -57,14 +67,18 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
     setState('loading')
     void Promise.all([runtime.get<EnterpriseIdentity>('/api/whoami'), runtime.get<AuditResponse>('/api/audit-list')])
       .then(([nextIdentity, audit]) => {
-        if (!active) return
+        if (!active) {
+          return
+        }
 
         setIdentity(nextIdentity)
         setEvents(audit.events ?? [])
         setState('ready')
       })
       .catch(reason => {
-        if (!active) return
+        if (!active) {
+          return
+        }
 
         setEvents([])
         setIdentity(null)

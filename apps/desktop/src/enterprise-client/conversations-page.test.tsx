@@ -35,6 +35,7 @@ describe('ConversationsPage', () => {
 
       throw new Error(`unexpected path: ${path}`)
     })
+
     const runtime: EnterpriseClientRuntime = {
       disconnect: vi.fn(async () => undefined),
       get: get as unknown as EnterpriseClientRuntime['get']
