@@ -42,8 +42,8 @@ describe('AssistantPage', () => {
       }),
       resumeSession: vi.fn(async () => ({
         messages: [
-          { content: '历史用户问题', role: 'user' },
-          { content: '历史 Hermes 回复', role: 'assistant' }
+          { content: '历史用户问题', role: 'user' as const },
+          { content: '历史 Hermes 回复', role: 'assistant' as const }
         ],
         session_id: 'runtime-1'
       })),
