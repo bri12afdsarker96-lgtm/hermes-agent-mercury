@@ -64,7 +64,13 @@ function stateLabel(state: LoadState): string {
   return '等待企业服务连接'
 }
 
-export function WorkflowsPage({ runtime }: { runtime: EnterpriseClientRuntime | null }) {
+export function WorkflowsPage({
+  principalId,
+  runtime
+}: {
+  principalId?: string
+  runtime: EnterpriseClientRuntime | null
+}) {
   const [error, setError] = useState<string | null>(null)
   const [detail, setDetail] = useState<Followup | null>(null)
   const [detailState, setDetailState] = useState<LoadState>('unavailable')
@@ -348,7 +354,7 @@ export function WorkflowsPage({ runtime }: { runtime: EnterpriseClientRuntime | 
         ) : null}
       </article>
 
-      <BusinessTasksPanel runtime={runtime} />
+      <BusinessTasksPanel principalId={principalId} runtime={runtime} />
 
       <RemindersPanel runtime={runtime} />
     </section>
