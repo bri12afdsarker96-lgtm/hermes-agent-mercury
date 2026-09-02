@@ -13,6 +13,7 @@ import {
   type EnterpriseIdentity,
   type EnterpriseMetrics
 } from './runtime'
+import { WorkflowsPage } from './workflows-page'
 
 type ConnectionState = 'error' | 'loading' | 'ready' | 'unavailable'
 type WorkspaceId = 'assistant' | 'conversations' | 'governance' | 'knowledge' | 'reminders' | 'workbench'
@@ -279,10 +280,12 @@ export function EnterpriseClientApp() {
         {activeWorkspace === 'conversations' ? <ConversationsPage runtime={runtimeRef.current} /> : null}
         {activeWorkspace === 'governance' ? <GovernancePage runtime={runtimeRef.current} /> : null}
         {activeWorkspace === 'knowledge' ? <KnowledgePage runtime={runtimeRef.current} /> : null}
+        {activeWorkspace === 'reminders' ? <WorkflowsPage runtime={runtimeRef.current} /> : null}
         {activeWorkspace !== 'assistant' &&
         activeWorkspace !== 'conversations' &&
         activeWorkspace !== 'governance' &&
         activeWorkspace !== 'knowledge' &&
+        activeWorkspace !== 'reminders' &&
         activeWorkspace !== 'workbench' ? (
           <WorkspacePlaceholder workspace={activeDefinition} />
         ) : null}
