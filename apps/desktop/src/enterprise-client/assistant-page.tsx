@@ -1,4 +1,6 @@
-import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { useStore } from '@nanostores/react'
+import { atom } from 'nanostores'
+import { type FormEvent, useCallback, useEffect, useState } from 'react'
 
 import {
   connectEnterpriseAgent,
@@ -14,6 +16,9 @@ interface ConversationMessage {
 }
 
 type LoadState = 'error' | 'loading' | 'ready'
+
+const $activeEnterpriseSessionId = atom<string | null>(null)
+const $enterpriseAgentRuntime = atom<EnterpriseAgentRuntime | null>(null)
 
 function textFromUnknown(value: unknown): string {
   if (typeof value === 'string') {
@@ -70,15 +75,13 @@ function stateLabel(state: LoadState): string {
 }
 
 export function AssistantPage() {
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const activeSessionId = useStore($activeEnterpriseSessionId)
   const [composer, setComposer] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [messages, setMessages] = useState<ConversationMessage[]>([])
   const [runtimeState, setRuntimeState] = useState<LoadState>('loading')
   const [sessions, setSessions] = useState<EnterpriseAgentSession[]>([])
   const [submitting, setSubmitting] = useState(false)
-  const activeSessionIdRef = useRef<string | null>(null)
-  const runtimeRef = useRef<EnterpriseAgentRuntime | null>(null)
 
   const refreshSessions = useCallback(async (runtime: EnterpriseAgentRuntime) => {
     const nextSessions = await runtime.listSessions()
@@ -97,9 +100,9 @@ export function AssistantPage() {
           return
         }
 
-        runtimeRef.current = runtime
+        $enterpriseAgentRuntime.set(runtime)
         disposeEvents = runtime.onEvent(event => {
-          if (!active || !event.session_id || event.session_id !== activeSessionIdRef.current) {
+          if (!active || !event.session_id || event.session_id !== $activeEnterpriseSessionId.get()) {
             return
           }
 
@@ -161,13 +164,14 @@ export function AssistantPage() {
     return () => {
       active = false
       disposeEvents?.()
-      runtimeRef.current?.close()
-      runtimeRef.current = null
+      $enterpriseAgentRuntime.get()?.close()
+      $enterpriseAgentRuntime.set(null)
+      $activeEnterpriseSessionId.set(null)
     }
   }, [refreshSessions])
 
   const selectSession = useCallback(async (storedSessionId: string) => {
-    const runtime = runtimeRef.current
+    const runtime = $enterpriseAgentRuntime.get()
 
     if (!runtime) {
       return
@@ -175,21 +179,19 @@ export function AssistantPage() {
 
     setError(null)
     setMessages([])
-    activeSessionIdRef.current = null
-    setActiveSessionId(null)
+    $activeEnterpriseSessionId.set(null)
 
     try {
       const resumed = await runtime.resumeSession(storedSessionId)
       setMessages(toConversationMessages(resumed.messages))
-      activeSessionIdRef.current = resumed.session_id
-      setActiveSessionId(resumed.session_id)
+      $activeEnterpriseSessionId.set(resumed.session_id)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'cannot resume Hermes session')
     }
   }, [])
 
   const createSession = useCallback(async () => {
-    const runtime = runtimeRef.current
+    const runtime = $enterpriseAgentRuntime.get()
 
     if (!runtime) {
       return
@@ -200,8 +202,7 @@ export function AssistantPage() {
     try {
       const sessionId = await runtime.createSession()
       setMessages([])
-      activeSessionIdRef.current = sessionId
-      setActiveSessionId(sessionId)
+      $activeEnterpriseSessionId.set(sessionId)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'cannot create Hermes session')
     }
@@ -210,7 +211,7 @@ export function AssistantPage() {
   const submit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      const runtime = runtimeRef.current
+      const runtime = $enterpriseAgentRuntime.get()
       const text = composer.trim()
 
       if (!runtime || !activeSessionId || !text || submitting) {

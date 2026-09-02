@@ -71,6 +71,7 @@ export async function connectEnterpriseAgent(): Promise<EnterpriseAgentRuntime> 
     connectErrorMessage: 'Could not connect to Hermes runtime',
     notConnectedErrorMessage: 'Hermes runtime is not connected'
   })
+
   const wsUrl = await resolveGatewayWsUrl(desktop, connection)
 
   await gateway.connect(wsUrl)

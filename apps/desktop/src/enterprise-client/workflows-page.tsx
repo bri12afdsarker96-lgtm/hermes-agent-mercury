@@ -32,7 +32,10 @@ interface FollowupHistoryResponse {
 type LoadState = 'error' | 'loading' | 'ready' | 'unavailable'
 
 function timestamp(value: string | undefined): string {
-  if (!value) return '—'
+  if (!value) {
+    return '—'
+  }
+
   const date = new Date(value)
 
   return Number.isNaN(date.getTime())
@@ -41,9 +44,17 @@ function timestamp(value: string | undefined): string {
 }
 
 function stateLabel(state: LoadState): string {
-  if (state === 'loading') return '正在读取'
-  if (state === 'ready') return '已连接'
-  if (state === 'error') return '读取失败'
+  if (state === 'loading') {
+    return '正在读取'
+  }
+
+  if (state === 'ready') {
+    return '已连接'
+  }
+
+  if (state === 'error') {
+    return '读取失败'
+  }
 
   return '等待企业服务连接'
 }
@@ -74,7 +85,10 @@ export function WorkflowsPage({ runtime }: { runtime: EnterpriseClientRuntime | 
     void runtime
       .get<FollowupListResponse>('/api/followup-list')
       .then(response => {
-        if (!active) return
+        if (!active) {
+          return
+        }
+
         const next = response.followups ?? []
         setFollowups(next)
         setSelectedId(current =>
@@ -83,7 +97,10 @@ export function WorkflowsPage({ runtime }: { runtime: EnterpriseClientRuntime | 
         setState('ready')
       })
       .catch(reason => {
-        if (!active) return
+        if (!active) {
+          return
+        }
+
         setFollowups([])
         setSelectedId(null)
         setState('error')
@@ -112,12 +129,18 @@ export function WorkflowsPage({ runtime }: { runtime: EnterpriseClientRuntime | 
     void runtime
       .get<FollowupHistoryResponse>(`/api/followup-history?followup_id=${encodeURIComponent(selectedId)}`)
       .then(response => {
-        if (!active) return
+        if (!active) {
+          return
+        }
+
         setHistory(response.history ?? [])
         setHistoryState('ready')
       })
       .catch(reason => {
-        if (!active) return
+        if (!active) {
+          return
+        }
+
         setHistory([])
         setHistoryState('error')
         setError(reason instanceof Error ? reason.message : 'cannot load follow-up history')
@@ -188,6 +211,7 @@ export function WorkflowsPage({ runtime }: { runtime: EnterpriseClientRuntime | 
             <dl className="hesc-detail-list">
               {(() => {
                 const followup = followups.find(row => row.followup_id === selectedId)
+
                 return (
                   <>
                     <div>

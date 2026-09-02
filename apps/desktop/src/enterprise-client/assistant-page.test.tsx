@@ -1,24 +1,18 @@
+import type { GatewayEvent } from '@hermes/shared'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { GatewayEvent } from '@hermes/shared'
-
-import { AssistantPage } from './assistant-page'
 import type { EnterpriseAgentRuntime } from './agent-runtime'
+import { AssistantPage } from './assistant-page'
 
 const runtimeState = vi.hoisted(() => ({
   eventHandler: undefined as undefined | ((event: GatewayEvent) => void),
   runtime: undefined as EnterpriseAgentRuntime | undefined
 }))
 
-vi.mock('./agent-runtime', async importOriginal => {
-  const original = await importOriginal<typeof import('./agent-runtime')>()
-
-  return {
-    ...original,
-    connectEnterpriseAgent: vi.fn(async () => runtimeState.runtime!)
-  }
-})
+vi.mock('./agent-runtime', () => ({
+  connectEnterpriseAgent: vi.fn(async () => runtimeState.runtime!)
+}))
 
 describe('AssistantPage', () => {
   it('renders a product-owned transcript from Hermes session and stream contracts', async () => {
@@ -49,6 +43,7 @@ describe('AssistantPage', () => {
       })),
       submit: vi.fn(async () => undefined)
     }
+
     runtimeState.runtime = runtime
 
     render(<AssistantPage />)

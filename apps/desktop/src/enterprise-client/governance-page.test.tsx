@@ -7,7 +7,7 @@ import type { EnterpriseClientRuntime } from './runtime'
 describe('GovernancePage', () => {
   it('uses identity and audit read contracts without client-side authorization decisions', async () => {
     const get = vi.fn(async (path: string): Promise<unknown> => {
-      if (path === '/api/whoami')
+      if (path === '/api/whoami') {
         return {
           name: '管理员',
           principal_id: 'p-1',
@@ -15,7 +15,9 @@ describe('GovernancePage', () => {
           tenant_id: 'tenant-1',
           product_capabilities: { audit: { enabled: true, status: 'LIVE' } }
         }
-      if (path === '/api/audit-list')
+      }
+
+      if (path === '/api/audit-list') {
         return {
           events: [
             {
@@ -27,8 +29,11 @@ describe('GovernancePage', () => {
             }
           ]
         }
+      }
+
       throw new Error(`unexpected path: ${path}`)
     })
+
     const runtime: EnterpriseClientRuntime = {
       disconnect: vi.fn(async () => undefined),
       get: get as unknown as EnterpriseClientRuntime['get']
