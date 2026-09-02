@@ -6,11 +6,20 @@ interface AuditEvent {
   action?: string
   actor?: string
   event_id?: string
+  payload_ref?: unknown
   resource_ref?: string
   ts?: string
 }
 
 interface AuditResponse {
+  events?: AuditEvent[]
+}
+
+interface AuditDetailResponse {
+  event?: AuditEvent
+}
+
+interface AuditCorrelationResponse {
   events?: AuditEvent[]
 }
 
@@ -44,18 +53,44 @@ function stateLabel(state: LoadState): string {
   return '等待企业服务连接'
 }
 
+function referenceValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '—'
+  }
+
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return '—'
+  }
+}
+
 export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime | null }) {
+  const [correlation, setCorrelation] = useState<AuditEvent[]>([])
+  const [correlationState, setCorrelationState] = useState<LoadState>('unavailable')
+  const [detail, setDetail] = useState<AuditEvent | null>(null)
+  const [detailState, setDetailState] = useState<LoadState>('unavailable')
   const [events, setEvents] = useState<AuditEvent[]>([])
   const [identity, setIdentity] = useState<EnterpriseIdentity | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
   const [state, setState] = useState<LoadState>('unavailable')
 
   useEffect(() => {
     let active = true
 
     if (!runtime) {
+      setCorrelation([])
+      setCorrelationState('unavailable')
+      setDetail(null)
+      setDetailState('unavailable')
       setEvents([])
       setIdentity(null)
+      setSelectedEventId(null)
       setState('unavailable')
 
       return () => {
@@ -72,7 +107,11 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
         }
 
         setIdentity(nextIdentity)
-        setEvents(audit.events ?? [])
+        const nextEvents = audit.events ?? []
+        setEvents(nextEvents)
+        setSelectedEventId(current =>
+          current && nextEvents.some(event => event.event_id === current) ? current : (nextEvents[0]?.event_id ?? null)
+        )
         setState('ready')
       })
       .catch(reason => {
@@ -82,6 +121,7 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
 
         setEvents([])
         setIdentity(null)
+        setSelectedEventId(null)
         setState('error')
         setError(reason instanceof Error ? reason.message : 'cannot load governance evidence')
       })
@@ -90,6 +130,87 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
       active = false
     }
   }, [runtime])
+
+  useEffect(() => {
+    let active = true
+
+    if (!runtime || !selectedEventId) {
+      setDetail(null)
+      setDetailState('unavailable')
+
+      return () => {
+        active = false
+      }
+    }
+
+    setDetail(null)
+    setDetailState('loading')
+    void runtime
+      .get<AuditDetailResponse>(`/api/audit-detail?event_id=${encodeURIComponent(selectedEventId)}`)
+      .then(response => {
+        if (!active) {
+          return
+        }
+
+        setDetail(response.event ?? null)
+        setDetailState('ready')
+      })
+      .catch(reason => {
+        if (!active) {
+          return
+        }
+
+        setDetail(null)
+        setDetailState('error')
+        setError(reason instanceof Error ? reason.message : 'cannot load audit evidence detail')
+      })
+
+    return () => {
+      active = false
+    }
+  }, [runtime, selectedEventId])
+
+  const selectedResourceRef =
+    detail?.resource_ref ?? events.find(event => event.event_id === selectedEventId)?.resource_ref
+
+  useEffect(() => {
+    let active = true
+
+    if (!runtime || !selectedResourceRef) {
+      setCorrelation([])
+      setCorrelationState('unavailable')
+
+      return () => {
+        active = false
+      }
+    }
+
+    setCorrelation([])
+    setCorrelationState('loading')
+    void runtime
+      .get<AuditCorrelationResponse>(`/api/audit-correlate?resource_ref=${encodeURIComponent(selectedResourceRef)}`)
+      .then(response => {
+        if (!active) {
+          return
+        }
+
+        setCorrelation(response.events ?? [])
+        setCorrelationState('ready')
+      })
+      .catch(reason => {
+        if (!active) {
+          return
+        }
+
+        setCorrelation([])
+        setCorrelationState('error')
+        setError(reason instanceof Error ? reason.message : 'cannot load audit evidence correlation')
+      })
+
+    return () => {
+      active = false
+    }
+  }, [runtime, selectedResourceRef])
 
   return (
     <section className="hesc-page" data-testid="enterprise-client-governance">
@@ -179,6 +300,7 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
                   <th scope="col">资源引用</th>
                   <th scope="col">执行主体</th>
                   <th scope="col">时间</th>
+                  <th scope="col">证据</th>
                 </tr>
               </thead>
               <tbody>
@@ -188,6 +310,16 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
                     <td>{event.resource_ref ?? '—'}</td>
                     <td>{event.actor ?? '—'}</td>
                     <td>{timestamp(event.ts)}</td>
+                    <td>
+                      <button
+                        className="hesc-action"
+                        disabled={!event.event_id}
+                        onClick={() => setSelectedEventId(event.event_id ?? null)}
+                        type="button"
+                      >
+                        {event.event_id === selectedEventId ? '已选中' : '查看证据'}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -195,6 +327,78 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
           </div>
         ) : null}
       </article>
+
+      <div className="hesc-governance-grid">
+        <article className="hesc-card">
+          <div className="hesc-section-heading">
+            <div>
+              <h2 className="hesc-section-title">证据详情</h2>
+              <p className="hesc-muted-copy">仅展示服务端安全投影，不会重新执行历史命令。</p>
+            </div>
+            <span
+              className="hesc-status"
+              data-tone={detailState === 'ready' ? 'success' : detailState === 'error' ? 'error' : 'warning'}
+            >
+              {stateLabel(detailState)}
+            </span>
+          </div>
+          {detailState === 'loading' ? <p className="hesc-muted-copy">正在读取审计证据详情…</p> : null}
+          {detailState === 'ready' && !detail ? <p className="hesc-muted-copy">该事件已不在当前授权范围内。</p> : null}
+          {detail ? (
+            <dl className="hesc-detail-list">
+              <div>
+                <dt>事件标识</dt>
+                <dd>{detail.event_id ?? selectedEventId ?? '—'}</dd>
+              </div>
+              <div>
+                <dt>资源引用</dt>
+                <dd>{detail.resource_ref ?? '—'}</dd>
+              </div>
+              <div>
+                <dt>安全载荷引用</dt>
+                <dd>{referenceValue(detail.payload_ref)}</dd>
+              </div>
+            </dl>
+          ) : null}
+        </article>
+
+        <article className="hesc-card">
+          <div className="hesc-section-heading">
+            <div>
+              <h2 className="hesc-section-title">同资源证据链</h2>
+              <p className="hesc-muted-copy">按服务端时间顺序关联同一资源的事实；它是证据浏览，不是重放。</p>
+            </div>
+            <span
+              className="hesc-status"
+              data-tone={correlationState === 'ready' ? 'success' : correlationState === 'error' ? 'error' : 'warning'}
+            >
+              {stateLabel(correlationState)}
+            </span>
+          </div>
+          {correlationState === 'loading' ? <p className="hesc-muted-copy">正在关联同资源审计证据…</p> : null}
+          {correlationState === 'ready' && correlation.length === 0 ? (
+            <p className="hesc-muted-copy">该资源没有返回更多审计证据。</p>
+          ) : null}
+          {correlation.length > 0 ? (
+            <div className="hesc-outbound-list">
+              {correlation.map((event, index) => (
+                <button
+                  aria-current={event.event_id === selectedEventId ? 'true' : undefined}
+                  disabled={!event.event_id}
+                  key={event.event_id ?? `correlation-${index}`}
+                  onClick={() => setSelectedEventId(event.event_id ?? null)}
+                  type="button"
+                >
+                  <strong>{event.action ?? '服务端未提供操作'}</strong>
+                  <span>
+                    {event.actor ?? '—'} · {timestamp(event.ts)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </article>
+      </div>
     </section>
   )
 }
