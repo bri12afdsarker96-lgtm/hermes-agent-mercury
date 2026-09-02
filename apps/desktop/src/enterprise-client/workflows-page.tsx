@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { BusinessTasksPanel } from './business-tasks-panel'
 import { RemindersPanel } from './reminders-panel'
 import type { EnterpriseClientRuntime } from './runtime'
 
@@ -346,6 +347,8 @@ export function WorkflowsPage({ runtime }: { runtime: EnterpriseClientRuntime | 
           </div>
         ) : null}
       </article>
+
+      <BusinessTasksPanel runtime={runtime} />
 
       <RemindersPanel runtime={runtime} />
     </section>
