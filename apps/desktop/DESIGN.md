@@ -45,8 +45,16 @@ one-off at the call site.
 
 ## Information architecture
 
-- **Chat is the home surface.** The transcript and composer stay primary; tools,
-  previews, files, review, and terminal complement the conversation.
+- **Enterprise Workspace is a distinct product root.** `EnterpriseClientShell`
+  (`src/enterprise-client/enterprise-design-system.tsx`) owns the role-neutral
+  enterprise titlebar, navigation, header and status bar. It is not a second
+  implementation of the generic Hermes chat shell: enterprise controllers feed
+  it server-authoritative identity, capability and connection presentation
+  state, while the Agent remains a capability within the workbench.
+- **Chat is a capability surface, not the Enterprise home.** Within the
+  Enterprise Workspace, the assistant transcript and composer support a
+  business task; tools, previews, files, review and terminal complement that
+  task rather than replacing the role-based workbench.
 - **Pages are durable destinations.** Chat, Skills, Messaging, and Artifacts
   remain in shell chrome. Do not hide a distinct product noun inside an
   unrelated page.
@@ -60,6 +68,11 @@ one-off at the call site.
 - **One action, one home.** A command may have keyboard, palette, and visible
   affordances, but they invoke the same action and state. Do not fork behavior
   per entry point.
+
+`EnterpriseStatusBadge` is the enterprise product's presentational status
+primitive. Its controller supplies the wording and tone from authoritative
+state; the component must never make a permission, capability or connectivity
+decision locally.
 - **Projects own workspace cwd.** Use Sidebar → Projects for local folders and
   worktrees; do not reintroduce a per-session/right-sidebar folder-picker flow.
 

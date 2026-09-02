@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { AssistantPage } from './assistant-page'
 import { ConversationsPage } from './conversations-page'
+import { EnterpriseClientShell, EnterpriseStatusBadge } from './enterprise-design-system'
 import { GovernancePage } from './governance-page'
 import { HandoffsPage } from './handoffs-page'
 import { KnowledgePage } from './knowledge-page'
@@ -80,9 +81,7 @@ function WorkspacePlaceholder({ workspace }: { workspace: WorkspaceDefinition })
           <h1>{workspace.label}</h1>
           <p>{workspace.description}</p>
         </div>
-        <span className="hesc-status" data-tone="warning">
-          分页接入中
-        </span>
+        <EnterpriseStatusBadge tone="warning">分页接入中</EnterpriseStatusBadge>
       </header>
       <div className="hesc-empty">
         <div>
@@ -107,9 +106,7 @@ function Workbench({ snapshot, state }: { snapshot: ClientSnapshot | null; state
           <h1>我的工作台</h1>
           <p>企业运行态、身份范围与当前能力状态均来自已连接的服务端。</p>
         </div>
-        <span className="hesc-status" data-tone={statusTone(state)}>
-          {humanConnectionState(state)}
-        </span>
+        <EnterpriseStatusBadge tone={statusTone(state)}>{humanConnectionState(state)}</EnterpriseStatusBadge>
       </header>
 
       <div className="hesc-kpis">
@@ -232,51 +229,21 @@ export function EnterpriseClientApp() {
   const activeDefinition = WORKSPACES.find(workspace => workspace.id === activeWorkspace) ?? WORKSPACES[0]
 
   return (
-    <div className="hesc-root" data-testid="enterprise-client-root">
-      <header className="hesc-titlebar">
-        <div aria-hidden="true" className="hesc-mark">
-          HE
-        </div>
-        <strong className="hesc-product-name">Hermes Enterprise</strong>
-        <span className="hesc-product-channel">独立企业客户端</span>
-        <div className="hesc-title-spacer" />
-        <span
-          className="hesc-connection-dot"
-          data-state={connectionState === 'ready' ? 'ready' : connectionState === 'error' ? 'error' : 'idle'}
-        />
-        <span className="hesc-title-status">{humanConnectionState(connectionState)}</span>
-      </header>
-
-      <aside aria-label="企业客户端主导航" className="hesc-sidebar">
-        <div className="hesc-sidebar-identity">
-          <strong>{snapshot?.identity.name ?? '企业工作空间'}</strong>
-          <span>{snapshot?.identity.tenant_id ?? '正在解析租户范围'}</span>
-        </div>
-        <nav className="hesc-nav">
-          {WORKSPACES.map(workspace => (
-            <button
-              aria-current={workspace.id === activeWorkspace ? 'page' : undefined}
-              key={workspace.id}
-              onClick={() => setActiveWorkspace(workspace.id)}
-              type="button"
-            >
-              <span aria-hidden="true" className="hesc-nav-glyph">
-                {workspace.glyph}
-              </span>
-              <span className="hesc-nav-label">{workspace.label}</span>
-            </button>
-          ))}
-        </nav>
-      </aside>
-
-      <header className="hesc-topbar">
-        <div className="hesc-breadcrumb">
-          企业客户端 / <strong>{activeDefinition.label}</strong>
-        </div>
-        <div className="hesc-topbar-scope">{snapshot?.identity.role ?? '权限由服务端确定'}</div>
-      </header>
-
-      <main className="hesc-main">
+    <EnterpriseClientShell
+      activeWorkspace={activeDefinition}
+      connectionState={connectionState}
+      connectionStatus={humanConnectionState(connectionState)}
+      identityName={snapshot?.identity.name ?? '企业工作空间'}
+      navigationLabel="企业客户端主导航"
+      onSelectWorkspace={workspaceId => setActiveWorkspace(workspaceId as WorkspaceId)}
+      productChannel="企业工作台"
+      productName="Hermes Enterprise"
+      scopeLabel={snapshot?.identity.role ?? '权限由服务端确定'}
+      statusbarDetail="runtime bridge: token-free / authority: server"
+      statusbarLabel="Hermes Enterprise Desktop"
+      tenantLabel={snapshot?.identity.tenant_id ?? '正在解析租户范围'}
+      workspaces={WORKSPACES}
+    >
         {activeWorkspace === 'workbench' ? <Workbench snapshot={snapshot} state={connectionState} /> : null}
         {activeWorkspace === 'assistant' ? <AssistantPage /> : null}
         {activeWorkspace === 'conversations' ? <ConversationsPage runtime={runtimeRef.current} /> : null}
@@ -308,12 +275,6 @@ export function EnterpriseClientApp() {
             </button>
           </div>
         ) : null}
-      </main>
-
-      <footer className="hesc-statusbar">
-        <span>Hermes Enterprise Client · 独立界面层</span>
-        <code>runtime bridge: token-free / authority: server</code>
-      </footer>
-    </div>
+    </EnterpriseClientShell>
   )
 }

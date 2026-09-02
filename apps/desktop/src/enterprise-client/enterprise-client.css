@@ -1,5 +1,27 @@
 /* Approved Enterprise Desktop Design System tokens, scoped to our own client. */
+@font-face {
+  font-family: 'RTWS ShangGo G0';
+  font-style: normal;
+  font-weight: 300;
+  src: url('./assets/fonts/RTWSShangGoG0v1-Light.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'RTWS ShangGo G0';
+  font-style: normal;
+  font-weight: 400;
+  src: url('./assets/fonts/RTWSShangGoG0v1-Regular.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'RTWS ShangGo G0';
+  font-style: normal;
+  font-weight: 700;
+  src: url('./assets/fonts/RTWSShangGoG0v1-Bold.ttf') format('truetype');
+}
+
 .hesc-root {
+  --font-enterprise: 'RTWS ShangGo G0', 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
   --blue-100: #edf5fe;
   --blue-200: #c7ddfd;
   --blue-500: #1668f5;
@@ -26,7 +48,7 @@
   overflow: hidden;
   background: var(--canvas);
   color: var(--text);
-  font-family: 'Source Han Sans CN', 'Segoe UI', sans-serif;
+  font-family: var(--font-enterprise);
   font-size: 13px;
   line-height: 20px;
 }
@@ -46,17 +68,10 @@
   background: var(--chrome);
   -webkit-app-region: drag;
 }
-.hesc-mark {
-  display: grid;
+.hesc-brand-mark {
   width: 22px;
   height: 22px;
-  place-items: center;
-  border-radius: 7px;
-  background: var(--blue-500);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: -0.05em;
+  object-fit: contain;
 }
 .hesc-product-name {
   font-weight: 700;
