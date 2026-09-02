@@ -337,6 +337,78 @@
 .hesc-error span {
   font-size: 12px;
 }
+.hesc-muted-copy {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.hesc-knowledge-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.3fr) minmax(0, 1fr);
+  gap: 16px;
+}
+.hesc-knowledge-collections,
+.hesc-knowledge-entries {
+  min-height: 320px;
+}
+.hesc-collection-list {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+}
+.hesc-collection-list button {
+  overflow: hidden;
+  border: 0;
+  border-radius: 7px;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hesc-collection-list button:hover {
+  background: #f7f9fc;
+  color: var(--text);
+}
+.hesc-collection-list button[aria-current='true'] {
+  background: var(--blue-100);
+  color: var(--blue-600);
+  font-weight: 600;
+}
+.hesc-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.hesc-table-wrap {
+  overflow: auto;
+  margin-top: 12px;
+}
+.hesc-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+.hesc-table th,
+.hesc-table td {
+  border-top: 1px solid var(--stroke);
+  padding: 10px 8px;
+}
+.hesc-table th {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.hesc-table td:first-child {
+  overflow: hidden;
+  max-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .hesc-action {
   border: 1px solid var(--blue-200);
   border-radius: 7px;
@@ -390,7 +462,8 @@
 }
 @media (width < 760px) {
   .hesc-kpis,
-  .hesc-grid {
+  .hesc-grid,
+  .hesc-knowledge-layout {
     grid-template-columns: 1fr;
   }
   .hesc-main {
