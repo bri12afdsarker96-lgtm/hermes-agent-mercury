@@ -4,6 +4,14 @@
  * opaque session id.
  */
 
+import {
+  EnterpriseClientError,
+  enterpriseClientErrorForStatus,
+  enterpriseNetworkError
+} from './runtime-errors'
+
+export { EnterpriseClientError } from './runtime-errors'
+
 export interface EnterpriseAlert {
   code?: string
   level?: string
@@ -27,13 +35,6 @@ export interface EnterpriseMetrics {
   alerts?: EnterpriseAlert[]
 }
 
-export class EnterpriseClientError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'EnterpriseClientError'
-  }
-}
-
 export interface EnterpriseClientRuntime {
   disconnect(): Promise<void>
   get<T>(path: string): Promise<T>
@@ -44,38 +45,51 @@ export async function connectEnterpriseClient(): Promise<EnterpriseClientRuntime
   const bridge = window.hermesDesktop?.enterprise
 
   if (!bridge) {
-    throw new EnterpriseClientError('desktop secure bridge is unavailable')
+    throw enterpriseNetworkError()
   }
 
-  const connected = await bridge.autoConnect()
+  const enterpriseBridge = bridge
+  let connected: Awaited<ReturnType<typeof enterpriseBridge.autoConnect>>
+
+  try {
+    connected = await enterpriseBridge.autoConnect()
+  } catch {
+    throw enterpriseNetworkError()
+  }
 
   if (!connected.ok) {
-    throw new EnterpriseClientError(connected.message)
+    throw enterpriseNetworkError()
   }
 
   const { sessionId } = connected
 
+  async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+    try {
+      const response = await enterpriseBridge.request({ body, method, path, sessionId })
+
+      if (response.kind !== 'ok') {
+        throw enterpriseClientErrorForStatus(response.status)
+      }
+
+      return response.data as T
+    } catch (reason) {
+      if (reason instanceof EnterpriseClientError) {
+        throw reason
+      }
+
+      throw enterpriseNetworkError()
+    }
+  }
+
   return {
     async disconnect() {
-      await bridge.disconnect(sessionId)
+      await enterpriseBridge.disconnect(sessionId)
     },
     async get<T>(path: string) {
-      const response = await bridge.request({ method: 'GET', path, sessionId })
-
-      if (response.kind !== 'ok') {
-        throw new EnterpriseClientError(response.message)
-      }
-
-      return response.data as T
+      return request<T>('GET', path)
     },
     async post<T>(path: string, body: unknown) {
-      const response = await bridge.request({ body, method: 'POST', path, sessionId })
-
-      if (response.kind !== 'ok') {
-        throw new EnterpriseClientError(response.message)
-      }
-
-      return response.data as T
+      return request<T>('POST', path, body)
     }
   }
 }

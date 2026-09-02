@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { connectEnterpriseClient, EnterpriseClientError } from './runtime'
+import { connectEnterpriseClient } from './runtime'
 
 type EnterpriseResponse =
   { data: unknown; kind: 'ok' } | { code: string; kind: 'error'; message: string; status: number }
@@ -51,14 +51,51 @@ describe('Enterprise client runtime adapter', () => {
   })
 
   it('fails closed when the bridge is missing or an API request is rejected', async () => {
-    await expect(connectEnterpriseClient()).rejects.toBeInstanceOf(EnterpriseClientError)
+    await expect(connectEnterpriseClient()).rejects.toMatchObject({
+      kind: 'network',
+      name: 'EnterpriseClientError',
+      status: 0
+    })
 
     installBridge({ code: 'http', kind: 'error', message: 'request failed (403)', status: 403 })
     const runtime = await connectEnterpriseClient()
 
     await expect(runtime.get('/api/whoami')).rejects.toMatchObject({
-      message: 'request failed (403)',
-      name: 'EnterpriseClientError'
+      kind: 'forbidden',
+      message: '当前身份无权访问此资源',
+      name: 'EnterpriseClientError',
+      status: 403
+    })
+  })
+
+  it.each([
+    [401, 'authentication_required', '企业会话已失效，请重新连接'],
+    [403, 'forbidden', '当前身份无权访问此资源'],
+    [404, 'not_found', '当前范围内没有可用资源'],
+    [409, 'conflict', '服务端状态已变化，请刷新后重试'],
+    [503, 'authority_unavailable', '企业服务暂时不可用，请稍后重试']
+  ] as const)('maps HTTP %i to a safe %s runtime error', async (status, kind, message) => {
+    installBridge({ code: 'server-detail', kind: 'error', message: 'sensitive server detail', status })
+    const runtime = await connectEnterpriseClient()
+
+    await expect(runtime.get('/api/whoami')).rejects.toMatchObject({
+      kind,
+      message,
+      name: 'EnterpriseClientError',
+      status
+    })
+  })
+
+  it('classifies a bridge transport failure without exposing its implementation detail', async () => {
+    const bridge = installBridge()
+    bridge.request.mockRejectedValueOnce(new Error('https://internal.example.invalid: connection refused'))
+    const runtime = await connectEnterpriseClient()
+
+    await expect(runtime.get('/api/health')).rejects.toMatchObject({
+      kind: 'network',
+      message: '无法连接企业服务，请检查网络后重试',
+      name: 'EnterpriseClientError',
+      status: 0
     })
   })
 })
