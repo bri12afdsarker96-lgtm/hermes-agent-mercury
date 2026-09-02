@@ -27,6 +27,9 @@ interface FollowupHistory {
 interface FollowupListResponse {
   followups?: Followup[]
 }
+interface FollowupDetailResponse {
+  followup?: Followup
+}
 interface FollowupHistoryResponse {
   history?: FollowupHistory[]
 }
@@ -62,6 +65,8 @@ function stateLabel(state: LoadState): string {
 
 export function WorkflowsPage({ runtime }: { runtime: EnterpriseClientRuntime | null }) {
   const [error, setError] = useState<string | null>(null)
+  const [detail, setDetail] = useState<Followup | null>(null)
+  const [detailState, setDetailState] = useState<LoadState>('unavailable')
   const [followups, setFollowups] = useState<Followup[]>([])
   const [history, setHistory] = useState<FollowupHistory[]>([])
   const [historyState, setHistoryState] = useState<LoadState>('unavailable')
@@ -72,6 +77,8 @@ export function WorkflowsPage({ runtime }: { runtime: EnterpriseClientRuntime | 
     let active = true
 
     if (!runtime) {
+      setDetail(null)
+      setDetailState('unavailable')
       setFollowups([])
       setSelectedId(null)
       setState('unavailable')
@@ -112,6 +119,45 @@ export function WorkflowsPage({ runtime }: { runtime: EnterpriseClientRuntime | 
       active = false
     }
   }, [runtime])
+
+  useEffect(() => {
+    let active = true
+
+    if (!runtime || !selectedId) {
+      setDetail(null)
+      setDetailState('unavailable')
+
+      return () => {
+        active = false
+      }
+    }
+
+    setDetail(null)
+    setDetailState('loading')
+    void runtime
+      .get<FollowupDetailResponse>(`/api/followup-detail?followup_id=${encodeURIComponent(selectedId)}`)
+      .then(response => {
+        if (!active) {
+          return
+        }
+
+        setDetail(response.followup ?? null)
+        setDetailState('ready')
+      })
+      .catch(reason => {
+        if (!active) {
+          return
+        }
+
+        setDetail(null)
+        setDetailState('error')
+        setError(reason instanceof Error ? reason.message : 'cannot load follow-up detail')
+      })
+
+    return () => {
+      active = false
+    }
+  }, [runtime, selectedId])
 
   useEffect(() => {
     let active = true
@@ -207,38 +253,51 @@ export function WorkflowsPage({ runtime }: { runtime: EnterpriseClientRuntime | 
         </article>
 
         <article className="hesc-card">
-          <h2 className="hesc-section-title">选中事项</h2>
+          <div className="hesc-section-heading">
+            <h2 className="hesc-section-title">选中事项</h2>
+            <span
+              className="hesc-status"
+              data-tone={detailState === 'ready' ? 'success' : detailState === 'error' ? 'error' : 'warning'}
+            >
+              {stateLabel(detailState)}
+            </span>
+          </div>
           {selectedId ? (
-            <dl className="hesc-detail-list">
-              {(() => {
-                const followup = followups.find(row => row.followup_id === selectedId)
+            <>
+              {detailState === 'loading' ? <p className="hesc-muted-copy">正在读取受权限约束的事项详情…</p> : null}
+              {detailState !== 'loading' ? (
+                <dl className="hesc-detail-list">
+                  {(() => {
+                    const followup = detail ?? followups.find(row => row.followup_id === selectedId)
 
-                return (
-                  <>
-                    <div>
-                      <dt>跟进标识</dt>
-                      <dd>{selectedId}</dd>
-                    </div>
-                    <div>
-                      <dt>负责人</dt>
-                      <dd>{followup?.owner_principal_id ?? '—'}</dd>
-                    </div>
-                    <div>
-                      <dt>应收金额</dt>
-                      <dd>{followup?.amount ? `${followup.amount} ${followup.currency ?? ''}`.trim() : '—'}</dd>
-                    </div>
-                    <div>
-                      <dt>预计收款</dt>
-                      <dd>{followup?.expected_receive_date ?? '—'}</dd>
-                    </div>
-                    <div>
-                      <dt>下次跟进</dt>
-                      <dd>{timestamp(followup?.next_followup_at)}</dd>
-                    </div>
-                  </>
-                )
-              })()}
-            </dl>
+                    return (
+                      <>
+                        <div>
+                          <dt>跟进标识</dt>
+                          <dd>{selectedId}</dd>
+                        </div>
+                        <div>
+                          <dt>负责人</dt>
+                          <dd>{followup?.owner_principal_id ?? '—'}</dd>
+                        </div>
+                        <div>
+                          <dt>应收金额</dt>
+                          <dd>{followup?.amount ? `${followup.amount} ${followup.currency ?? ''}`.trim() : '—'}</dd>
+                        </div>
+                        <div>
+                          <dt>预计收款</dt>
+                          <dd>{followup?.expected_receive_date ?? '—'}</dd>
+                        </div>
+                        <div>
+                          <dt>下次跟进</dt>
+                          <dd>{timestamp(followup?.next_followup_at)}</dd>
+                        </div>
+                      </>
+                    )
+                  })()}
+                </dl>
+              ) : null}
+            </>
           ) : (
             <p className="hesc-muted-copy">选择一个服务端跟进事项以查看其只读状态。</p>
           )}
