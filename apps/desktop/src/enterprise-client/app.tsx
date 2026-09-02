@@ -19,6 +19,7 @@ import {
 import {
   beginEnterpriseLogin,
   connectEnterpriseClient,
+  type EnterpriseClientError,
   type EnterpriseClientRuntime,
   type EnterpriseHealth,
   type EnterpriseIdentity,
@@ -199,6 +200,21 @@ export function EnterpriseClientApp() {
     void runtime?.disconnect()
   }, [])
 
+  const releaseAuthentication = useCallback((reason: EnterpriseClientError) => {
+    const runtime = runtimeRef.current
+
+    if (!runtime) {
+      return
+    }
+
+    generationRef.current += 1
+    runtimeRef.current = null
+    void runtime?.disconnect()
+    setSnapshot(null)
+    setConnectionState('error')
+    setError(reason.message)
+  }, [])
+
   const refresh = useCallback(async () => {
     const generation = generationRef.current + 1
     generationRef.current = generation
@@ -209,7 +225,7 @@ export function EnterpriseClientApp() {
     let runtime: EnterpriseClientRuntime | null = existingRuntime
 
     try {
-      runtime = runtime ?? (await connectEnterpriseClient())
+      runtime = runtime ?? (await connectEnterpriseClient({ onAuthenticationRequired: releaseAuthentication }))
 
       if (generation !== generationRef.current) {
         if (runtime !== existingRuntime) {
@@ -254,7 +270,7 @@ export function EnterpriseClientApp() {
       setConnectionState('error')
       setError(reason instanceof Error ? reason.message : 'cannot connect to enterprise service')
     }
-  }, [])
+  }, [releaseAuthentication])
 
   const beginLogin = useCallback(async () => {
     setConnectionState('loading')
