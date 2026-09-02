@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { RemindersPanel } from './reminders-panel'
 import type { EnterpriseClientRuntime } from './runtime'
 
 interface Followup {
@@ -286,6 +287,8 @@ export function WorkflowsPage({ runtime }: { runtime: EnterpriseClientRuntime | 
           </div>
         ) : null}
       </article>
+
+      <RemindersPanel runtime={runtime} />
     </section>
   )
 }
