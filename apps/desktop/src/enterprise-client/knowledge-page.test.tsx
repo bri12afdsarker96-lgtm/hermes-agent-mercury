@@ -6,19 +6,22 @@ import type { EnterpriseClientRuntime } from './runtime'
 
 describe('KnowledgePage', () => {
   it('reads committed collections and selected entries through the product runtime adapter', async () => {
-    const get = vi.fn(async <T,>(path: string) => {
+    const get = vi.fn(async (path: string): Promise<unknown> => {
       if (path === '/api/knowledge-committed') {
-        return { collections: ['policies'] } as T
+        return { collections: ['policies'] }
       }
 
       if (path === '/api/knowledge-committed?collection=policies') {
-        return { entries: [{ chunks: 12, source: 'policy-handbook.pdf' }] } as T
+        return { entries: [{ chunks: 12, source: 'policy-handbook.pdf' }] }
       }
 
       throw new Error(`unexpected path: ${path}`)
     })
 
-    const runtime: EnterpriseClientRuntime = { disconnect: vi.fn(async () => undefined), get }
+    const runtime: EnterpriseClientRuntime = {
+      disconnect: vi.fn(async () => undefined),
+      get: get as unknown as EnterpriseClientRuntime['get']
+    }
 
     render(<KnowledgePage runtime={runtime} />)
 
