@@ -286,6 +286,17 @@ async function setupEnterpriseVisualFixture(): Promise<MockBackendFixture> {
     .toContain('/console')
   await expect(fixture.page.getByTestId('enterprise-console')).toBeVisible({ timeout: 15_000 })
   await expect(fixture.page.getByTestId('console-page-dashboard')).toBeVisible({ timeout: 15_000 })
+  // Route visibility is deliberately not the visual-ready condition: the
+  // Dashboard mounts while its authoritative health + metrics queries are
+  // still pending. Capture only after both mock-backed reads have reached
+  // their declared states so the baseline cannot accidentally freeze the
+  // login/connecting transition as the product surface.
+  await expect(fixture.page.getByTestId('console-health-state')).toHaveText('healthy', {
+    timeout: 15_000,
+  })
+  await expect(fixture.page.getByTestId('console-metrics-state')).toHaveText('loaded', {
+    timeout: 15_000,
+  })
 
   // Suppress the transient `Update ready` overlay before the viewport proof
   // begins, so the screenshot captures a notification-free baseline.
