@@ -23,12 +23,27 @@ describe('GovernancePage', () => {
             {
               action: 'binding.revoked',
               actor: 'p-1',
-              event_id: 'event-1',
+              event_id: '1ad15d1f-b0c7-4b72-8c90-e81565bc9dd1',
               resource_ref: 'binding-1',
               ts: '2026-09-01T10:00:00Z'
             }
           ]
         }
+      }
+
+      if (path === '/api/audit-detail?event_id=1ad15d1f-b0c7-4b72-8c90-e81565bc9dd1') {
+        return {
+          event: {
+            action: 'binding.revoked',
+            event_id: '1ad15d1f-b0c7-4b72-8c90-e81565bc9dd1',
+            payload_ref: { reason: 'operator_request' },
+            resource_ref: 'binding-1'
+          }
+        }
+      }
+
+      if (path === '/api/audit-correlate?resource_ref=binding-1') {
+        return { events: [{ action: 'binding.created', event_id: 'event-0' }] }
       }
 
       throw new Error(`unexpected path: ${path}`)
@@ -43,8 +58,11 @@ describe('GovernancePage', () => {
 
     expect(await screen.findByText('管理员')).toBeTruthy()
     expect(await screen.findByText('binding.revoked')).toBeTruthy()
+    expect(await screen.findByText('binding.created')).toBeTruthy()
     expect(screen.getByText('已启用')).toBeTruthy()
     expect(get).toHaveBeenCalledWith('/api/whoami')
     expect(get).toHaveBeenCalledWith('/api/audit-list')
+    expect(get).toHaveBeenCalledWith('/api/audit-detail?event_id=1ad15d1f-b0c7-4b72-8c90-e81565bc9dd1')
+    expect(get).toHaveBeenCalledWith('/api/audit-correlate?resource_ref=binding-1')
   })
 })
