@@ -263,7 +263,43 @@ async function assertNoErrorAlert(page: Page): Promise<void> {
 // which fix-electron-tracing.ts removes from electronContexts on close, so
 // Playwright's didFinishTest no longer tries to finalise tracing on a live
 // Electron context.
-const VISUAL_TEST_TIMEOUT_MS = 120_000
+const VISUAL_TEST_TIMEOUT_MS = 180_000
+
+async function waitForUncoveredEnterpriseSurface(page: Page): Promise<void> {
+  // The Dashboard can be mounted beneath the initial gateway overlay. Playwright
+  // considers that DOM visible, while users only see the full-screen connecting
+  // state. Reuse the app-wide E2E readiness invariant here without requiring
+  // the chat composer, which this full-window Enterprise route intentionally
+  // does not mount.
+  await page.waitForFunction(
+    () => {
+      const center = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2)
+      if (!center) {
+        return false
+      }
+
+      let node: Element | null = center
+      while (node) {
+        const style = window.getComputedStyle(node)
+        const rect = node.getBoundingClientRect()
+        if (
+          style.position === 'fixed' &&
+          rect.left <= 0 &&
+          rect.top <= 0 &&
+          rect.right >= window.innerWidth &&
+          rect.bottom >= window.innerHeight
+        ) {
+          return false
+        }
+        node = node.parentElement
+      }
+
+      return true
+    },
+    undefined,
+    { timeout: 120_000 },
+  )
+}
 
 async function setupEnterpriseVisualFixture(): Promise<MockBackendFixture> {
   const fixture = await setupMockBackend({
@@ -279,12 +315,23 @@ async function setupEnterpriseVisualFixture(): Promise<MockBackendFixture> {
 
   // This evidence route is not the chat composer. Generic waitForAppReady waits
   // for gateway-backed chat readiness and can time out after the Enterprise
-  // navigation is already usable. Gate on the exact real shell → Enterprise
-  // route → dashboard seam that this test actually exercises.
-  const enterpriseNav = fixture.page.getByRole('button', { name: 'Enterprise', exact: true })
-  await expect(enterpriseNav).toBeVisible({ timeout: 15_000 })
-  await enterpriseNav.click()
+  // route is already usable. Fresh launches now take over the root route and
+  // land directly on /console, so the Dashboard is the actual product-ready
+  // seam; the old shell "Enterprise" navigation button is no longer present.
+  await expect
+    .poll(() => fixture.page.evaluate(() => window.location.hash))
+    .toContain('/console')
+  await expect(fixture.page.getByTestId('enterprise-console')).toBeVisible({ timeout: 15_000 })
   await expect(fixture.page.getByTestId('console-page-dashboard')).toBeVisible({ timeout: 15_000 })
+  // Reuse the existing data-ready contract: a mounted route alone can still
+  // paint pending cards, which is not a valid visual baseline.
+  await expect(fixture.page.getByTestId('console-health-state')).toHaveText('healthy', {
+    timeout: 15_000,
+  })
+  await expect(fixture.page.getByTestId('console-metrics-state')).toHaveText('loaded', {
+    timeout: 15_000,
+  })
+  await waitForUncoveredEnterpriseSurface(fixture.page)
 
   // Suppress the transient `Update ready` overlay before the viewport proof
   // begins, so the screenshot captures a notification-free baseline.
