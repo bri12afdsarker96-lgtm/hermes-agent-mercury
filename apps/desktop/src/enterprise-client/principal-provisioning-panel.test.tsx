@@ -86,6 +86,27 @@ describe('PrincipalProvisioningPanel', () => {
     expect(screen.queryByText('initial-token-once')).toBeNull()
   })
 
+  it('lets a supervisor withdraw its own pending request before approval', async () => {
+    const get = vi.fn(async () => ({
+      requests: [{ request_id: 'request-1', requested_name: '待调整员工', requested_role: 'operator', status: 'pending' }]
+    }))
+    const post = vi.fn(async () => ({ request_id: 'request-1', status: 'withdrawn' }))
+    const runtime: EnterpriseClientRuntime = {
+      disconnect: vi.fn(async () => undefined),
+      get: get as unknown as EnterpriseClientRuntime['get'],
+      post: post as unknown as NonNullable<EnterpriseClientRuntime['post']>
+    }
+
+    render(<PrincipalProvisioningPanel identity={identity('supervisor')} runtime={runtime} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '撤回申请' }))
+
+    await waitFor(() => {
+      expect(post).toHaveBeenCalledWith('/api/principal-provisioning-withdraw', { request_id: 'request-1' })
+    })
+    expect(await screen.findByText('员工申请已撤回；如仍需开通，请提交新的申请并等待企业管理员批准。')).toBeTruthy()
+  })
+
   it('does not render a provisioning affordance for an operator', () => {
     const runtime: EnterpriseClientRuntime = { disconnect: vi.fn(async () => undefined), get: vi.fn() }
 

@@ -43,6 +43,10 @@ function requestStatus(status: string | undefined): string {
     return '已驳回'
   }
 
+  if (status === 'withdrawn') {
+    return '已撤回'
+  }
+
   return '待批准'
 }
 
@@ -221,6 +225,29 @@ export function PrincipalProvisioningPanel({
     }
   }
 
+  async function withdrawRequest(requestId: string) {
+    if (!runtime || submitting) {
+      return
+    }
+
+    setError(null)
+    setNotice(null)
+    setToken(null)
+    setSubmitting(true)
+
+    try {
+      const post = requirePost(runtime)
+      await post<PrincipalProvisionRequest>('/api/principal-provisioning-withdraw', { request_id: requestId })
+      setNotice('员工申请已撤回；如仍需开通，请提交新的申请并等待企业管理员批准。')
+      await refreshRequests()
+      setState('ready')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'cannot withdraw principal provisioning request')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return (
     <article className="hesc-card hesc-provisioning-card" data-testid="enterprise-client-principal-provisioning">
       <div className="hesc-section-heading">
@@ -293,7 +320,7 @@ export function PrincipalProvisioningPanel({
                 <th scope="col">申请角色</th>
                 <th scope="col">申请人</th>
                 <th scope="col">状态</th>
-                {identity?.role === 'tenant_admin' ? <th scope="col">操作</th> : null}
+                {identity?.role === 'tenant_admin' || identity?.role === 'supervisor' ? <th scope="col">操作</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -342,6 +369,22 @@ export function PrincipalProvisioningPanel({
                             驳回申请
                           </button>
                         </div>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                  ) : null}
+                  {identity?.role === 'supervisor' ? (
+                    <td>
+                      {request.status === 'pending' && request.request_id ? (
+                        <button
+                          className="hesc-action hesc-action-danger"
+                          disabled={submitting}
+                          onClick={() => void withdrawRequest(request.request_id ?? '')}
+                          type="button"
+                        >
+                          撤回申请
+                        </button>
                       ) : (
                         '—'
                       )}
