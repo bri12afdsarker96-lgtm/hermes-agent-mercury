@@ -20,7 +20,7 @@ export function EnterpriseLoginPage({ busy, error, onRetry, status }: Enterprise
         <span>Hermes Enterprise Desktop</span>
       </header>
       <div className="hesc-login-content">
-        <section className="hesc-login-brand" aria-labelledby="enterprise-login-product">
+        <section aria-labelledby="enterprise-login-product" className="hesc-login-brand">
           <div className="hesc-login-brand-lockup">
             <img alt="" aria-hidden="true" src={hermesMark} />
             <span>
@@ -39,14 +39,14 @@ export function EnterpriseLoginPage({ busy, error, onRetry, status }: Enterprise
               <li>未接入能力明确标记，不做臆造展示</li>
             </ul>
           </div>
-          <div className="hesc-login-features" aria-label="企业身份保障">
+          <div aria-label="企业身份保障" className="hesc-login-features">
             <span><b>✓</b><i>单点登录</i><small>企业身份一步登录</small></span>
             <span><b>⌁</b><i>凭据安全保存</i><small>令牌不进入渲染层</small></span>
             <span><b>⌘</b><i>权限自动同步</i><small>角色变更服务端生效</small></span>
           </div>
         </section>
 
-        <section className="hesc-login-panel" aria-labelledby="enterprise-login-heading">
+        <section aria-labelledby="enterprise-login-heading" className="hesc-login-panel">
           <div>
             <h2 id="enterprise-login-heading">登录企业账号</h2>
             <p>使用企业身份登录，进入你的 Hermes 工作台。</p>
