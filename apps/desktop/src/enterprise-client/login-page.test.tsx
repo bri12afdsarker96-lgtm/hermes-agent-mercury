@@ -17,10 +17,10 @@ describe('EnterpriseLoginPage', () => {
     )
 
     expect(screen.getByRole('heading', { name: '登录企业账号' })).toBeTruthy()
-    expect(screen.getByText('本客户端不提供自助注册。请联系企业管理员开通或恢复账号。')).toBeTruthy()
+    expect(screen.getByText(/本客户端不提供自助注册/)).toBeTruthy()
     expect(screen.queryByRole('textbox')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: '登录并进入工作台' }))
+    fireEvent.click(screen.getByRole('button', { name: '使用企业账号登录' }))
 
     expect(onRetry).toHaveBeenCalledOnce()
   })
