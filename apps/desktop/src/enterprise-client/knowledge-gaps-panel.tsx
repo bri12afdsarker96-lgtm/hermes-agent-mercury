@@ -1,5 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react'
 
+import { reconcileAfterConflict } from './authority-reconciliation'
 import type { EnterpriseClientRuntime } from './runtime'
 
 interface KnowledgeGap {
@@ -100,7 +101,10 @@ export function KnowledgeGapsPanel({ runtime }: { runtime: EnterpriseClientRunti
         setText('')
         await load()
       })
-      .catch(reason => setError(reason instanceof Error ? reason.message : 'cannot author knowledge gap'))
+      .catch(async reason => {
+        await reconcileAfterConflict(reason, load)
+        setError(reason instanceof Error ? reason.message : 'cannot author knowledge gap')
+      })
       .finally(() => setAction(null))
   }
 
@@ -119,7 +123,10 @@ export function KnowledgeGapsPanel({ runtime }: { runtime: EnterpriseClientRunti
         setReason('')
         await load()
       })
-      .catch(reason => setError(reason instanceof Error ? reason.message : 'cannot reject knowledge gap'))
+      .catch(async reason => {
+        await reconcileAfterConflict(reason, load)
+        setError(reason instanceof Error ? reason.message : 'cannot reject knowledge gap')
+      })
       .finally(() => setAction(null))
   }
 
