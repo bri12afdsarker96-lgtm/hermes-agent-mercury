@@ -688,6 +688,28 @@
   flex-wrap: wrap;
   gap: 8px;
 }
+.hesc-provisioning-reason-select {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.hesc-provisioning-reason-select select {
+  min-width: 126px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 7px;
+  padding: 7px 8px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+}
+.hesc-provisioning-reason {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
 .hesc-workflows-grid {
   display: grid;
   grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.15fr);
