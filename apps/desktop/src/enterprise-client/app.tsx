@@ -1,6 +1,6 @@
 import './enterprise-client.css'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { AssistantPage } from './assistant-page'
 import { ConversationsPage } from './conversations-page'
@@ -8,6 +8,11 @@ import { EnterpriseClientShell, EnterpriseStatusBadge } from './enterprise-desig
 import { GovernancePage } from './governance-page'
 import { HandoffsPage } from './handoffs-page'
 import { KnowledgePage } from './knowledge-page'
+import {
+  enterpriseRoleLabel,
+  enterpriseWorkspaces,
+  type EnterpriseWorkspaceId
+} from './role-presentation'
 import {
   connectEnterpriseClient,
   type EnterpriseClientRuntime,
@@ -18,7 +23,7 @@ import {
 import { WorkflowsPage } from './workflows-page'
 
 type ConnectionState = 'error' | 'loading' | 'ready' | 'unavailable'
-type WorkspaceId = 'assistant' | 'conversations' | 'governance' | 'handoffs' | 'knowledge' | 'reminders' | 'workbench'
+type WorkspaceId = EnterpriseWorkspaceId
 
 interface ClientSnapshot {
   health: EnterpriseHealth
@@ -32,16 +37,6 @@ interface WorkspaceDefinition {
   id: WorkspaceId
   label: string
 }
-
-const WORKSPACES: WorkspaceDefinition[] = [
-  { description: '连接状态与运营概览', glyph: '01', id: 'workbench', label: '工作台' },
-  { description: '基于 Hermes runtime 的智能协作', glyph: '02', id: 'assistant', label: '智能助手' },
-  { description: '企业渠道与人工协同', glyph: '03', id: 'conversations', label: '会话中心' },
-  { description: '经授权的人工坐席交接', glyph: '04', id: 'handoffs', label: '人工协同' },
-  { description: '企业知识与检索工作流', glyph: '05', id: 'knowledge', label: '知识空间' },
-  { description: '提醒、任务和业务跟进', glyph: '06', id: 'reminders', label: '工作流' },
-  { description: '身份、权限与审计', glyph: '07', id: 'governance', label: '治理中心' }
-]
 
 function humanConnectionState(state: ConnectionState): string {
   if (state === 'loading') {
@@ -226,7 +221,22 @@ export function EnterpriseClientApp() {
     return releaseRuntime
   }, [refresh, releaseRuntime])
 
-  const activeDefinition = WORKSPACES.find(workspace => workspace.id === activeWorkspace) ?? WORKSPACES[0]
+  const workspaces: WorkspaceDefinition[] = useMemo(
+    () => enterpriseWorkspaces(snapshot?.identity),
+    [snapshot?.identity.effective_permissions, snapshot?.identity.role]
+  )
+
+  useEffect(() => {
+    if (!workspaces.some(workspace => workspace.id === activeWorkspace)) {
+      setActiveWorkspace(workspaces[0]?.id ?? 'workbench')
+    }
+  }, [activeWorkspace, workspaces])
+
+  const activeDefinition = workspaces.find(workspace => workspace.id === activeWorkspace) ?? workspaces[0]
+
+  if (!activeDefinition) {
+    return null
+  }
 
   return (
     <EnterpriseClientShell
@@ -237,12 +247,12 @@ export function EnterpriseClientApp() {
       navigationLabel="企业客户端主导航"
       onSelectWorkspace={workspaceId => setActiveWorkspace(workspaceId as WorkspaceId)}
       productChannel="企业工作台"
-      productName="Hermes Enterprise"
-      scopeLabel={snapshot?.identity.role ?? '权限由服务端确定'}
-      statusbarDetail="runtime bridge: token-free / authority: server"
+      productName="Hermes Enterprise Desktop"
+      scopeLabel={enterpriseRoleLabel(snapshot?.identity.role)}
+      statusbarDetail="安全连接 · 服务端权限"
       statusbarLabel="Hermes Enterprise Desktop"
       tenantLabel={snapshot?.identity.tenant_id ?? '正在解析租户范围'}
-      workspaces={WORKSPACES}
+      workspaces={workspaces}
     >
         {activeWorkspace === 'workbench' ? <Workbench snapshot={snapshot} state={connectionState} /> : null}
         {activeWorkspace === 'assistant' ? <AssistantPage /> : null}

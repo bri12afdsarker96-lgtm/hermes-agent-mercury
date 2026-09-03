@@ -24,6 +24,7 @@ export interface EnterpriseHealth {
 }
 
 export interface EnterpriseIdentity {
+  effective_permissions?: string[]
   name?: string
   principal_id?: string
   product_capabilities?: Record<string, { enabled?: boolean; status?: string }>
