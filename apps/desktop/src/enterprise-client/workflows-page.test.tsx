@@ -31,8 +31,9 @@ describe('WorkflowsPage', () => {
       get: get as unknown as EnterpriseClientRuntime['get']
     }
 
-    render(<WorkflowsPage runtime={runtime} />)
+    render(<WorkflowsPage role="operator" runtime={runtime} />)
 
+    expect(await screen.findByRole('heading', { name: '我的任务' })).toBeTruthy()
     expect(await screen.findByText('9 月回款')).toBeTruthy()
     expect((await screen.findAllByText('created')).length).toBeGreaterThan(0)
     expect(get).toHaveBeenCalledWith('/api/followup-list')

@@ -288,7 +288,11 @@ export function EnterpriseClientApp() {
         {activeWorkspace === 'governance' ? <GovernancePage runtime={runtimeRef.current} /> : null}
         {activeWorkspace === 'knowledge' ? <KnowledgePage runtime={runtimeRef.current} /> : null}
         {activeWorkspace === 'reminders' ? (
-          <WorkflowsPage principalId={snapshot?.identity.principal_id} runtime={runtimeRef.current} />
+          <WorkflowsPage
+            principalId={snapshot?.identity.principal_id}
+            role={snapshot?.identity.role}
+            runtime={runtimeRef.current}
+          />
         ) : null}
         {activeWorkspace !== 'assistant' &&
         activeWorkspace !== 'conversations' &&

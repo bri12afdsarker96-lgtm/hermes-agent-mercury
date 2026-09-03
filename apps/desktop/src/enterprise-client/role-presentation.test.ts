@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { enterpriseRoleLabel, enterpriseWorkbenchPresentation, enterpriseWorkspaces } from './role-presentation'
+import {
+  enterpriseRoleLabel,
+  enterpriseWorkbenchPresentation,
+  enterpriseWorkspaces,
+  enterpriseWorkflowPresentation
+} from './role-presentation'
 
 describe('enterprise role presentation', () => {
   it('uses Chinese display labels for every server role', () => {
@@ -41,5 +46,12 @@ describe('enterprise role presentation', () => {
     expect(enterpriseWorkbenchPresentation('supervisor').title).toBe('团队工作台')
     expect(enterpriseWorkbenchPresentation('tenant_admin').title).toBe('运营总览')
     expect(enterpriseWorkbenchPresentation('unrecognised').title).toBe('企业工作台')
+  })
+
+  it('uses the same server role fact for the owned business-operation title', () => {
+    expect(enterpriseWorkflowPresentation('operator').title).toBe('我的任务')
+    expect(enterpriseWorkflowPresentation('supervisor').title).toBe('团队任务')
+    expect(enterpriseWorkflowPresentation('tenant_admin').title).toBe('业务运营')
+    expect(enterpriseWorkflowPresentation('unrecognised').title).toBe('业务工作')
   })
 })

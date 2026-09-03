@@ -34,6 +34,11 @@ export interface EnterpriseWorkbenchPresentation {
   title: string
 }
 
+export interface EnterpriseWorkflowPresentation {
+  purpose: string
+  title: string
+}
+
 const OPERATOR_WORKSPACES: readonly EnterpriseWorkspaceDefinition[] = [
   { description: '查看个人待办与服务状态', glyph: '01', id: 'workbench', label: '工作台' },
   {
@@ -200,6 +205,26 @@ export function enterpriseWorkbenchPresentation(role: string | undefined): Enter
   }
 
   return { purpose: '正在确认当前企业身份和可见工作范围。', title: '企业工作台' }
+}
+
+export function enterpriseWorkflowPresentation(role: string | undefined): EnterpriseWorkflowPresentation {
+  if (role === 'operator') {
+    return { purpose: '处理本人获授权的业务任务、提醒和跟进事项。', title: '我的任务' }
+  }
+
+  if (role === 'supervisor') {
+    return { purpose: '处理团队范围内获授权的任务、提醒和跟进事项。', title: '团队任务' }
+  }
+
+  if (role === 'tenant_admin') {
+    return { purpose: '查看本企业获授权的任务、提醒和业务跟进事实。', title: '业务运营' }
+  }
+
+  if (role === 'super_admin') {
+    return { purpose: '查看平台运营事实；跨租户内容必须由服务端明确授权。', title: '业务运营' }
+  }
+
+  return { purpose: '正在确认当前企业身份和可见业务范围。', title: '业务工作' }
 }
 
 export function enterpriseWorkspaces(snapshot: EnterpriseRoleSnapshot | undefined): EnterpriseWorkspaceDefinition[] {
