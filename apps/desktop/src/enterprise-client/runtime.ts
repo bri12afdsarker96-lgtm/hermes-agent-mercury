@@ -34,6 +34,15 @@ export interface EnterpriseIdentity {
 
 export interface EnterpriseMetrics {
   alerts?: EnterpriseAlert[]
+  metrics?: {
+    m15_biz_tasks?: {
+      created?: number
+      escalated?: number
+    }
+    m16_handoff?: {
+      claimed?: number
+    }
+  }
 }
 
 export interface EnterpriseClientRuntime {

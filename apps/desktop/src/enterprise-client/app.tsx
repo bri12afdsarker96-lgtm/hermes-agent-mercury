@@ -23,6 +23,7 @@ import {
   type EnterpriseIdentity,
   type EnterpriseMetrics
 } from './runtime'
+import { canReadMetricAggregation, workbenchAggregate } from './workbench-metrics'
 import { WorkflowsPage } from './workflows-page'
 
 type ConnectionState = 'error' | 'loading' | 'ready' | 'unavailable'
@@ -97,6 +98,7 @@ function Workbench({ snapshot, state }: { snapshot: ClientSnapshot | null; state
   const alerts = snapshot?.metrics.alerts
   const serviceValue = health ? (health.ok ? '正常' : '异常') : '—'
   const presentation = enterpriseWorkbenchPresentation(identity?.role)
+  const aggregate = workbenchAggregate(identity, snapshot?.metrics)
 
   return (
     <section className="hesc-page" data-testid="enterprise-client-workbench">
@@ -127,9 +129,9 @@ function Workbench({ snapshot, state }: { snapshot: ClientSnapshot | null; state
           <p className="hesc-card-note">LIVE 且已启用的服务端能力</p>
         </article>
         <article className="hesc-card">
-          <div className="hesc-card-label">待处理工作</div>
-          <div className="hesc-card-value">—</div>
-          <p className="hesc-card-note">服务端尚未提供角色工作聚合，不以设计预览数字替代。</p>
+          <div className="hesc-card-label">{aggregate.label}</div>
+          <div className="hesc-card-value">{aggregate.value}</div>
+          <p className="hesc-card-note">{aggregate.note}</p>
         </article>
       </div>
 
@@ -202,11 +204,14 @@ export function EnterpriseClientApp() {
       runtime = runtime ?? (await connectEnterpriseClient())
       runtimeRef.current = runtime
 
-      const [health, identity, metrics] = await Promise.all([
+      const [health, identity] = await Promise.all([
         runtime.get<EnterpriseHealth>('/api/health'),
-        runtime.get<EnterpriseIdentity>('/api/whoami'),
-        runtime.get<EnterpriseMetrics>('/api/metrics?window=24h')
+        runtime.get<EnterpriseIdentity>('/api/whoami')
       ])
+
+      const metrics = canReadMetricAggregation(identity)
+        ? await runtime.get<EnterpriseMetrics>('/api/metrics?window=24h').catch(() => ({}))
+        : {}
 
       setSnapshot({ health, identity, metrics })
       setConnectionState('ready')
