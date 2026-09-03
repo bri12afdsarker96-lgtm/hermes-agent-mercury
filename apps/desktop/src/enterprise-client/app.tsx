@@ -8,6 +8,7 @@ import { EnterpriseClientShell, EnterpriseStatusBadge } from './enterprise-desig
 import { GovernancePage } from './governance-page'
 import { HandoffsPage } from './handoffs-page'
 import { KnowledgePage } from './knowledge-page'
+import { EnterpriseLoginPage } from './login-page'
 import {
   enterpriseRoleLabel,
   enterpriseWorkbenchPresentation,
@@ -238,6 +239,17 @@ export function EnterpriseClientApp() {
       setActiveWorkspace(workspaces[0]?.id ?? 'workbench')
     }
   }, [activeWorkspace, workspaces])
+
+  if (!snapshot && connectionState !== 'ready') {
+    return (
+      <EnterpriseLoginPage
+        busy={connectionState === 'loading'}
+        error={error}
+        onRetry={() => void refresh()}
+        status={humanConnectionState(connectionState)}
+      />
+    )
+  }
 
   const activeDefinition = workspaces.find(workspace => workspace.id === activeWorkspace) ?? workspaces[0]
 
