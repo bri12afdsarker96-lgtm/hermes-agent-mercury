@@ -268,7 +268,6 @@ const VISUAL_TEST_TIMEOUT_MS = 120_000
 
 async function setupEnterpriseVisualFixture(): Promise<MockBackendFixture> {
   const fixture = await setupMockBackend({
-    beforeFirstWindow: installEnterpriseEvidenceServer,
     // REM-03: do not pass `headless: true` so the renderer runs in a real
     // Xvfb-backed Chromium compositor instead of headless mode; the prior
     // headless flag interacted badly with the fixture window-state seed.
@@ -277,6 +276,17 @@ async function setupEnterpriseVisualFixture(): Promise<MockBackendFixture> {
     // runs its own bounded role=alert assertion via assertNoErrorAlert.
     installErrorGuard: false,
   })
+
+  // Electron's production handler registration completes while the first
+  // BrowserWindow is being constructed. Installing our contract mock before
+  // that point lets the production registration overwrite it, which makes the
+  // renderer correctly fail closed but prevents this fixture from proving the
+  // owned role UI. Replace the handler only after the window exists, then
+  // reload so EnterpriseClientApp reconnects through the normal preload IPC
+  // bridge. This remains renderer → preload → ipcMain evidence; no browser
+  // fetch or renderer credential is introduced.
+  await installEnterpriseEvidenceServer(fixture.app)
+  await fixture.page.reload()
 
   // The owned EnterpriseClientApp is the product root. Do not navigate through
   // a generic Hermes sidebar button: that was the old visual authority.
