@@ -23,7 +23,17 @@ export interface EnterpriseHealth {
   ok?: boolean
 }
 
+export interface EnterpriseDesktopSurface {
+  available?: boolean
+}
+
+export interface EnterpriseDesktopSurfaces {
+  schema_version?: number
+  surfaces?: Record<string, EnterpriseDesktopSurface>
+}
+
 export interface EnterpriseIdentity {
+  desktop_surfaces?: EnterpriseDesktopSurfaces
   name?: string
   principal_id?: string
   product_capabilities?: Record<string, { enabled?: boolean; status?: string }>
