@@ -3,6 +3,7 @@ import './enterprise-client.css'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { AssistantPage } from './assistant-page'
+import { currentAuthoritySnapshot, type EnterpriseConnectionState } from './authority-snapshot'
 import { ConversationsPage } from './conversations-page'
 import { EnterpriseClientShell, EnterpriseStatusBadge } from './enterprise-design-system'
 import { GovernancePage } from './governance-page'
@@ -19,7 +20,7 @@ import {
 import { enterpriseSessionDisposition } from './session-policy'
 import { WorkflowsPage } from './workflows-page'
 
-type ConnectionState = 'error' | 'loading' | 'ready' | 'unavailable'
+type ConnectionState = EnterpriseConnectionState
 type WorkspaceId = 'assistant' | 'conversations' | 'governance' | 'handoffs' | 'knowledge' | 'reminders' | 'workbench'
 
 interface ClientSnapshot {
@@ -270,33 +271,35 @@ export function EnterpriseClientApp() {
   }, [refresh, releaseRuntime])
 
   const activeDefinition = WORKSPACES.find(workspace => workspace.id === activeWorkspace) ?? WORKSPACES[0]
+  const authoritySnapshot = currentAuthoritySnapshot(snapshot, connectionState)
+  const authorityRuntime = connectionState === 'ready' ? runtimeRef.current : null
 
   return (
     <EnterpriseClientShell
       activeWorkspace={activeDefinition}
       connectionState={connectionState}
       connectionStatus={humanConnectionState(connectionState)}
-      identityName={snapshot?.identity.name ?? '企业工作空间'}
+      identityName={authoritySnapshot?.identity.name ?? '企业工作空间'}
       navigationLabel="企业客户端主导航"
       onSelectWorkspace={workspaceId => setActiveWorkspace(workspaceId as WorkspaceId)}
       productChannel="企业工作台"
       productName="Hermes Enterprise"
-      scopeLabel={snapshot?.identity.role ?? '权限由服务端确定'}
+      scopeLabel={authoritySnapshot?.identity.role ?? '权限由服务端确定'}
       statusbarDetail="runtime bridge: token-free / authority: server"
       statusbarLabel="Hermes Enterprise Desktop"
-      tenantLabel={snapshot?.identity.tenant_id ?? '正在解析租户范围'}
+      tenantLabel={authoritySnapshot?.identity.tenant_id ?? '正在解析租户范围'}
       workspaces={WORKSPACES}
     >
-        {activeWorkspace === 'workbench' ? <Workbench snapshot={snapshot} state={connectionState} /> : null}
+        {activeWorkspace === 'workbench' ? <Workbench snapshot={authoritySnapshot} state={connectionState} /> : null}
         {activeWorkspace === 'assistant' ? <AssistantPage /> : null}
-        {activeWorkspace === 'conversations' ? <ConversationsPage runtime={runtimeRef.current} /> : null}
+        {activeWorkspace === 'conversations' ? <ConversationsPage runtime={authorityRuntime} /> : null}
         {activeWorkspace === 'handoffs' ? (
-          <HandoffsPage principalId={snapshot?.identity.principal_id} runtime={runtimeRef.current} />
+          <HandoffsPage principalId={authoritySnapshot?.identity.principal_id} runtime={authorityRuntime} />
         ) : null}
-        {activeWorkspace === 'governance' ? <GovernancePage runtime={runtimeRef.current} /> : null}
-        {activeWorkspace === 'knowledge' ? <KnowledgePage runtime={runtimeRef.current} /> : null}
+        {activeWorkspace === 'governance' ? <GovernancePage runtime={authorityRuntime} /> : null}
+        {activeWorkspace === 'knowledge' ? <KnowledgePage runtime={authorityRuntime} /> : null}
         {activeWorkspace === 'reminders' ? (
-          <WorkflowsPage principalId={snapshot?.identity.principal_id} runtime={runtimeRef.current} />
+          <WorkflowsPage principalId={authoritySnapshot?.identity.principal_id} runtime={authorityRuntime} />
         ) : null}
         {activeWorkspace !== 'assistant' &&
         activeWorkspace !== 'conversations' &&
