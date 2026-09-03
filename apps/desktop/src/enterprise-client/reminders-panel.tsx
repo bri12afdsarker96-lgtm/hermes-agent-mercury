@@ -1,5 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react'
 
+import { reconcileAfterConflict } from './authority-reconciliation'
 import type { EnterpriseClientRuntime } from './runtime'
 
 interface Reminder {
@@ -111,7 +112,10 @@ export function RemindersPanel({ runtime }: { runtime: EnterpriseClientRuntime |
         setTitle('')
         await load()
       })
-      .catch(reason => setError(reason instanceof Error ? reason.message : 'cannot create reminder'))
+      .catch(async reason => {
+        await reconcileAfterConflict(reason, load)
+        setError(reason instanceof Error ? reason.message : 'cannot create reminder')
+      })
       .finally(() => setAction(null))
   }
 
@@ -127,7 +131,10 @@ export function RemindersPanel({ runtime }: { runtime: EnterpriseClientRuntime |
     void runtime
       .post('/api/reminder-cancel', { reminder_id: reminderId })
       .then(load)
-      .catch(reason => setError(reason instanceof Error ? reason.message : 'cannot cancel reminder'))
+      .catch(async reason => {
+        await reconcileAfterConflict(reason, load)
+        setError(reason instanceof Error ? reason.message : 'cannot cancel reminder')
+      })
       .finally(() => setAction(null))
   }
 
