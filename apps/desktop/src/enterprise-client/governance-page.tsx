@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { CapabilityPolicyPanel } from './capability-policy-panel'
+import { PrincipalProvisioningPanel } from './principal-provisioning-panel'
 import type { EnterpriseClientRuntime, EnterpriseIdentity } from './runtime'
 
 interface AuditEvent {
@@ -282,6 +283,8 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
       </div>
 
       <CapabilityPolicyPanel runtime={runtime} />
+
+      <PrincipalProvisioningPanel identity={identity} runtime={runtime} />
 
       <article className="hesc-card hesc-audit-card">
         <div className="hesc-section-heading">
