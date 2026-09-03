@@ -8,13 +8,25 @@ type EnterpriseBridgeResponse =
   | { code: string; kind: 'error'; message: string; status: number }
 
 const HEALTH = { auth_mode: 'native_bearer', ok: true }
+
 const IDENTITY = {
+  desktop_surfaces: {
+    schema_version: 1,
+    surfaces: {
+      conversations: { available: true },
+      governance: { available: false },
+      handoffs: { available: true },
+      knowledge: { available: false },
+      workflows: { available: true }
+    }
+  },
   name: 'Lin Qiao',
   principal_id: 'principal-operator-042',
   product_capabilities: { knowledge_rag: { enabled: true, status: 'LIVE' } },
   role: 'operator',
   tenant_id: 'tenant-acme-logistics'
 }
+
 const METRICS = { alerts: [] }
 
 function installAuthorityBridge(responses: Record<string, EnterpriseBridgeResponse>) {
@@ -57,6 +69,11 @@ describe('EnterpriseClientApp authority lifecycle', () => {
     expect(screen.getAllByText('Lin Qiao')).toHaveLength(2)
     expect(screen.getAllByText('tenant-acme-logistics')).toHaveLength(2)
     expect(screen.getAllByText('员工')).toHaveLength(3)
+    expect(screen.getByRole('button', { name: '企业会话' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '人工接管' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '业务运营' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '企业知识' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '员工与权限' })).toBeNull()
     expect(bridge.autoConnect).toHaveBeenCalledWith()
     expect(bridge.request).toHaveBeenCalledWith({
       method: 'GET',
@@ -64,6 +81,35 @@ describe('EnterpriseClientApp authority lifecycle', () => {
       sessionId: 'opaque-session'
     })
     expect(JSON.stringify(bridge.request.mock.calls)).not.toMatch(/token|bearer/i)
+  })
+
+  it('fails closed for server-backed workspaces when the authority contract is absent', async () => {
+    const bridge = installAuthorityBridge({
+      '/api/health': { data: HEALTH, kind: 'ok' },
+      '/api/metrics?window=24h': { data: METRICS, kind: 'ok' },
+      '/api/whoami': {
+        data: {
+          name: IDENTITY.name,
+          principal_id: IDENTITY.principal_id,
+          product_capabilities: IDENTITY.product_capabilities,
+          role: IDENTITY.role,
+          tenant_id: IDENTITY.tenant_id
+        },
+        kind: 'ok'
+      }
+    })
+
+    render(<EnterpriseClientApp />)
+
+    await screen.findAllByText('企业服务已连接')
+    expect(screen.getByRole('button', { name: '工作台' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'AI 助理' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '企业会话' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '人工接管' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '企业知识' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '业务运营' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '员工与权限' })).toBeNull()
+    expect(bridge.disconnect).not.toHaveBeenCalled()
   })
 
   it('releases the opaque session and clears authority presentation after a 401', async () => {

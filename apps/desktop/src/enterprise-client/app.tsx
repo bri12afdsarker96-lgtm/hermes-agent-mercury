@@ -14,8 +14,7 @@ import { EnterpriseLoginPage } from './login-page'
 import {
   enterpriseRoleLabel,
   enterpriseWorkbenchPresentation,
-  type EnterpriseWorkspaceId,
-  enterpriseWorkspaces
+  type EnterpriseWorkspaceId
 } from './role-presentation'
 import {
   beginEnterpriseLogin,
@@ -46,6 +45,43 @@ interface WorkspaceDefinition {
   label: string
 }
 
+const WORKSPACES: readonly WorkspaceDefinition[] = [
+  { description: '查看企业运行状态与身份范围', glyph: '01', id: 'workbench', label: '工作台' },
+  { description: '使用 Hermes runtime 的智能协作能力', glyph: '02', id: 'assistant', label: 'AI 助理' },
+  { description: '查看企业会话的投递事实', glyph: '03', id: 'conversations', label: '企业会话' },
+  { description: '处理经授权的人工协同事项', glyph: '04', id: 'handoffs', label: '人工接管' },
+  { description: '管理获授权的企业知识工作流', glyph: '05', id: 'knowledge', label: '企业知识' },
+  { description: '查看任务、提醒与业务跟进事实', glyph: '06', id: 'reminders', label: '业务运营' },
+  { description: '查看员工权限、能力与治理事实', glyph: '07', id: 'governance', label: '员工与权限' }
+]
+
+const ALWAYS_VISIBLE_WORKSPACES = new Set<WorkspaceId>(['assistant', 'workbench'])
+
+/**
+ * Hermes_AI owns availability. The local role only changes product wording;
+ * it must never grant a server-backed Desktop surface.
+ */
+const SERVER_SURFACE_BY_WORKSPACE: Partial<Record<WorkspaceId, string>> = {
+  conversations: 'conversations',
+  governance: 'governance',
+  handoffs: 'handoffs',
+  knowledge: 'knowledge',
+  reminders: 'workflows'
+}
+
+function workspacesFor(identity: EnterpriseIdentity | undefined): WorkspaceDefinition[] {
+  const surfaces = identity?.desktop_surfaces?.surfaces
+
+  return WORKSPACES.filter(workspace => {
+    if (ALWAYS_VISIBLE_WORKSPACES.has(workspace.id)) {
+      return true
+    }
+
+    const surface = SERVER_SURFACE_BY_WORKSPACE[workspace.id]
+
+    return surface !== undefined && surfaces?.[surface]?.available === true
+  })
+}
 function humanConnectionState(state: ConnectionState): string {
   if (state === 'loading') {
     return '正在连接企业服务'
@@ -303,16 +339,16 @@ export function EnterpriseClientApp() {
 
   const authoritySnapshot = currentAuthoritySnapshot(snapshot, connectionState)
   const authorityRuntime = connectionState === 'ready' ? runtimeRef.current : null
-  const workspaces: WorkspaceDefinition[] = useMemo(
-    () => enterpriseWorkspaces(authoritySnapshot?.identity),
-    [authoritySnapshot?.identity.effective_permissions, authoritySnapshot?.identity.role]
+  const visibleWorkspaces = useMemo(
+    () => workspacesFor(authoritySnapshot?.identity),
+    [authoritySnapshot?.identity?.desktop_surfaces]
   )
 
   useEffect(() => {
-    if (!workspaces.some(workspace => workspace.id === activeWorkspace)) {
-      setActiveWorkspace(workspaces[0]?.id ?? 'workbench')
+    if (!visibleWorkspaces.some(workspace => workspace.id === activeWorkspace)) {
+      setActiveWorkspace('workbench')
     }
-  }, [activeWorkspace, workspaces])
+  }, [activeWorkspace, visibleWorkspaces])
 
   if (!snapshot && connectionState !== 'ready') {
     return (
@@ -325,11 +361,7 @@ export function EnterpriseClientApp() {
     )
   }
 
-  const activeDefinition = workspaces.find(workspace => workspace.id === activeWorkspace) ?? workspaces[0]
-
-  if (!activeDefinition) {
-    return null
-  }
+  const activeDefinition = visibleWorkspaces.find(workspace => workspace.id === activeWorkspace) ?? WORKSPACES[0]
 
   return (
     <EnterpriseClientShell
@@ -338,37 +370,43 @@ export function EnterpriseClientApp() {
       connectionStatus={humanConnectionState(connectionState)}
       identityName={authoritySnapshot?.identity.name ?? '企业工作空间'}
       navigationLabel="企业客户端主导航"
-      onSelectWorkspace={workspaceId => setActiveWorkspace(workspaceId as WorkspaceId)}
+      onSelectWorkspace={workspaceId => {
+        const workspace = workspaceId as WorkspaceId
+
+        if (visibleWorkspaces.some(candidate => candidate.id === workspace)) {
+          setActiveWorkspace(workspace)
+        }
+      }}
       productChannel="企业工作台"
       productName="Hermes Enterprise Desktop"
       scopeLabel={enterpriseRoleLabel(authoritySnapshot?.identity.role)}
       statusbarDetail="安全连接 · 服务端权限"
       statusbarLabel="Hermes Enterprise Desktop"
       tenantLabel={authoritySnapshot?.identity.tenant_id ?? '正在解析租户范围'}
-      workspaces={workspaces}
+      workspaces={visibleWorkspaces}
     >
-        {activeWorkspace === 'workbench' ? <Workbench snapshot={authoritySnapshot} state={connectionState} /> : null}
-        {activeWorkspace === 'assistant' ? <AssistantPage /> : null}
-        {activeWorkspace === 'conversations' ? <ConversationsPage runtime={authorityRuntime} /> : null}
-        {activeWorkspace === 'handoffs' ? (
+        {activeDefinition.id === 'workbench' ? <Workbench snapshot={authoritySnapshot} state={connectionState} /> : null}
+        {activeDefinition.id === 'assistant' ? <AssistantPage /> : null}
+        {activeDefinition.id === 'conversations' ? <ConversationsPage runtime={authorityRuntime} /> : null}
+        {activeDefinition.id === 'handoffs' ? (
           <HandoffsPage principalId={authoritySnapshot?.identity.principal_id} runtime={authorityRuntime} />
         ) : null}
-        {activeWorkspace === 'governance' ? <GovernancePage runtime={authorityRuntime} /> : null}
-        {activeWorkspace === 'knowledge' ? <KnowledgePage runtime={authorityRuntime} /> : null}
-        {activeWorkspace === 'reminders' ? (
+        {activeDefinition.id === 'governance' ? <GovernancePage runtime={authorityRuntime} /> : null}
+        {activeDefinition.id === 'knowledge' ? <KnowledgePage runtime={authorityRuntime} /> : null}
+        {activeDefinition.id === 'reminders' ? (
           <WorkflowsPage
             principalId={authoritySnapshot?.identity.principal_id}
             role={authoritySnapshot?.identity.role}
             runtime={authorityRuntime}
           />
         ) : null}
-        {activeWorkspace !== 'assistant' &&
-        activeWorkspace !== 'conversations' &&
-        activeWorkspace !== 'governance' &&
-        activeWorkspace !== 'handoffs' &&
-        activeWorkspace !== 'knowledge' &&
-        activeWorkspace !== 'reminders' &&
-        activeWorkspace !== 'workbench' ? (
+        {activeDefinition.id !== 'assistant' &&
+        activeDefinition.id !== 'conversations' &&
+        activeDefinition.id !== 'governance' &&
+        activeDefinition.id !== 'handoffs' &&
+        activeDefinition.id !== 'knowledge' &&
+        activeDefinition.id !== 'reminders' &&
+        activeDefinition.id !== 'workbench' ? (
           <WorkspacePlaceholder workspace={activeDefinition} />
         ) : null}
         {error ? (
