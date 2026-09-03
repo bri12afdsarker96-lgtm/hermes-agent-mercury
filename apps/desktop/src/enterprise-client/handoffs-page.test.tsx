@@ -48,7 +48,7 @@ describe('HandoffsPage', () => {
 
     const runtime: EnterpriseClientRuntime = {
       disconnect: vi.fn(async () => undefined),
-      get,
+      get: get as EnterpriseClientRuntime['get'],
       post: post as NonNullable<EnterpriseClientRuntime['post']>
     }
 
