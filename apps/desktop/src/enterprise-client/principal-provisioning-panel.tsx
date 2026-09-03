@@ -62,6 +62,7 @@ export function PrincipalProvisioningPanel({
 }) {
   const [error, setError] = useState<string | null>(null)
   const [name, setName] = useState('')
+  const [notice, setNotice] = useState<string | null>(null)
   const [requests, setRequests] = useState<PrincipalProvisionRequest[]>([])
   const [state, setState] = useState<LoadState>('unavailable')
   const [submitting, setSubmitting] = useState(false)
@@ -84,6 +85,7 @@ export function PrincipalProvisioningPanel({
     if (!runtime || !isSupportedRole) {
       setError(null)
       setName('')
+      setNotice(null)
       setRequests([])
       setState('unavailable')
       setSubmitting(false)
@@ -95,6 +97,7 @@ export function PrincipalProvisioningPanel({
     }
 
     setError(null)
+    setNotice(null)
     setRequests([])
     setState('loading')
     setToken(null)
@@ -135,6 +138,7 @@ export function PrincipalProvisioningPanel({
     }
 
     setError(null)
+    setNotice(null)
     setSubmitting(true)
 
     try {
@@ -156,6 +160,7 @@ export function PrincipalProvisioningPanel({
     }
 
     setError(null)
+    setNotice(null)
     setSubmitting(true)
 
     try {
@@ -170,6 +175,29 @@ export function PrincipalProvisioningPanel({
       setState('ready')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'cannot approve principal provisioning request')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function rejectRequest(requestId: string) {
+    if (!runtime || submitting) {
+      return
+    }
+
+    setError(null)
+    setNotice(null)
+    setToken(null)
+    setSubmitting(true)
+
+    try {
+      const post = requirePost(runtime)
+      await post<PrincipalProvisionRequest>('/api/principal-provisioning-reject', { request_id: requestId })
+      setNotice('员工申请已驳回；系统未创建账号或初始令牌。')
+      await refreshRequests()
+      setState('ready')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'cannot reject principal provisioning request')
     } finally {
       setSubmitting(false)
     }
@@ -225,6 +253,8 @@ export function PrincipalProvisioningPanel({
         </div>
       ) : null}
 
+      {notice ? <p className="hesc-provisioning-notice" role="status">{notice}</p> : null}
+
       {error ? (
         <div className="hesc-error" role="status">
           <div>
@@ -258,14 +288,24 @@ export function PrincipalProvisioningPanel({
                   {identity?.role === 'tenant_admin' ? (
                     <td>
                       {request.status === 'pending' && request.request_id ? (
-                        <button
-                          className="hesc-action"
-                          disabled={submitting}
-                          onClick={() => void approveRequest(request.request_id ?? '')}
-                          type="button"
-                        >
-                          批准并创建账号
-                        </button>
+                        <div className="hesc-provisioning-actions">
+                          <button
+                            className="hesc-action"
+                            disabled={submitting}
+                            onClick={() => void approveRequest(request.request_id ?? '')}
+                            type="button"
+                          >
+                            批准并创建账号
+                          </button>
+                          <button
+                            className="hesc-action hesc-action-danger"
+                            disabled={submitting}
+                            onClick={() => void rejectRequest(request.request_id ?? '')}
+                            type="button"
+                          >
+                            驳回申请
+                          </button>
+                        </div>
                       ) : (
                         '—'
                       )}

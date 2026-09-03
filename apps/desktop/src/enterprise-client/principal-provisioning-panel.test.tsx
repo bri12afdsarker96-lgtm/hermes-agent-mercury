@@ -56,6 +56,30 @@ describe('PrincipalProvisioningPanel', () => {
     expect(screen.queryByText('initial-token-once')).toBeNull()
   })
 
+  it('lets a tenant admin reject a pending request without retaining a credential', async () => {
+    const get = vi.fn(async () => ({
+      requests: [{ request_id: 'request-1', requested_name: '未入职员工', requested_role: 'operator', status: 'pending' }]
+    }))
+
+    const post = vi.fn(async () => ({ request_id: 'request-1', status: 'rejected' }))
+
+    const runtime: EnterpriseClientRuntime = {
+      disconnect: vi.fn(async () => undefined),
+      get: get as unknown as EnterpriseClientRuntime['get'],
+      post: post as unknown as NonNullable<EnterpriseClientRuntime['post']>
+    }
+
+    render(<PrincipalProvisioningPanel identity={identity('tenant_admin')} runtime={runtime} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '驳回申请' }))
+
+    await waitFor(() => {
+      expect(post).toHaveBeenCalledWith('/api/principal-provisioning-reject', { request_id: 'request-1' })
+    })
+    expect(await screen.findByText('员工申请已驳回；系统未创建账号或初始令牌。')).toBeTruthy()
+    expect(screen.queryByText('initial-token-once')).toBeNull()
+  })
+
   it('does not render a provisioning affordance for an operator', () => {
     const runtime: EnterpriseClientRuntime = { disconnect: vi.fn(async () => undefined), get: vi.fn() }
 
