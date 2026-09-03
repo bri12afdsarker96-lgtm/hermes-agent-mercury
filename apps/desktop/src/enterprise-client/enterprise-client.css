@@ -706,6 +706,45 @@
 .hesc-audit-card {
   margin-top: 16px;
 }
+.hesc-provisioning-card {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+.hesc-provisioning-form {
+  display: grid;
+  max-width: 420px;
+  gap: 8px;
+}
+.hesc-provisioning-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.hesc-provisioning-form input {
+  border: 1px solid var(--stroke-strong);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+}
+.hesc-provisioning-token {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--blue-200);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--blue-100);
+  color: var(--text);
+}
+.hesc-provisioning-token code {
+  overflow-wrap: anywhere;
+  color: var(--blue-600);
+  font-family: 'JetBrains Mono', Consolas, monospace;
+}
 .hesc-workflows-grid {
   display: grid;
   grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.15fr);
