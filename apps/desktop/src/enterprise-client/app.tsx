@@ -10,6 +10,7 @@ import { HandoffsPage } from './handoffs-page'
 import { KnowledgePage } from './knowledge-page'
 import {
   enterpriseRoleLabel,
+  enterpriseWorkbenchPresentation,
   enterpriseWorkspaces,
   type EnterpriseWorkspaceId
 } from './role-presentation'
@@ -93,13 +94,14 @@ function Workbench({ snapshot, state }: { snapshot: ClientSnapshot | null; state
   const health = snapshot?.health
   const alerts = snapshot?.metrics.alerts
   const serviceValue = health ? (health.ok ? '正常' : '异常') : '—'
+  const presentation = enterpriseWorkbenchPresentation(identity?.role)
 
   return (
     <section className="hesc-page" data-testid="enterprise-client-workbench">
       <header className="hesc-page-header">
         <div>
-          <h1>我的工作台</h1>
-          <p>企业运行态、身份范围与当前能力状态均来自已连接的服务端。</p>
+          <h1>{presentation.title}</h1>
+          <p>{presentation.purpose}</p>
         </div>
         <EnterpriseStatusBadge tone={statusTone(state)}>{humanConnectionState(state)}</EnterpriseStatusBadge>
       </header>
@@ -121,6 +123,11 @@ function Workbench({ snapshot, state }: { snapshot: ClientSnapshot | null; state
           <div className="hesc-card-label">已启用能力</div>
           <div className="hesc-card-value">{identity ? capabilityCount(identity) : '—'}</div>
           <p className="hesc-card-note">LIVE 且已启用的服务端能力</p>
+        </article>
+        <article className="hesc-card">
+          <div className="hesc-card-label">待处理工作</div>
+          <div className="hesc-card-value">—</div>
+          <p className="hesc-card-note">服务端尚未提供角色工作聚合，不以设计预览数字替代。</p>
         </article>
       </div>
 
