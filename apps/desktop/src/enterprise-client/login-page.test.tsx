@@ -35,6 +35,6 @@ describe('EnterpriseLoginPage', () => {
       />
     )
 
-    expect(screen.getByRole('button', { name: '正在验证企业身份…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '正在验证企业身份…' }).getAttribute('disabled')).not.toBeNull()
   })
 })
