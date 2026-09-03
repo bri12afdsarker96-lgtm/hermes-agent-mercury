@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   enterpriseRoleLabel,
   enterpriseWorkbenchPresentation,
-  enterpriseWorkspaces,
-  enterpriseWorkflowPresentation
+  enterpriseWorkflowPresentation,
+  enterpriseWorkspaces
 } from './role-presentation'
 
 describe('enterprise role presentation', () => {
