@@ -26,6 +26,7 @@
   --blue-200: #c7ddfd;
   --blue-500: #1668f5;
   --blue-600: #0e58dc;
+  --teal-500: #29b6a8;
   --green-50: #ebfef5;
   --green-600: #0e9a58;
   --orange-50: #fff4ea;
@@ -105,21 +106,38 @@
   border-right: 1px solid var(--stroke);
   background: var(--surface);
 }
-.hesc-sidebar-identity {
-  padding: 18px;
+.hesc-sidebar-brand {
+  display: flex;
+  height: 56px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 20px;
   border-bottom: 1px solid var(--stroke);
 }
-.hesc-sidebar-identity strong,
-.hesc-sidebar-identity span {
+.hesc-sidebar-brand > span {
+  display: grid;
+  min-width: 0;
+}
+.hesc-sidebar-brand strong,
+.hesc-sidebar-brand small {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.hesc-sidebar-identity span {
-  margin-top: 2px;
+.hesc-sidebar-brand strong {
+  font-size: 14px;
+  line-height: 18px;
+}
+.hesc-sidebar-brand small {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 16px;
+}
+.hesc-sidebar-mark {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
 }
 .hesc-nav {
   display: grid;
@@ -167,17 +185,87 @@
   border-bottom: 1px solid var(--stroke);
   background: var(--surface);
 }
-.hesc-breadcrumb,
-.hesc-topbar-scope {
+.hesc-tenant,
+.hesc-account,
+.hesc-health,
+.hesc-status-item {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.hesc-tenant {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.hesc-tenant-icon {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--blue-100);
+  color: var(--blue-600);
+  font-size: 11px;
+}
+.hesc-tenant-name,
+.hesc-account-name,
+.hesc-status-detail {
   overflow: hidden;
-  color: var(--muted);
-  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.hesc-breadcrumb strong {
-  color: var(--text);
+.hesc-chevron {
+  color: var(--quiet);
+  font-size: 13px;
+}
+.hesc-search {
+  display: flex;
+  width: min(420px, 38vw);
+  min-width: 220px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-inline: auto;
+  border-bottom: 1px solid var(--stroke-strong);
+  padding: 6px 2px;
+  color: var(--quiet);
+  font-size: 12px;
+}
+.hesc-search small {
+  color: var(--orange-600);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.hesc-account {
+  justify-content: flex-end;
+}
+.hesc-avatar {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--teal-500);
+  color: #fff;
+  font-size: 13px;
   font-weight: 600;
+}
+.hesc-account-name {
+  max-width: 96px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.hesc-role {
+  border-radius: 6px;
+  padding: 3px 8px;
+  background: var(--blue-100);
+  color: var(--blue-600);
+  font-size: 11px;
 }
 .hesc-main {
   grid-column: 2;
@@ -668,9 +756,40 @@
   color: var(--muted);
   font-size: 11px;
 }
-.hesc-statusbar code {
+.hesc-health {
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  padding: 4px 10px;
+  background: #f7f9fc;
+}
+.hesc-health[data-state='ready'] {
+  border-color: #d2f9e5;
+  background: var(--green-50);
+  color: var(--green-600);
+}
+.hesc-health[data-state='error'] {
+  border-color: #fddcd9;
+  background: var(--red-50);
+  color: var(--red-600);
+}
+.hesc-status-item {
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  padding: 4px 10px;
+  background: var(--surface);
+}
+.hesc-status-item > span {
   color: var(--quiet);
-  font-family: 'JetBrains Mono', Consolas, monospace;
+}
+.hesc-status-item strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.hesc-status-spacer {
+  flex: 1;
+}
+.hesc-status-detail {
+  color: var(--quiet);
 }
 .hesc-root :focus-visible {
   outline: 3px solid color-mix(in oklch, var(--blue-500) 35%, transparent);
@@ -681,11 +800,11 @@
   .hesc-root {
     grid-template-columns: 64px minmax(0, 1fr);
   }
-  .hesc-sidebar-identity {
-    padding: 16px 8px;
+  .hesc-sidebar-brand {
+    justify-content: center;
+    padding: 0;
   }
-  .hesc-sidebar-identity strong,
-  .hesc-sidebar-identity span,
+  .hesc-sidebar-brand > span,
   .hesc-nav-label {
     display: none;
   }
@@ -721,5 +840,13 @@
   }
   .hesc-topbar {
     padding-inline: 18px;
+  }
+  .hesc-search {
+    display: none;
+  }
+  .hesc-account-name,
+  .hesc-role,
+  .hesc-status-detail {
+    display: none;
   }
 }
