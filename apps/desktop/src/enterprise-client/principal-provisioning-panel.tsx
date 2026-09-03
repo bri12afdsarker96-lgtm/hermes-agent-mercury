@@ -5,6 +5,7 @@ import type { EnterpriseClientRuntime, EnterpriseIdentity } from './runtime'
 interface PrincipalProvisionRequest {
   created_principal_id?: string
   created_ts?: number | string
+  rejection_reason?: string
   request_id?: string
   requested_name?: string
   requested_role?: string
@@ -24,6 +25,15 @@ interface ProvisionedPrincipalResponse extends PrincipalProvisionRequest {
 
 type LoadState = 'error' | 'loading' | 'ready' | 'unavailable'
 
+const REJECTION_REASONS = [
+  { label: '重复申请', value: 'duplicate_request' },
+  { label: '信息不完整', value: 'insufficient_information' },
+  { label: '岗位尚未批准', value: 'position_not_approved' },
+  { label: '其他（不记录自由文本）', value: 'other' }
+] as const
+
+type RejectionReason = (typeof REJECTION_REASONS)[number]['value']
+
 function requestStatus(status: string | undefined): string {
   if (status === 'approved') {
     return '已批准'
@@ -34,6 +44,10 @@ function requestStatus(status: string | undefined): string {
   }
 
   return '待批准'
+}
+
+function rejectionReasonLabel(reason: string | undefined): string | null {
+  return REJECTION_REASONS.find(candidate => candidate.value === reason)?.label ?? null
 }
 
 function requirePost(runtime: EnterpriseClientRuntime): NonNullable<EnterpriseClientRuntime['post']> {
@@ -64,6 +78,7 @@ export function PrincipalProvisioningPanel({
   const [name, setName] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
   const [requests, setRequests] = useState<PrincipalProvisionRequest[]>([])
+  const [rejectionReason, setRejectionReason] = useState<RejectionReason>('insufficient_information')
   const [state, setState] = useState<LoadState>('unavailable')
   const [submitting, setSubmitting] = useState(false)
   const [token, setToken] = useState<string | null>(null)
@@ -192,8 +207,11 @@ export function PrincipalProvisioningPanel({
 
     try {
       const post = requirePost(runtime)
-      await post<PrincipalProvisionRequest>('/api/principal-provisioning-reject', { request_id: requestId })
-      setNotice('员工申请已驳回；系统未创建账号或初始令牌。')
+      await post<PrincipalProvisionRequest>('/api/principal-provisioning-reject', {
+        request_id: requestId,
+        reason: rejectionReason
+      })
+      setNotice(`员工申请已因“${rejectionReasonLabel(rejectionReason)}”驳回；系统未创建账号或初始令牌。`)
       await refreshRequests()
       setState('ready')
     } catch (reason) {
@@ -284,7 +302,12 @@ export function PrincipalProvisioningPanel({
                   <td>{request.requested_name ?? '—'}</td>
                   <td>{request.requested_role ?? 'operator'}</td>
                   <td>{request.requested_by ?? '—'}</td>
-                  <td>{requestStatus(request.status)}</td>
+                  <td>
+                    <span>{requestStatus(request.status)}</span>
+                    {request.status === 'rejected' && rejectionReasonLabel(request.rejection_reason) ? (
+                      <small className="hesc-provisioning-reason">{rejectionReasonLabel(request.rejection_reason)}</small>
+                    ) : null}
+                  </td>
                   {identity?.role === 'tenant_admin' ? (
                     <td>
                       {request.status === 'pending' && request.request_id ? (
@@ -297,6 +320,19 @@ export function PrincipalProvisioningPanel({
                           >
                             批准并创建账号
                           </button>
+                          <label className="hesc-provisioning-reason-select">
+                            <span>驳回理由</span>
+                            <select
+                              aria-label={`为 ${request.requested_name ?? '该员工'} 选择驳回理由`}
+                              disabled={submitting}
+                              onChange={event => setRejectionReason(event.target.value as RejectionReason)}
+                              value={rejectionReason}
+                            >
+                              {REJECTION_REASONS.map(reason => (
+                                <option key={reason.value} value={reason.value}>{reason.label}</option>
+                              ))}
+                            </select>
+                          </label>
                           <button
                             className="hesc-action hesc-action-danger"
                             disabled={submitting}
