@@ -107,6 +107,27 @@ describe('PrincipalProvisioningPanel', () => {
     expect(await screen.findByText('员工申请已撤回；如仍需开通，请提交新的申请并等待企业管理员批准。')).toBeTruthy()
   })
 
+  it('lets a tenant admin reissue an approved employee token once', async () => {
+    const get = vi.fn(async () => ({
+      requests: [{ request_id: 'request-1', requested_name: '已入职员工', created_principal_id: 'employee-1', status: 'approved' }]
+    }))
+    const post = vi.fn(async () => ({ principal_id: 'employee-1', token: 'replacement-token-once' }))
+    const runtime: EnterpriseClientRuntime = {
+      disconnect: vi.fn(async () => undefined),
+      get: get as unknown as EnterpriseClientRuntime['get'],
+      post: post as unknown as NonNullable<EnterpriseClientRuntime['post']>
+    }
+
+    render(<PrincipalProvisioningPanel identity={identity('tenant_admin')} runtime={runtime} />)
+    fireEvent.click(await screen.findByRole('button', { name: '重新签发初始令牌' }))
+
+    await waitFor(() => {
+      expect(post).toHaveBeenCalledWith('/api/principal-token-reissue', { principal_id: 'employee-1' })
+    })
+    expect(await screen.findByText('replacement-token-once')).toBeTruthy()
+    expect(screen.getByText('旧初始令牌已失效；请通过受控渠道交付新令牌。')).toBeTruthy()
+  })
+
   it('does not render a provisioning affordance for an operator', () => {
     const runtime: EnterpriseClientRuntime = { disconnect: vi.fn(async () => undefined), get: vi.fn() }
 
