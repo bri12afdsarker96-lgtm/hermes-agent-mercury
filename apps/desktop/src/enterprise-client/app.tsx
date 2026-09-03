@@ -147,7 +147,7 @@ function Workbench({ snapshot, state }: { snapshot: ClientSnapshot | null; state
             </div>
             <div>
               <dt>角色</dt>
-              <dd>{identity?.role ?? '—'}</dd>
+              <dd>{identity ? enterpriseRoleLabel(identity.role) : '—'}</dd>
             </div>
             <div>
               <dt>主体标识</dt>

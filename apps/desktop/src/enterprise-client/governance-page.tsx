@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { CapabilityPolicyPanel } from './capability-policy-panel'
+import { enterpriseRoleLabel } from './role-presentation'
 import type { EnterpriseClientRuntime, EnterpriseIdentity } from './runtime'
 
 interface AuditEvent {
@@ -251,7 +252,7 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
             </div>
             <div>
               <dt>角色</dt>
-              <dd>{identity?.role ?? '—'}</dd>
+              <dd>{identity ? enterpriseRoleLabel(identity.role) : '—'}</dd>
             </div>
             <div>
               <dt>主体标识</dt>
