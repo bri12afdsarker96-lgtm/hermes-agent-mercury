@@ -1,5 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react'
 
+import { reconcileAfterConflict } from './authority-reconciliation'
 import type { EnterpriseClientRuntime } from './runtime'
 
 interface Handoff {
@@ -113,6 +114,7 @@ export function HandoffsPage({
         setReply('')
         await load()
       } catch (reason) {
+        await reconcileAfterConflict(reason, load)
         setError(reason instanceof Error ? reason.message : 'cannot complete handoff action')
       } finally {
         setActionState(null)
