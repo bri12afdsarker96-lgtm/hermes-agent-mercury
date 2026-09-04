@@ -105,6 +105,22 @@ describe('FollowupPage responsive detail', () => {
     expect(row.getAttribute('aria-expanded')).toBe('true')
   })
 
+  it('returns keyboard focus to the opening row after Escape closes the compact Sheet', async () => {
+    setViewportMode(true)
+    $transport.set(new FollowupTransport())
+    wrap(<FollowupPage />)
+
+    const row = await screen.findByTestId('console-followup-f1')
+    row.focus()
+    fireEvent.click(row)
+
+    await screen.findByRole('dialog')
+    fireEvent.keyDown(window.document, { key: 'Escape' })
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(window.document.activeElement).toBe(row))
+  })
+
   it('renders selected detail inline at 1440px and above', async () => {
     setViewportMode(false)
     $transport.set(new FollowupTransport())

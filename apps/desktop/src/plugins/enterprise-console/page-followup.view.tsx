@@ -55,7 +55,7 @@ import {
   StatusDot,
 } from '@hermes/plugin-sdk'
 import type { ReactNode } from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import {
   FOLLOWUP_STATUS_VALUES,
@@ -292,6 +292,7 @@ export function FollowupView({
   onStatusChange,
 }: FollowupViewProps) {
   const compactDetail = useCompactDetail()
+  const selectedRowRef = useRef<HTMLButtonElement | null>(null)
   void FOLLOWUP_STATUS_VALUES
 
   return (
@@ -339,7 +340,10 @@ export function FollowupView({
                           : 'flex w-full items-center justify-between gap-3 rounded-md px-3 py-2.5 text-left outline-none hover:bg-(--ui-fill-quaternary) focus-visible:ring-2 focus-visible:ring-(--ui-accent)'
                       }
                       data-testid={`console-followup-${row.followupId}`}
-                      onClick={() => onSelect(row.followupId)}
+                      onClick={(event) => {
+                        selectedRowRef.current = event.currentTarget
+                        onSelect(row.followupId)
+                      }}
                       type="button"
                     >
                       <span className="min-w-0">
@@ -383,6 +387,20 @@ export function FollowupView({
       >
         <SheetContent
           className="w-[min(90vw,var(--ec-detail-w))] overflow-y-auto sm:max-w-(--ec-detail-w)"
+          onCloseAutoFocus={(event) => {
+            // Restore keyboard focus to the follow-up row that opened the
+            // sheet. The controlled-open Sheet has no DialogTrigger for the
+            // primitive to track, so its default close-restore lands on
+            // <body> and keyboard users lose their place (observed in the
+            // packaged keyboard trace). Keep the actual opening element,
+            // rather than selection state, because closing clears selectedId.
+            const trigger = selectedRowRef.current
+
+            if (trigger?.isConnected) {
+              event.preventDefault()
+              trigger.focus()
+            }
+          }}
           side="right"
         >
           <SheetHeader>

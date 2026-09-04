@@ -12909,7 +12909,12 @@ async function fetchJsonForBackend(
 }
 
 ipcMain.handle('hermes:connection-config:probe', async (_event, rawUrl) => probeRemoteAuthMode(rawUrl))
-ipcMain.handle('hermes:connection-config:oauth-login', async (_event, rawUrl) => {
+
+// One implementation for both Settings' explicit gateway sign-in and the
+// product-owned Enterprise Desktop entry. The latter supplies a main-resolved
+// connection below, so no renderer can turn this into an arbitrary OAuth URL
+// launcher or receive the resulting bearer.
+async function signInToRemoteGateway(rawUrl) {
   // Capability-gated login (RFC 8252). Probe the gateway's public /api/status:
   //   - advertises "native_pkce" in auth_flows → run the system-browser +
   //     loopback + PKCE flow. No embedded webview, tokens held by the app
@@ -12974,7 +12979,9 @@ ipcMain.handle('hermes:connection-config:oauth-login', async (_event, rawUrl) =>
   }
 
   return { ok: true, baseUrl, connected }
-})
+}
+
+ipcMain.handle('hermes:connection-config:oauth-login', async (_event, rawUrl) => signInToRemoteGateway(rawUrl))
 ipcMain.handle('hermes:connection-config:oauth-logout', async (_event, rawUrl) => {
   const baseUrl = rawUrl ? normalizeRemoteBaseUrl(rawUrl) : ''
   await clearOauthSession(baseUrl || undefined)
@@ -13472,7 +13479,7 @@ ipcMain.handle('hermes:api', async (_event, request) => {
   return handleHermesApiRequest(request).finally(releaseProfileDeletion)
 })
 
-// ── Enterprise Console transport (P3-M4A) ────────────────────────────────────
+// ── Enterprise Client transport ──────────────────────────────────────────────
 // The bearer for an EXTERNAL Hermes web server lives HERE, in the main process,
 // per renderer (WebContents) — never persisted, never returned to any renderer.
 // Each connect mints an opaque sessionId bound to the sender; every request /
@@ -13480,14 +13487,14 @@ ipcMain.handle('hermes:api', async (_event, request) => {
 // transport can neither borrow a newer credential nor tear down a newer session.
 // Requests are constrained to `/api/*` and injected in main via the existing
 // `fetchJson` engine (no browser Origin — the server's strict-Origin / no-CORS
-// posture stays intact). Consumed by the console plugin's IpcHermesTransport.
+// posture stays intact). Consumed by the independent client's runtime adapter.
 const enterpriseSessions = new EnterpriseSessionStore()
 const enterpriseWiredSenders = new Set<number>()
 
 /** Only the primary desktop shell may establish or use an enterprise session.
  * Overlay, quick-entry, and helper windows share the preload but are not
- * console-capable renderers; sender/session fencing alone is insufficient. */
-function isEnterpriseConsoleSender(sender: WebContents): boolean {
+ * client-capable renderers; sender/session fencing alone is insufficient. */
+function isEnterpriseClientSender(sender: WebContents): boolean {
   return !sender.isDestroyed() && mainWindow?.webContents.id === sender.id
 }
 
@@ -13502,6 +13509,73 @@ function destroyAllEnterpriseSessions(): void {
   enterpriseWiredSenders.clear()
 }
 
+// First-enterprise-login remains a native, main-owned operation. The renderer
+// cannot provide a URL, token, password, or identity; it merely asks this
+// already-configured desktop to start the existing PKCE flow. Requiring an
+// OAuth remote route and a trusted enterprise origin prevents a successful
+// gateway login from being presented as a usable enterprise session when the
+// second authority plane has not been configured.
+ipcMain.handle('hermes:enterprise:begin-login', async (event) => {
+  rememberLog('[enterprise-login] native sign-in requested')
+
+  if (!isEnterpriseClientSender(event.sender)) {
+    rememberLog('[enterprise-login] rejected: sender is not the primary desktop window')
+    return { code: 'forbidden_sender', message: 'enterprise login unavailable', ok: false }
+  }
+
+  const enterpriseOrigin = normalizeEnterpriseApiOriginOrNull(
+    resolveEnterpriseOriginCandidate({
+      processEnv: process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN,
+      windowsUserEnvReader: () => readWindowsUserEnvVar('HERMES_DESKTOP_ENTERPRISE_ORIGIN')
+    })
+  )
+
+  if (!enterpriseOrigin) {
+    rememberLog('[enterprise-login] rejected: trusted enterprise origin is not configured')
+    return { code: 'no_enterprise_origin', message: 'enterprise API origin is not configured', ok: false }
+  }
+
+  let gatewayRoute
+
+  try {
+    // Do not call resolveRemoteBackend here: that helper intentionally rejects
+    // an OAuth route with no pre-existing native session, which is correct for
+    // normal backend traffic but makes a first sign-in impossible. This branch
+    // needs only the trusted, persisted dial target; signInToRemoteGateway
+    // obtains the native session immediately afterwards.
+    gatewayRoute = resolveDesktopRemoteRoute({
+      config: readDesktopConnectionConfig(),
+      env: {
+        token: process.env.HERMES_DESKTOP_REMOTE_TOKEN,
+        url: process.env.HERMES_DESKTOP_REMOTE_URL
+      },
+      profile: primaryProfileKey(),
+      registry: readDesktopConnectionsRegistry()
+    })
+  } catch {
+    rememberLog('[enterprise-login] rejected: configured gateway route could not be resolved')
+    return { code: 'gateway_unavailable', message: 'enterprise gateway is not configured', ok: false }
+  }
+
+  if (!gatewayRoute || gatewayRoute.kind === 'ssh' || gatewayRoute.authMode !== 'oauth') {
+    rememberLog('[enterprise-login] rejected: no OAuth gateway is configured')
+    return { code: 'no_oauth_gateway', message: 'enterprise OAuth gateway is not configured', ok: false }
+  }
+
+  try {
+    rememberLog('[enterprise-login] starting configured native OAuth flow')
+    const result = await signInToRemoteGateway(gatewayRoute.url)
+
+    rememberLog(`[enterprise-login] native flow completed: connected=${result.connected}`)
+    return result.connected
+      ? { ok: true }
+      : { code: 'login_not_completed', message: 'enterprise login was not completed', ok: false }
+  } catch {
+    rememberLog('[enterprise-login] native flow failed before completion')
+    return { code: 'gateway_unavailable', message: 'enterprise gateway is unavailable', ok: false }
+  }
+})
+
 // B16-OL · One-login. Establish the enterprise session ENTIRELY in main from the
 // existing native OAuth bearer — no URL/token pasted in the renderer, no bearer
 // crossing to the renderer. Topology is fixed (OL-council): the Agent gateway and
@@ -13515,7 +13589,7 @@ function destroyAllEnterpriseSessions(): void {
 //     the configured trusted origin is forbidden.
 // Idempotent per sender; returns only {ok, sessionId, baseUrl} (bearer stripped).
 ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
-  if (!isEnterpriseConsoleSender(event.sender)) {
+  if (!isEnterpriseClientSender(event.sender)) {
     return { code: 'forbidden_sender', message: 'enterprise session unavailable', ok: false }
   }
 
@@ -13566,6 +13640,7 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
   }
 
   if (!bearer) {
+    rememberLog('[enterprise-auth] auto-connect rejected: no native session')
     // No authenticated native session -> cannot authenticate (UNKNOWN/unavailable),
     // never a fake AUTHENTICATED.
     return { code: 'no_native_session', message: 'no authenticated native session', ok: false }
@@ -13576,6 +13651,7 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
   try {
     sessionId = enterpriseSessions.autoConnect(senderId, enterpriseOrigin, bearer)
   } catch (err) {
+    rememberLog('[enterprise-auth] auto-connect rejected: session creation failed')
     return { ok: false, ...classifyConnectError(err) }
   }
 
@@ -13590,14 +13666,16 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
   const session = enterpriseSessions.resolve(senderId, sessionId)
 
   if (!session) {
+    rememberLog('[enterprise-auth] auto-connect rejected: session unavailable')
     return { code: 'network', message: 'session unavailable', ok: false }
   }
 
+  rememberLog('[enterprise-auth] enterprise session ready')
   return buildAutoConnectResult(session)
 })
 
 ipcMain.handle('hermes:enterprise:disconnect', (event, payload) => {
-  if (!isEnterpriseConsoleSender(event.sender)) {
+  if (!isEnterpriseClientSender(event.sender)) {
     return { ok: false }
   }
 
@@ -13607,7 +13685,7 @@ ipcMain.handle('hermes:enterprise:disconnect', (event, payload) => {
 })
 
 ipcMain.handle('hermes:enterprise:request', async (event, req) => {
-  if (!isEnterpriseConsoleSender(event.sender)) {
+  if (!isEnterpriseClientSender(event.sender)) {
     return { code: 'forbidden_sender', kind: 'error', message: 'not connected', status: 0 }
   }
 
@@ -13639,6 +13717,7 @@ ipcMain.handle('hermes:enterprise:request', async (event, req) => {
       method: String(method).toUpperCase()
     })
 
+    rememberLog('[enterprise-auth] enterprise request succeeded')
     return { data, kind: 'ok' }
   } catch (err) {
     // fetchJson rejects Error('<status>: <text>') for HTTP >= 400, else a
@@ -13648,9 +13727,11 @@ ipcMain.handle('hermes:enterprise:request', async (event, req) => {
     const match = /^(\d{3}):/.exec(message)
 
     if (match) {
+      rememberLog(`[enterprise-auth] enterprise request rejected: HTTP ${match[1]}`)
       return { code: 'http', kind: 'error', message: `request failed (${match[1]})`, status: Number(match[1]) }
     }
 
+    rememberLog('[enterprise-auth] enterprise request failed: network')
     return { code: 'network', kind: 'error', message: 'cannot reach the Hermes server', status: 0 }
   }
 })
@@ -13658,7 +13739,7 @@ ipcMain.handle('hermes:enterprise:request', async (event, req) => {
 // Multipart upload (knowledge-upload) — same fencing + path guard as request;
 // reuses fetchJson's existing multipart (`options.upload`, field name "file").
 ipcMain.handle('hermes:enterprise:upload', async (event, req) => {
-  if (!isEnterpriseConsoleSender(event.sender)) {
+  if (!isEnterpriseClientSender(event.sender)) {
     return { code: 'forbidden_sender', kind: 'error', message: 'not connected', status: 0 }
   }
 
