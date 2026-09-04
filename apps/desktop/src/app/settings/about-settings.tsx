@@ -107,6 +107,9 @@ export function AboutSettings() {
             {version?.appVersion ? a.version(version.appVersion) : a.versionUnavailable}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">{a.attribution}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            本软件使用 HarmonyOS Sans Fonts；完整许可随应用一并提供。
+          </p>
         </div>
         {version?.bundleOutOfSync && (
           <div className="mx-auto w-full max-w-2xl rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-left text-sm">

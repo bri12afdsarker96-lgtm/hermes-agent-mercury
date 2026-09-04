@@ -20,7 +20,7 @@ For this UI line, authority is split deliberately:
 2. **Implementation mechanics:** Mercury's existing Electron/React shell, plugin SDK, theme engine and shared primitives remain authoritative. Do not create a second shell/router/theme engine merely to copy the standalone design-kit delivery runtime.
 3. **Functional truth / permissions / API / tenant authority:** current Hermes server contracts and current PR #8 functional controller are authoritative. The ZIP's `TRUTH_MATRIX.md` captured an older runtime point-in-time and MUST NOT regress newer server truth.
 4. Preview fixtures in the ZIP (`data.js`, demo role switcher, fake KPI numbers, sample people/groups/amounts) are `DESIGN_PREVIEW_ONLY` and MUST NOT become runtime facts.
-5. The unlicensed RTWS ShangGo G0 binaries in the supplied package remain non-distributable in this repo. The accepted Source Han Sans CN substitution remains.
+5. The unlicensed RTWS ShangGo G0 binaries in the supplied package remain non-distributable in this repo. The product uses unmodified HarmonyOS Sans SC files under the accompanying Huawei license instead.
 
 This means a newer real server capability is mapped into the approved visual language rather than hidden or downgraded to match an older design fixture.
 
