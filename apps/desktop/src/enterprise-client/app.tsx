@@ -341,7 +341,11 @@ export function EnterpriseClientApp() {
   const authorityRuntime = connectionState === 'ready' ? runtimeRef.current : null
   const visibleWorkspaces = useMemo(
     () => workspacesFor(authoritySnapshot?.identity),
-    [authoritySnapshot?.identity?.desktop_surfaces]
+    [
+      authoritySnapshot?.identity?.desktop_surfaces,
+      authoritySnapshot?.identity?.effective_permissions,
+      authoritySnapshot?.identity?.role
+    ]
   )
 
   useEffect(() => {
