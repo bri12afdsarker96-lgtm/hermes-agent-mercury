@@ -2,9 +2,10 @@
 
 **Status:** controlled candidate implementation and infrastructure deployment
 completed; it is **not** a formal release and human-owned desktop/product
-acceptance remains outstanding.  This document records observed state on
-2026-09-04 (Asia/Shanghai).  It contains no passwords, private keys, access
-tokens, or personal-account identifiers.
+acceptance remains outstanding.  This document records the initial observed
+state on 2026-09-04 and the Git-alignment update on 2026-09-05
+(Asia/Shanghai).  It contains no passwords, private keys, access tokens, or
+personal-account identifiers.
 
 ## 1. Scope and repository authority
 
@@ -115,8 +116,9 @@ The next colleague owns these acceptance tests, in this order:
 ## 6. Local-worktree closure performed
 
 No currently active, named product work branch is ahead of its tracked GitHub
-branch.  This does **not** mean the object database contains no local-only
-history.
+branch.  The historical local-only Git line identified during the first
+handoff audit has now been preserved on a remote archive branch; it remains
+unreviewed and is not a merge candidate.
 
 | Location | Closure result |
 | --- | --- |
@@ -125,7 +127,8 @@ history.
 | Server candidate worktree | Clean at `a64dda45`, pushed as PR #156. |
 | Six clean auxiliary Server worktrees | Fast-forwarded to their tracked remote branches; no history rewrite and no unpushed local commit. |
 | Local `codex/principal-lifecycle-audit` name | Only a local alias for the already-pushed `origin/codex/principal-token-reissue` commit `052fd0ad`; it contains no unique work to upload. |
-| Historical Server object lines | Local history still includes commits that are not referenced by `origin` (a refreshed ref scan found 28; another audit found 31 under a different ref set).  They may contain source/test changes, but have no active remote branch or review target.  Do not bulk-delete or bulk-push them; inventory each candidate and create a narrowly scoped review branch only when a maintainer identifies it as needed. |
+| Historical Server object line | The 28 commits found by the refreshed reference scan were pushed intact to [`codex/archive/gate2c-local-history-20260905`](https://github.com/bri12afdsarker96-lgtm/Hermes_AI/tree/codex/archive/gate2c-local-history-20260905) at `fab3d1c0`.  This is a preservation branch only: it has no approved PR base, test verdict or merge authorization.  A maintainer must carve out a narrowly scoped review branch before any part is reused. |
+| Remaining local untracked artifacts | The Server root's existing `.worktrees/` folder and candidate transfer archive files remain deliberately local.  They are neither source commits nor reviewable release artifacts; do not upload them blindly or treat them as product code. |
 
 ## 7. Rollback and operating safeguards
 
