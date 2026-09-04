@@ -248,6 +248,30 @@ export function PrincipalProvisioningPanel({
     }
   }
 
+  async function reissueToken(principalId: string) {
+    if (!runtime || submitting) {
+      return
+    }
+
+    setError(null)
+    setNotice(null)
+    setToken(null)
+    setSubmitting(true)
+
+    try {
+      const post = requirePost(runtime)
+      const response = await post<ProvisionedPrincipalResponse>('/api/principal-token-reissue', {
+        principal_id: principalId
+      })
+      setToken(oneTimeToken(response))
+      setNotice('旧初始令牌已失效；请通过受控渠道交付新令牌。')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'cannot reissue principal token')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return (
     <article className="hesc-card hesc-provisioning-card" data-testid="enterprise-client-principal-provisioning">
       <div className="hesc-section-heading">
@@ -369,6 +393,15 @@ export function PrincipalProvisioningPanel({
                             驳回申请
                           </button>
                         </div>
+                      ) : request.status === 'approved' && request.created_principal_id ? (
+                        <button
+                          className="hesc-action"
+                          disabled={submitting}
+                          onClick={() => void reissueToken(request.created_principal_id ?? '')}
+                          type="button"
+                        >
+                          重新签发初始令牌
+                        </button>
                       ) : (
                         '—'
                       )}
