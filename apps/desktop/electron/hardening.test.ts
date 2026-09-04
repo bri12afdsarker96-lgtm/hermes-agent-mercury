@@ -989,6 +989,7 @@ test('enterprise login remains a main-owned, configured OAuth operation', () => 
   assert.match(handlerBody, /isEnterpriseClientSender\(event\.sender\)/)
   assert.match(handlerBody, /resolveRemoteBackend\(primaryProfileKey\(\)\)/)
   assert.match(handlerBody, /signInToRemoteGateway\(remote\.baseUrl\)/)
+  assert.match(handlerBody, /rememberLog\('\[enterprise-login\] native sign-in requested'\)/)
   assert.doesNotMatch(handlerBody, /event\.sender.*url|payload.*url/)
 })
 

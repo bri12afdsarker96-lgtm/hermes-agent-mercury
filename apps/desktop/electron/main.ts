@@ -13516,7 +13516,10 @@ function destroyAllEnterpriseSessions(): void {
 // gateway login from being presented as a usable enterprise session when the
 // second authority plane has not been configured.
 ipcMain.handle('hermes:enterprise:begin-login', async (event) => {
+  rememberLog('[enterprise-login] native sign-in requested')
+
   if (!isEnterpriseClientSender(event.sender)) {
+    rememberLog('[enterprise-login] rejected: sender is not the primary desktop window')
     return { code: 'forbidden_sender', message: 'enterprise login unavailable', ok: false }
   }
 
@@ -13528,6 +13531,7 @@ ipcMain.handle('hermes:enterprise:begin-login', async (event) => {
   )
 
   if (!enterpriseOrigin) {
+    rememberLog('[enterprise-login] rejected: trusted enterprise origin is not configured')
     return { code: 'no_enterprise_origin', message: 'enterprise API origin is not configured', ok: false }
   }
 
@@ -13536,20 +13540,25 @@ ipcMain.handle('hermes:enterprise:begin-login', async (event) => {
   try {
     remote = await resolveRemoteBackend(primaryProfileKey())
   } catch {
+    rememberLog('[enterprise-login] rejected: configured gateway could not be resolved')
     return { code: 'gateway_unavailable', message: 'enterprise gateway is not configured', ok: false }
   }
 
   if (!remote?.baseUrl || remote.authMode !== 'oauth') {
+    rememberLog('[enterprise-login] rejected: no OAuth gateway is configured')
     return { code: 'no_oauth_gateway', message: 'enterprise OAuth gateway is not configured', ok: false }
   }
 
   try {
+    rememberLog('[enterprise-login] starting configured native OAuth flow')
     const result = await signInToRemoteGateway(remote.baseUrl)
 
+    rememberLog(`[enterprise-login] native flow completed: connected=${result.connected}`)
     return result.connected
       ? { ok: true }
       : { code: 'login_not_completed', message: 'enterprise login was not completed', ok: false }
   } catch {
+    rememberLog('[enterprise-login] native flow failed before completion')
     return { code: 'gateway_unavailable', message: 'enterprise gateway is unavailable', ok: false }
   }
 })

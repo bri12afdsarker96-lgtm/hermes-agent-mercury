@@ -237,7 +237,13 @@ export function EnterpriseClientApp() {
 
     if (!result.ok) {
       setConnectionState('error')
-      setError('无法启动企业身份登录，请确认客户端已由管理员完成企业服务配置。')
+      setError(
+        result.code === 'no_enterprise_origin' || result.code === 'no_oauth_gateway'
+          ? '企业登录服务尚未完成配置，请联系平台管理员。'
+          : result.code === 'login_not_completed'
+            ? '企业身份登录未完成，请在打开的浏览器窗口中完成登录后返回客户端。'
+            : '无法启动企业身份登录，请检查企业网络连接后重试。'
+      )
       return
     }
 
