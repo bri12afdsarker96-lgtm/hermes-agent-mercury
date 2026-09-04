@@ -13535,23 +13535,36 @@ ipcMain.handle('hermes:enterprise:begin-login', async (event) => {
     return { code: 'no_enterprise_origin', message: 'enterprise API origin is not configured', ok: false }
   }
 
-  let remote
+  let gatewayRoute
 
   try {
-    remote = await resolveRemoteBackend(primaryProfileKey())
+    // Do not call resolveRemoteBackend here: that helper intentionally rejects
+    // an OAuth route with no pre-existing native session, which is correct for
+    // normal backend traffic but makes a first sign-in impossible. This branch
+    // needs only the trusted, persisted dial target; signInToRemoteGateway
+    // obtains the native session immediately afterwards.
+    gatewayRoute = resolveDesktopRemoteRoute({
+      config: readDesktopConnectionConfig(),
+      env: {
+        token: process.env.HERMES_DESKTOP_REMOTE_TOKEN,
+        url: process.env.HERMES_DESKTOP_REMOTE_URL
+      },
+      profile: primaryProfileKey(),
+      registry: readDesktopConnectionsRegistry()
+    })
   } catch {
-    rememberLog('[enterprise-login] rejected: configured gateway could not be resolved')
+    rememberLog('[enterprise-login] rejected: configured gateway route could not be resolved')
     return { code: 'gateway_unavailable', message: 'enterprise gateway is not configured', ok: false }
   }
 
-  if (!remote?.baseUrl || remote.authMode !== 'oauth') {
+  if (!gatewayRoute || gatewayRoute.kind === 'ssh' || gatewayRoute.authMode !== 'oauth') {
     rememberLog('[enterprise-login] rejected: no OAuth gateway is configured')
     return { code: 'no_oauth_gateway', message: 'enterprise OAuth gateway is not configured', ok: false }
   }
 
   try {
     rememberLog('[enterprise-login] starting configured native OAuth flow')
-    const result = await signInToRemoteGateway(remote.baseUrl)
+    const result = await signInToRemoteGateway(gatewayRoute.url)
 
     rememberLog(`[enterprise-login] native flow completed: connected=${result.connected}`)
     return result.connected
