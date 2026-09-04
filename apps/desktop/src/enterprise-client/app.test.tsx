@@ -56,7 +56,7 @@ describe('EnterpriseClientApp authority lifecycle', () => {
     await screen.findAllByText('企业服务已连接')
     expect(screen.getAllByText('Lin Qiao')).toHaveLength(2)
     expect(screen.getAllByText('tenant-acme-logistics')).toHaveLength(2)
-    expect(screen.getAllByText('operator')).toHaveLength(2)
+    expect(screen.getAllByText('员工')).toHaveLength(2)
     expect(bridge.autoConnect).toHaveBeenCalledWith()
     expect(bridge.request).toHaveBeenCalledWith({
       method: 'GET',
@@ -78,9 +78,8 @@ describe('EnterpriseClientApp authority lifecycle', () => {
     expect(await screen.findByText('企业会话已失效，请重新连接')).toBeTruthy()
     await waitFor(() => expect(bridge.disconnect).toHaveBeenCalledWith('opaque-session'))
     expect(screen.queryByText('Lin Qiao')).toBeNull()
-    expect(screen.getByText('企业工作空间')).toBeTruthy()
-    expect(screen.getByText('正在解析租户范围')).toBeTruthy()
-    expect(screen.getByText('权限由服务端确定')).toBeTruthy()
+    expect(screen.getByTestId('enterprise-login-root')).toBeTruthy()
+    expect(screen.getByText('登录企业账号')).toBeTruthy()
   })
 
   it('does not release a session for a 403 authority denial', async () => {
