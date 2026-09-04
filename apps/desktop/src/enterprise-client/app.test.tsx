@@ -20,6 +20,7 @@ const IDENTITY = {
       workflows: { available: true }
     }
   },
+  effective_permissions: ['*'],
   name: 'Lin Qiao',
   principal_id: 'principal-operator-042',
   product_capabilities: { knowledge_rag: { enabled: true, status: 'LIVE' } },
@@ -69,9 +70,9 @@ describe('EnterpriseClientApp authority lifecycle', () => {
     expect(screen.getAllByText('Lin Qiao')).toHaveLength(2)
     expect(screen.getAllByText('tenant-acme-logistics')).toHaveLength(2)
     expect(screen.getAllByText('员工')).toHaveLength(3)
-    expect(screen.getByRole('button', { name: '企业会话' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '人工接管' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '业务运营' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '我的任务' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '企业会话' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '人工接管' })).toBeNull()
     expect(screen.queryByRole('button', { name: '企业知识' })).toBeNull()
     expect(screen.queryByRole('button', { name: '员工与权限' })).toBeNull()
     expect(bridge.autoConnect).toHaveBeenCalledWith()

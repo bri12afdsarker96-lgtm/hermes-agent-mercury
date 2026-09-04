@@ -13,7 +13,9 @@ import { KnowledgePage } from './knowledge-page'
 import { EnterpriseLoginPage } from './login-page'
 import {
   enterpriseRoleLabel,
+  enterpriseWorkspaces,
   enterpriseWorkbenchPresentation,
+  type EnterpriseWorkspaceDefinition,
   type EnterpriseWorkspaceId
 } from './role-presentation'
 import {
@@ -38,22 +40,7 @@ interface ClientSnapshot {
   metrics: EnterpriseMetrics
 }
 
-interface WorkspaceDefinition {
-  description: string
-  glyph: string
-  id: WorkspaceId
-  label: string
-}
-
-const WORKSPACES: readonly WorkspaceDefinition[] = [
-  { description: '查看企业运行状态与身份范围', glyph: '01', id: 'workbench', label: '工作台' },
-  { description: '使用 Hermes runtime 的智能协作能力', glyph: '02', id: 'assistant', label: 'AI 助理' },
-  { description: '查看企业会话的投递事实', glyph: '03', id: 'conversations', label: '企业会话' },
-  { description: '处理经授权的人工协同事项', glyph: '04', id: 'handoffs', label: '人工接管' },
-  { description: '管理获授权的企业知识工作流', glyph: '05', id: 'knowledge', label: '企业知识' },
-  { description: '查看任务、提醒与业务跟进事实', glyph: '06', id: 'reminders', label: '业务运营' },
-  { description: '查看员工权限、能力与治理事实', glyph: '07', id: 'governance', label: '员工与权限' }
-]
+type WorkspaceDefinition = EnterpriseWorkspaceDefinition
 
 const ALWAYS_VISIBLE_WORKSPACES = new Set<WorkspaceId>(['assistant', 'workbench'])
 
@@ -72,7 +59,7 @@ const SERVER_SURFACE_BY_WORKSPACE: Partial<Record<WorkspaceId, string>> = {
 function workspacesFor(identity: EnterpriseIdentity | undefined): WorkspaceDefinition[] {
   const surfaces = identity?.desktop_surfaces?.surfaces
 
-  return WORKSPACES.filter(workspace => {
+  return enterpriseWorkspaces(identity).filter(workspace => {
     if (ALWAYS_VISIBLE_WORKSPACES.has(workspace.id)) {
       return true
     }
