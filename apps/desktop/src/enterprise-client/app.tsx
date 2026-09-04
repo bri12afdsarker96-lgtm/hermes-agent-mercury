@@ -24,6 +24,7 @@ import {
   type EnterpriseIdentity,
   type EnterpriseMetrics
 } from './runtime'
+import { enterpriseSessionDisposition } from './session-policy'
 import { canReadMetricAggregation, workbenchAggregate } from './workbench-metrics'
 import { WorkflowsPage } from './workflows-page'
 
@@ -188,21 +189,36 @@ export function EnterpriseClientApp() {
   const [connectionState, setConnectionState] = useState<ConnectionState>('unavailable')
   const [error, setError] = useState<string | null>(null)
   const [snapshot, setSnapshot] = useState<ClientSnapshot | null>(null)
+  const generationRef = useRef(0)
   const runtimeRef = useRef<EnterpriseClientRuntime | null>(null)
 
   const releaseRuntime = useCallback(() => {
+    generationRef.current += 1
     const runtime = runtimeRef.current
     runtimeRef.current = null
     void runtime?.disconnect()
   }, [])
 
   const refresh = useCallback(async () => {
+    const generation = generationRef.current + 1
+    generationRef.current = generation
     setConnectionState('loading')
     setError(null)
-    let runtime: EnterpriseClientRuntime | null = runtimeRef.current
+
+    const existingRuntime = runtimeRef.current
+    let runtime: EnterpriseClientRuntime | null = existingRuntime
 
     try {
       runtime = runtime ?? (await connectEnterpriseClient())
+
+      if (generation !== generationRef.current) {
+        if (runtime !== existingRuntime) {
+          await runtime.disconnect()
+        }
+
+        return
+      }
+
       runtimeRef.current = runtime
 
       const [health, identity] = await Promise.all([
@@ -214,16 +230,27 @@ export function EnterpriseClientApp() {
         ? await runtime.get<EnterpriseMetrics>('/api/metrics?window=24h').catch(() => ({}))
         : {}
 
+      if (generation !== generationRef.current) {
+        return
+      }
+
       setSnapshot({ health, identity, metrics })
       setConnectionState('ready')
     } catch (reason) {
-      void runtime?.disconnect()
-
-      if (runtimeRef.current === runtime) {
-        runtimeRef.current = null
+      if (generation !== generationRef.current) {
+        return
       }
 
-      setSnapshot(null)
+      if (enterpriseSessionDisposition(reason) === 'release-and-clear') {
+        void runtime?.disconnect()
+
+        if (runtimeRef.current === runtime) {
+          runtimeRef.current = null
+        }
+
+        setSnapshot(null)
+      }
+
       setConnectionState('error')
       setError(reason instanceof Error ? reason.message : 'cannot connect to enterprise service')
     }
