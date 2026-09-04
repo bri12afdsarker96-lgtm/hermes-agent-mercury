@@ -51,6 +51,20 @@ test('desktop packaging and renderer ship the enterprise brand artwork', () => {
   ])
 })
 
+test('the shared desktop shell uses HarmonyOS Sans SC as its sole bundled UI font', () => {
+  const styles = fs.readFileSync(path.join(desktopRoot, 'src', 'styles.css'), 'utf8')
+  assert.match(styles, /font-family: 'HarmonyOS Sans SC'/)
+  assert.doesNotMatch(styles, /Source Han Sans CN|SourceHanSansCN/)
+
+  for (const weight of ['Light', 'Regular', 'Medium', 'Bold']) {
+    assert.equal(
+      fs.existsSync(path.join(desktopRoot, 'src', 'fonts', `HarmonyOS_Sans_SC_${weight}.ttf`)),
+      true,
+      `HarmonyOS Sans SC ${weight} must ship with the desktop client`
+    )
+  }
+})
+
 test('upstream MIT attribution remains present', () => {
   const license = fs.readFileSync(path.join(repositoryRoot, 'LICENSE'), 'utf8')
   assert.match(license, /MIT License/)

@@ -54,8 +54,13 @@ export function isRemoteReauthError(error: string | null | undefined): boolean {
 
   return (
     text.includes('remote gateway session has expired') ||
+    text.includes('远程企业服务会话已失效') ||
+    text.includes('hermes 企业服务会话已失效') ||
     text.includes('gateway sign-in required') ||
     text.includes('needs oauth login') ||
+    text.includes('需要身份验证') ||
+    text.includes('尚未登录') ||
+    text.includes('请重新登录') ||
     (text.includes('oauth') && (text.includes('not signed in') || text.includes('sign in')))
   )
 }

@@ -105,19 +105,11 @@ design. Porting any of them was rejected.
 
 ## Typography
 
-The design's brand face is rejected for licensing. The approved replacement is
-**Source Han Sans CN (思源黑体)** from Adobe's official `adobe-fonts/source-han-sans`
-release **2.005R**. The bundled file is the official CN region-specific variable
-WOFF2 at `Variable/WOFF2/OTF/Subset/SourceHanSansCN-VF.otf.woff2`, stored locally
-as `src/fonts/SourceHanSansCN-VF.woff2`; the upstream Git blob SHA is
-`f87772cec1747734cbea16204ae99e4f2cc06713`. The accompanying Adobe OFL-1.1
-license is `src/fonts/LICENSE-SourceHanSansCN.txt` (upstream blob
-`3ff0ccaba06857bf292ade9a50f16a0f02b3b8d4`). No runtime CDN is used.
-
-One variable file covers the approved UI's 400–700 weights and avoids shipping
-duplicate static CJK font binaries. Only the Enterprise Console opts in through
-`ui/console.css`; core Mercury typography remains unchanged. No substitute font
-is renamed or aliased to the Source Han family.
+The design's commercial brand face is rejected for licensing. The approved
+replacement is **HarmonyOS Sans SC**, bundled as Huawei's original, unmodified
+Light, Regular, Medium and Bold files. It is the interface face for both the
+shared desktop shell and Enterprise Console; its distribution terms and source
+record are retained in `HARMONYOS_SANS_PROVENANCE.md`. No runtime CDN is used.
 
 ## Function truth is unchanged by this layer
 

@@ -2,6 +2,9 @@ import { normalize } from '@/lib/text'
 
 import type { Locale } from './types'
 
+// Shared desktop infrastructure remains English-first for upstream reuse and
+// isolated tests. The Hermes 企业助手 entry point explicitly supplies its
+// Chinese-first product locale instead.
 export const DEFAULT_LOCALE: Locale = 'en'
 
 export const LOCALE_OPTIONS = [

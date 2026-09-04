@@ -254,17 +254,10 @@ Notes:
   `@font-face` rules live at the top of `src/styles.css`, the files in
   `src/fonts/`, and each face carries its licence.
 - **JetBrains Mono** (Apache-2.0) is the bundled terminal/code face.
-- **Source Han Sans CN / 思源黑体** (SIL OFL-1.1,
-  `src/fonts/LICENSE-SourceHanSansCN.txt`) is the bundled CJK face, taken from
-  Adobe's official `adobe-fonts/source-han-sans` 2.005R release. The exact CN
-  region-specific variable WOFF2 is stored as `src/fonts/SourceHanSansCN-VF.woff2`
-  and covers the approved UI's 400–700 weights in one file.
-- The face is declared globally but **opted into per surface** — today only the
-  Enterprise Console (`plugins/enterprise-console/ui/console.css`), whose
-  product copy is Simplified Chinese. `--dt-font-sans` is unchanged, so core
-  typography is unaffected; an unused `@font-face` costs nothing. If a second
-  surface needs CJK, opt it in the same way rather than changing the global
-  stack, which would restyle the whole app.
+- **HarmonyOS Sans SC** is the product-wide interface face, including the
+  shared desktop shell and Enterprise Console. Its four original, unmodified
+  weight files and Huawei licence notice live in `src/fonts/`; see
+  `docs/enterprise-console/HARMONYOS_SANS_PROVENANCE.md`.
 - Adding a face means adding its licence file in the same change. A typeface
   without a licence in-tree does not ship.
 
