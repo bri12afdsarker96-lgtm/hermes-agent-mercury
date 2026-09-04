@@ -14,9 +14,9 @@ import { EnterpriseLoginPage } from './login-page'
 import {
   enterpriseRoleLabel,
   enterpriseWorkbenchPresentation,
-  enterpriseWorkspaces,
   type EnterpriseWorkspaceDefinition,
-  type EnterpriseWorkspaceId
+  type EnterpriseWorkspaceId,
+  enterpriseWorkspaces
 } from './role-presentation'
 import {
   beginEnterpriseLogin,
