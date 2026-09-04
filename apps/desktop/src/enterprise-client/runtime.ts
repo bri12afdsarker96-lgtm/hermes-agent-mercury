@@ -69,7 +69,16 @@ export async function beginEnterpriseLogin(): Promise<EnterpriseLoginResult> {
   }
 }
 
-export async function connectEnterpriseClient(): Promise<EnterpriseClientRuntime> {
+export interface EnterpriseClientOptions {
+  /**
+   * The shell owns the opaque session lifecycle. Pages may only use the
+   * runtime; a confirmed session expiry is reported here for the shell to
+   * release it.
+   */
+  onAuthenticationRequired?: (reason: EnterpriseClientError) => void
+}
+
+export async function connectEnterpriseClient(options: EnterpriseClientOptions = {}): Promise<EnterpriseClientRuntime> {
   const bridge = window.hermesDesktop?.enterprise
 
   if (!bridge) {
@@ -101,11 +110,13 @@ export async function connectEnterpriseClient(): Promise<EnterpriseClientRuntime
 
       return response.data as T
     } catch (reason) {
-      if (reason instanceof EnterpriseClientError) {
-        throw reason
+      const clientError = reason instanceof EnterpriseClientError ? reason : enterpriseNetworkError()
+
+      if (clientError.kind === 'authentication_required') {
+        options.onAuthenticationRequired?.(clientError)
       }
 
-      throw enterpriseNetworkError()
+      throw clientError
     }
   }
 
