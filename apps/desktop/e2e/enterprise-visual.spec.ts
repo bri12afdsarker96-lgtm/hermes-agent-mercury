@@ -65,8 +65,15 @@ const ENTERPRISE_RESPONSES = {
     ],
   },
   '/api/whoami': {
-    capability_revision: 42,
+  capability_revision: 42,
     data_scope: { mode: 'tenant', scopes: ['tenant:acme-logistics'] },
+    desktop_surfaces: {
+      schema_version: 1,
+      surfaces: {
+        knowledge: { available: true },
+        workflows: { available: true },
+      },
+    },
     effective_permissions: ['*'],
     name: 'Lin Qiao',
     principal_id: 'principal-operator-042',
