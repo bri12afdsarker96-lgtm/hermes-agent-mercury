@@ -56,7 +56,7 @@ describe('EnterpriseClientApp authority lifecycle', () => {
     await screen.findAllByText('企业服务已连接')
     expect(screen.getAllByText('Lin Qiao')).toHaveLength(2)
     expect(screen.getAllByText('tenant-acme-logistics')).toHaveLength(2)
-    expect(screen.getAllByText('员工')).toHaveLength(2)
+    expect(screen.getAllByText('员工')).toHaveLength(3)
     expect(bridge.autoConnect).toHaveBeenCalledWith()
     expect(bridge.request).toHaveBeenCalledWith({
       method: 'GET',
