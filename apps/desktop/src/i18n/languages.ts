@@ -2,10 +2,10 @@ import { normalize } from '@/lib/text'
 
 import type { Locale } from './types'
 
-// Hermes-企业助手 is a Chinese-first enterprise product. Other bundled locales
-// remain selectable, but a fresh or malformed configuration must never fall
-// back to an English first paint.
-export const DEFAULT_LOCALE: Locale = 'zh'
+// Shared desktop infrastructure remains English-first for upstream reuse and
+// isolated tests. The Hermes 企业助手 entry point explicitly supplies its
+// Chinese-first product locale instead.
+export const DEFAULT_LOCALE: Locale = 'en'
 
 export const LOCALE_OPTIONS = [
   {
