@@ -17,6 +17,7 @@ import {
   enterpriseWorkspaces
 } from './role-presentation'
 import {
+  beginEnterpriseLogin,
   connectEnterpriseClient,
   type EnterpriseClientRuntime,
   type EnterpriseHealth,
@@ -228,6 +229,21 @@ export function EnterpriseClientApp() {
     }
   }, [])
 
+  const beginLogin = useCallback(async () => {
+    setConnectionState('loading')
+    setError(null)
+
+    const result = await beginEnterpriseLogin()
+
+    if (!result.ok) {
+      setConnectionState('error')
+      setError('无法启动企业身份登录，请确认客户端已由管理员完成企业服务配置。')
+      return
+    }
+
+    await refresh()
+  }, [refresh])
+
   useEffect(() => {
     document.title = 'Hermes Enterprise'
     void refresh()
@@ -251,7 +267,7 @@ export function EnterpriseClientApp() {
       <EnterpriseLoginPage
         busy={connectionState === 'loading'}
         error={error}
-        onRetry={() => void refresh()}
+        onLogin={() => void beginLogin()}
         status={humanConnectionState(connectionState)}
       />
     )

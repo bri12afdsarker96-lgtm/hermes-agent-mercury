@@ -5,13 +5,13 @@ import { EnterpriseLoginPage } from './login-page'
 
 describe('EnterpriseLoginPage', () => {
   it('uses the owned Chinese enterprise entry and delegates authentication to its controller', () => {
-    const onRetry = vi.fn()
+    const onLogin = vi.fn()
 
     render(
       <EnterpriseLoginPage
         busy={false}
         error={null}
-        onRetry={onRetry}
+        onLogin={onLogin}
         status="等待连接企业服务"
       />
     )
@@ -22,7 +22,7 @@ describe('EnterpriseLoginPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '使用企业账号登录' }))
 
-    expect(onRetry).toHaveBeenCalledOnce()
+    expect(onLogin).toHaveBeenCalledOnce()
   })
 
   it('makes the connecting state non-repeatable', () => {
@@ -30,7 +30,7 @@ describe('EnterpriseLoginPage', () => {
       <EnterpriseLoginPage
         busy
         error={null}
-        onRetry={vi.fn()}
+        onLogin={vi.fn()}
         status="正在连接企业服务"
       />
     )

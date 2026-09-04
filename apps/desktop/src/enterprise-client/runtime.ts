@@ -51,6 +51,24 @@ export interface EnterpriseClientRuntime {
   post?<T>(path: string, body: unknown): Promise<T>
 }
 
+export type EnterpriseLoginResult = { ok: true } | { code: string; message: string; ok: false }
+
+/** Starts the configured, main-owned PKCE flow without exposing any auth
+ * material or endpoint selection to the renderer. */
+export async function beginEnterpriseLogin(): Promise<EnterpriseLoginResult> {
+  const bridge = window.hermesDesktop?.enterprise
+
+  if (!bridge) {
+    return { code: 'bridge_unavailable', message: 'enterprise desktop bridge is unavailable', ok: false }
+  }
+
+  try {
+    return await bridge.beginLogin()
+  } catch {
+    return { code: 'gateway_unavailable', message: 'enterprise gateway is unavailable', ok: false }
+  }
+}
+
 export async function connectEnterpriseClient(): Promise<EnterpriseClientRuntime> {
   const bridge = window.hermesDesktop?.enterprise
 

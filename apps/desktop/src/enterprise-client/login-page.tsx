@@ -3,7 +3,7 @@ import hermesMark from './assets/hermes-mark.svg'
 export interface EnterpriseLoginPageProps {
   busy: boolean
   error: string | null
-  onRetry: () => void
+  onLogin: () => void
   status: string
 }
 
@@ -12,7 +12,7 @@ export interface EnterpriseLoginPageProps {
  * Hermes_AI: the renderer never asks for or retains a token, password, or a
  * self-registration identity.
  */
-export function EnterpriseLoginPage({ busy, error, onRetry, status }: EnterpriseLoginPageProps) {
+export function EnterpriseLoginPage({ busy, error, onLogin, status }: EnterpriseLoginPageProps) {
   return (
     <main className="hesc-login" data-testid="enterprise-login-root">
       <header className="hesc-login-titlebar">
@@ -56,7 +56,7 @@ export function EnterpriseLoginPage({ busy, error, onRetry, status }: Enterprise
             {status}
           </div>
           {error ? <p className="hesc-login-error">{error}</p> : null}
-          <button className="hesc-login-action" disabled={busy} onClick={onRetry} type="button">
+          <button className="hesc-login-action" disabled={busy} onClick={onLogin} type="button">
             {busy ? '正在验证企业身份…' : '使用企业账号登录'}
           </button>
           <p className="hesc-login-help">企业连接由受控桌面身份通道发起。本客户端不提供自助注册，请联系企业管理员开通或恢复账号。</p>

@@ -12909,7 +12909,12 @@ async function fetchJsonForBackend(
 }
 
 ipcMain.handle('hermes:connection-config:probe', async (_event, rawUrl) => probeRemoteAuthMode(rawUrl))
-ipcMain.handle('hermes:connection-config:oauth-login', async (_event, rawUrl) => {
+
+// One implementation for both Settings' explicit gateway sign-in and the
+// product-owned Enterprise Desktop entry. The latter supplies a main-resolved
+// connection below, so no renderer can turn this into an arbitrary OAuth URL
+// launcher or receive the resulting bearer.
+async function signInToRemoteGateway(rawUrl) {
   // Capability-gated login (RFC 8252). Probe the gateway's public /api/status:
   //   - advertises "native_pkce" in auth_flows → run the system-browser +
   //     loopback + PKCE flow. No embedded webview, tokens held by the app
@@ -12974,7 +12979,9 @@ ipcMain.handle('hermes:connection-config:oauth-login', async (_event, rawUrl) =>
   }
 
   return { ok: true, baseUrl, connected }
-})
+}
+
+ipcMain.handle('hermes:connection-config:oauth-login', async (_event, rawUrl) => signInToRemoteGateway(rawUrl))
 ipcMain.handle('hermes:connection-config:oauth-logout', async (_event, rawUrl) => {
   const baseUrl = rawUrl ? normalizeRemoteBaseUrl(rawUrl) : ''
   await clearOauthSession(baseUrl || undefined)
@@ -13501,6 +13508,51 @@ function destroyAllEnterpriseSessions(): void {
 
   enterpriseWiredSenders.clear()
 }
+
+// First-enterprise-login remains a native, main-owned operation. The renderer
+// cannot provide a URL, token, password, or identity; it merely asks this
+// already-configured desktop to start the existing PKCE flow. Requiring an
+// OAuth remote route and a trusted enterprise origin prevents a successful
+// gateway login from being presented as a usable enterprise session when the
+// second authority plane has not been configured.
+ipcMain.handle('hermes:enterprise:begin-login', async (event) => {
+  if (!isEnterpriseClientSender(event.sender)) {
+    return { code: 'forbidden_sender', message: 'enterprise login unavailable', ok: false }
+  }
+
+  const enterpriseOrigin = normalizeEnterpriseApiOriginOrNull(
+    resolveEnterpriseOriginCandidate({
+      processEnv: process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN,
+      windowsUserEnvReader: () => readWindowsUserEnvVar('HERMES_DESKTOP_ENTERPRISE_ORIGIN')
+    })
+  )
+
+  if (!enterpriseOrigin) {
+    return { code: 'no_enterprise_origin', message: 'enterprise API origin is not configured', ok: false }
+  }
+
+  let remote
+
+  try {
+    remote = await resolveRemoteBackend(primaryProfileKey())
+  } catch {
+    return { code: 'gateway_unavailable', message: 'enterprise gateway is not configured', ok: false }
+  }
+
+  if (!remote?.baseUrl || remote.authMode !== 'oauth') {
+    return { code: 'no_oauth_gateway', message: 'enterprise OAuth gateway is not configured', ok: false }
+  }
+
+  try {
+    const result = await signInToRemoteGateway(remote.baseUrl)
+
+    return result.connected
+      ? { ok: true }
+      : { code: 'login_not_completed', message: 'enterprise login was not completed', ok: false }
+  } catch {
+    return { code: 'gateway_unavailable', message: 'enterprise gateway is unavailable', ok: false }
+  }
+})
 
 // B16-OL · One-login. Establish the enterprise session ENTIRELY in main from the
 // existing native OAuth bearer — no URL/token pasted in the renderer, no bearer
