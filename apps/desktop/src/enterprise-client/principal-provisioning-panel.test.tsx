@@ -56,7 +56,7 @@ describe('PrincipalProvisioningPanel', () => {
     expect(screen.queryByText('initial-token-once')).toBeNull()
   })
 
-  it('lets a tenant admin reject a pending request without retaining a credential', async () => {
+  it('lets a tenant admin reject with an allowlisted reason without retaining a credential', async () => {
     const get = vi.fn(async () => ({
       requests: [{ request_id: 'request-1', requested_name: '未入职员工', requested_role: 'operator', status: 'pending' }]
     }))
@@ -71,12 +71,18 @@ describe('PrincipalProvisioningPanel', () => {
 
     render(<PrincipalProvisioningPanel identity={identity('tenant_admin')} runtime={runtime} />)
 
+    fireEvent.change(await screen.findByRole('combobox', { name: '为 未入职员工 选择驳回理由' }), {
+      target: { value: 'position_not_approved' }
+    })
     fireEvent.click(await screen.findByRole('button', { name: '驳回申请' }))
 
     await waitFor(() => {
-      expect(post).toHaveBeenCalledWith('/api/principal-provisioning-reject', { request_id: 'request-1' })
+      expect(post).toHaveBeenCalledWith('/api/principal-provisioning-reject', {
+        request_id: 'request-1',
+        reason: 'position_not_approved'
+      })
     })
-    expect(await screen.findByText('员工申请已驳回；系统未创建账号或初始令牌。')).toBeTruthy()
+    expect(await screen.findByText('员工申请已因“岗位尚未批准”驳回；系统未创建账号或初始令牌。')).toBeTruthy()
     expect(screen.queryByText('initial-token-once')).toBeNull()
   })
 
