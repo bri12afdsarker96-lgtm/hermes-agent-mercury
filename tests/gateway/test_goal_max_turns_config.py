@@ -51,6 +51,10 @@ async def test_gateway_goal_uses_goals_max_turns_from_full_config(tmp_path, monk
         message_id="msg-goal-config",
     )
 
+    # Pre-warm from sync context: the /goal handler runs on the event loop,
+    # where a cold cache only waits the bounded bootstrap window — under CI
+    # load the goal write can be dropped and the state assertion flakes.
+    goals._get_session_db()
     response = await GatewayRunner._handle_goal_command(runner, event)
 
     try:
