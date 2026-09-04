@@ -183,6 +183,7 @@ declare global {
        * `{ path, method, body }`. Optional: absent outside the desktop shell.
        */
       enterprise?: {
+        beginLogin: () => Promise<{ ok: true } | { code: string; message: string; ok: false }>
         autoConnect: () => Promise<
           { baseUrl: string; ok: true; sessionId: string } | { code: string; message: string; ok: false }
         >

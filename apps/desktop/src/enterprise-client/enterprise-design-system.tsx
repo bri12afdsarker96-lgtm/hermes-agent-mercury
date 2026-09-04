@@ -73,16 +73,18 @@ export function EnterpriseClientShell({
       <header className="hesc-titlebar">
         <img alt="" aria-hidden="true" className="hesc-brand-mark" src={hermesMark} />
         <strong className="hesc-product-name">{productName}</strong>
-        <span className="hesc-product-channel">{productChannel}</span>
         <div className="hesc-title-spacer" />
         <span className="hesc-connection-dot" data-state={indicatorState} />
         <span className="hesc-title-status">{connectionStatus}</span>
       </header>
 
       <aside className="hesc-sidebar">
-        <div className="hesc-sidebar-identity">
-          <strong>{identityName}</strong>
-          <span>{tenantLabel}</span>
+        <div className="hesc-sidebar-brand">
+          <img alt="" aria-hidden="true" className="hesc-sidebar-mark" src={hermesMark} />
+          <span>
+            <strong>Hermes</strong>
+            <small>{productChannel}</small>
+          </span>
         </div>
         <nav aria-label={navigationLabel} className="hesc-nav">
           {workspaces.map(workspace => (
@@ -102,17 +104,42 @@ export function EnterpriseClientShell({
       </aside>
 
       <header className="hesc-topbar">
-        <div className="hesc-breadcrumb">
-          {productName} / <strong>{activeWorkspace.label}</strong>
+        <div className="hesc-tenant">
+          <span aria-hidden="true" className="hesc-tenant-icon">
+            企
+          </span>
+          <span className="hesc-tenant-name">{tenantLabel}</span>
+          <span aria-hidden="true" className="hesc-chevron">
+            ▾
+          </span>
         </div>
-        <div className="hesc-topbar-scope">{scopeLabel}</div>
+        <div aria-label="全局搜索尚未接入" className="hesc-search" role="status">
+          <span>搜索会话、任务、知识、员工等</span>
+          <small>暂未接入</small>
+        </div>
+        <div className="hesc-account">
+          <span aria-hidden="true" className="hesc-avatar">
+            {identityName.slice(0, 1)}
+          </span>
+          <span className="hesc-account-name">{identityName}</span>
+          <span className="hesc-role">{scopeLabel}</span>
+        </div>
       </header>
 
       <main className="hesc-main">{children}</main>
 
       <footer className="hesc-statusbar">
+        <span className="hesc-health" data-state={indicatorState}>
+          <span aria-hidden="true" className="hesc-connection-dot" data-state={indicatorState} />
+          {connectionStatus}
+        </span>
+        <span className="hesc-status-item">
+          <span>身份</span>
+          <strong>{scopeLabel}</strong>
+        </span>
+        <span className="hesc-status-spacer" />
         <span>{statusbarLabel}</span>
-        <code>{statusbarDetail}</code>
+        <span className="hesc-status-detail">{statusbarDetail}</span>
       </footer>
     </div>
   )

@@ -980,6 +980,19 @@ test('connection-config save and apply IPC handlers route payloads through coerc
   }
 })
 
+test('enterprise login remains a main-owned, configured OAuth operation', () => {
+  const source = readMain()
+  const handlerStart = source.indexOf("ipcMain.handle('hermes:enterprise:begin-login'")
+
+  assert.notEqual(handlerStart, -1, 'enterprise login IPC handler must exist')
+  const handlerBody = source.slice(handlerStart, handlerStart + 2600)
+  assert.match(handlerBody, /isEnterpriseClientSender\(event\.sender\)/)
+  assert.match(handlerBody, /resolveDesktopRemoteRoute\(\{/)
+  assert.match(handlerBody, /signInToRemoteGateway\(gatewayRoute\.url\)/)
+  assert.match(handlerBody, /rememberLog\('\[enterprise-login\] native sign-in requested'\)/)
+  assert.doesNotMatch(handlerBody, /event\.sender.*url|payload.*url/)
+})
+
 test('whenReady enables basic password-store encryption before createWindow', () => {
   const source = readMain()
   const enableIndex = source.indexOf('enableBasicPasswordStoreEncryption({')

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { BusinessTasksPanel } from './business-tasks-panel'
 import { RemindersPanel } from './reminders-panel'
+import { enterpriseWorkflowPresentation } from './role-presentation'
 import type { EnterpriseClientRuntime } from './runtime'
 
 interface Followup {
@@ -66,9 +67,11 @@ function stateLabel(state: LoadState): string {
 
 export function WorkflowsPage({
   principalId,
+  role,
   runtime
 }: {
   principalId?: string
+  role?: string
   runtime: EnterpriseClientRuntime | null
 }) {
   const [error, setError] = useState<string | null>(null)
@@ -79,6 +82,7 @@ export function WorkflowsPage({
   const [historyState, setHistoryState] = useState<LoadState>('unavailable')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [state, setState] = useState<LoadState>('unavailable')
+  const presentation = enterpriseWorkflowPresentation(role)
 
   useEffect(() => {
     let active = true
@@ -209,8 +213,10 @@ export function WorkflowsPage({
     <section className="hesc-page" data-testid="enterprise-client-workflows">
       <header className="hesc-page-header">
         <div>
-          <h1>工作流</h1>
-          <p>展示 Hermes_AI 的业务跟进事实和状态历史。创建、确认、转交及提醒调度仍由已授权的服务端工作流负责。</p>
+          <h1>{presentation.title}</h1>
+          <p>
+            {presentation.purpose} 创建、确认、转交及提醒调度仍由已授权的企业服务状态机负责。
+          </p>
         </div>
         <span
           className="hesc-status"
