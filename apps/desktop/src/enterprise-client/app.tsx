@@ -24,8 +24,8 @@ import {
   type EnterpriseIdentity,
   type EnterpriseMetrics
 } from './runtime'
-import { canReadMetricAggregation, workbenchAggregate } from './workbench-metrics'
 import { enterpriseSessionDisposition } from './session-policy'
+import { canReadMetricAggregation, workbenchAggregate } from './workbench-metrics'
 import { WorkflowsPage } from './workflows-page'
 
 type ConnectionState = 'error' | 'loading' | 'ready' | 'unavailable'
