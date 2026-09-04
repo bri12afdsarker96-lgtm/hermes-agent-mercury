@@ -13,8 +13,8 @@ import { KnowledgePage } from './knowledge-page'
 import { EnterpriseLoginPage } from './login-page'
 import {
   enterpriseRoleLabel,
-  enterpriseWorkspaces,
   enterpriseWorkbenchPresentation,
+  enterpriseWorkspaces,
   type EnterpriseWorkspaceDefinition,
   type EnterpriseWorkspaceId
 } from './role-presentation'
