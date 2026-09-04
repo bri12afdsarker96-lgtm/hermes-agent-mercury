@@ -41,7 +41,13 @@ function makeFakeServerFactory(port = 51234) {
 
   // Drive a synthetic browser hit to the loopback callback.
   state.hitCallback = (query: string) => {
-    const res: any = { writeHead: () => undefined, end: () => undefined }
+    const res: any = {
+      writeHead: () => undefined,
+      end: (body: string) => {
+        state.callbackHtml = body
+      }
+    }
+
     state.handler({ url: `/callback?${query}` }, res)
   }
 
@@ -98,6 +104,8 @@ test('runNativeLogin completes the loopback round trip and returns tokens', asyn
   // The token POST carried the code + a verifier whose hash is the challenge.
   assert.equal(tokenPostBody.code, 'gw-code-1')
   assert.ok(tokenPostBody.code_verifier && tokenPostBody.code_verifier.length >= 43)
+  assert.match(state.callbackHtml, /已成功登录 Hermes 企业助手/)
+  assert.match(state.callbackHtml, /返回客户端/)
   // Listener was cleaned up.
   assert.equal(state.closed, true)
 })

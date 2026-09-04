@@ -2,7 +2,10 @@ import { normalize } from '@/lib/text'
 
 import type { Locale } from './types'
 
-export const DEFAULT_LOCALE: Locale = 'en'
+// Hermes-企业助手 is a Chinese-first enterprise product. Other bundled locales
+// remain selectable, but a fresh or malformed configuration must never fall
+// back to an English first paint.
+export const DEFAULT_LOCALE: Locale = 'zh'
 
 export const LOCALE_OPTIONS = [
   {

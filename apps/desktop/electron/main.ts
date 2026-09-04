@@ -6745,7 +6745,7 @@ function openOauthLoginWindow(baseUrl, { silent = false } = {}) {
       win = new BrowserWindow({
         width: 520,
         height: 720,
-        title: silent ? 'Connecting to Hermes Cloud agent…' : 'Sign in to Hermes gateway',
+        title: silent ? '正在连接 Hermes 企业服务…' : '登录企业服务',
         autoHideMenuBar: true,
         // Silent cascade: start HIDDEN. The auto-SSO 302 chain completes in
         // well under a second, so the window normally never needs to show. We
@@ -7678,7 +7678,7 @@ function openPortalLoginWindow() {
       win = new BrowserWindow({
         width: 520,
         height: 720,
-        title: 'Sign in to Hermes Cloud',
+        title: '登录 Hermes 企业服务',
         autoHideMenuBar: true,
         webPreferences: {
           contextIsolation: true,
@@ -7778,7 +7778,7 @@ async function discoverCloudAgents(org?: string) {
       // recover it) — surface it as a re-login, not a generic failure.
       if (error && error.statusCode === 401) {
         const err = new Error(
-          'Your Hermes Cloud session has expired. Open Settings → Gateway and sign in again.'
+          'Hermes 企业服务会话已失效。请打开“设置 → 网关”后重新登录。'
         ) as any
 
         err.needsCloudLogin = true
@@ -7886,7 +7886,7 @@ async function cloudAgentSilentSignIn(dashboardUrl) {
   // interactive prompt rather than a silent cascade. Discovery already gates on
   // this, but a selection can arrive after the session lapsed.
   if (!(await hasLivePortalSession())) {
-    const err = new Error('Your Hermes Cloud session has expired. Sign in to Hermes Cloud again.') as any
+    const err = new Error('Hermes 企业服务会话已失效，请重新登录。') as any
     err.needsCloudLogin = true
     throw err
   }
@@ -8715,8 +8715,8 @@ async function buildRemoteConnection(
       oauthGuardMayHardFail(await gatewayAuthProviders(baseUrl, remoteHeaders))
     ) {
       const err = new Error(
-        'Remote Hermes gateway uses OAuth, but you are not signed in. ' +
-          'Open Settings → Gateway and click "Sign in", or switch back to Local.'
+        '远程企业服务需要身份验证，但当前尚未登录。' +
+          '请打开“设置 → 网关”并点击“登录”，或切回本地服务。'
       ) as any
 
       err.needsOauthLogin = true
@@ -8730,8 +8730,8 @@ async function buildRemoteConnection(
     } catch (error) {
       throw gatewayTicketFailure(
         error,
-        'Your remote gateway session has expired. Open Settings → Gateway and click "Sign in" again.',
-        'Could not reach the remote Hermes gateway while refreshing its WebSocket ticket. Try reconnecting.'
+        '远程企业服务会话已失效。请打开“设置 → 网关”，然后重新登录。',
+        '刷新 WebSocket 访问凭据时无法连接远程企业服务，请检查网络后重试。'
       )
     }
 
