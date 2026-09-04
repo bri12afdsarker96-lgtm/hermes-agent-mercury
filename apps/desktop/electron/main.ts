@@ -841,15 +841,17 @@ const WINDOW_BUTTON_POSITION = {
 // (pure + unit-testable); computeNativeOverlayWidth() applies it per platform.
 // It's only the pre-layout fallback — the renderer measures the exact overlay
 // width live via the Window Controls Overlay API.
-// The apple-touch PNG bakes in the macOS-style ~10% margin, which is correct
-// for the dock but renders visibly smaller than neighboring taskbar icons on
-// Windows, where icons are full-bleed. Windows prefers the full-bleed
-// assets/icon.ico (shipped to resources/ via extraResources) and only falls
-// back to the padded PNG if the ico is missing.
+// The product mark is a full-bleed, high-resolution Hermes asset. Windows
+// prefers its ICO container (shipped to resources/ via extraResources); the
+// PNG is the cross-platform fallback for development and web surfaces.
 const APP_ICON_PATHS = [
   ...(IS_WINDOWS
-    ? [path.join(process.resourcesPath ?? '', 'icon.ico'), path.join(APP_ROOT, 'assets', 'icon.ico')]
+    ? [
+        path.join(process.resourcesPath ?? '', 'brand-icon.ico'),
+        path.join(APP_ROOT, 'assets', 'brand', 'hermes-mark-hires.ico')
+      ]
     : []),
+  path.join(APP_ROOT, 'assets', 'brand', 'hermes-mark-hires.png'),
   path.join(APP_ROOT, 'public', 'apple-touch-icon.png'),
   path.join(APP_ROOT, 'dist', 'apple-touch-icon.png'),
   path.join(unpackedPathFor(APP_ROOT), 'dist', 'apple-touch-icon.png')
@@ -1210,7 +1212,7 @@ if (IS_WINDOWS) {
 app.setAboutPanelOptions({
   applicationName: APP_NAME,
   applicationVersion: resolveHermesVersion(),
-  copyright: 'Copyright © 2026 Nous Research · Hermes Agent (MIT License)'
+  copyright: 'Copyright © 2026 Nous Research · Hermes Agent (MIT License) · Includes HarmonyOS Sans Fonts'
 })
 
 // Custom scheme for streaming audio/video into the renderer. Local paths read
@@ -15058,7 +15060,7 @@ function showAboutPanelFresh() {
       applicationVersion: skew.outOfSync
         ? `${resolveHermesVersion()} — app build out of date, update the desktop app`
         : resolveHermesVersion(),
-      copyright: 'Copyright © 2026 Nous Research · Hermes Agent (MIT License)'
+      copyright: 'Copyright © 2026 Nous Research · Hermes Agent (MIT License) · Includes HarmonyOS Sans Fonts'
     })
     app.showAboutPanel()
   })

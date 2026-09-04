@@ -92,6 +92,40 @@
   src: url('./fonts/SourceHanSansCN-VF.woff2') format('woff2');
 }
 
+/* HarmonyOS Sans SC is our desktop product face. Original, unmodified font
+   files and Huawei's license notice are bundled under ./fonts/. */
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('./fonts/HarmonyOS_Sans_SC_Light.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/HarmonyOS_Sans_SC_Regular.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/HarmonyOS_Sans_SC_Medium.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/HarmonyOS_Sans_SC_Bold.ttf') format('truetype');
+}
+
 @theme inline {
   --color-background: var(--dt-background);
   --color-foreground: var(--dt-foreground);
@@ -423,7 +457,7 @@
     --dt-user-bubble-border: var(--ui-stroke-tertiary);
 
     --dt-font-sans:
-      'Segoe WPC', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif,
+      'HarmonyOS Sans SC', 'Segoe WPC', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif,
       'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', emoji;
     /* Key caps always use the native UI face — never theme typography overrides. */
     --dt-font-kbd: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;

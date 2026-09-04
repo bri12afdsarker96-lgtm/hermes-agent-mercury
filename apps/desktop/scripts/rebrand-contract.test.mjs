@@ -30,7 +30,11 @@ test('protocol identity stays upgrade-compatible while executable is rebranded',
 })
 
 test('desktop packaging and renderer ship the enterprise brand artwork', () => {
-  const binaryAssets = ['assets/icon.png', 'assets/icon.ico', 'assets/icon.icns', 'public/apple-touch-icon.png']
+  const binaryAssets = [
+    'assets/brand/hermes-mark-hires.png',
+    'assets/brand/hermes-mark-hires.ico',
+    'public/apple-touch-icon.png'
+  ]
   for (const relative of binaryAssets) {
     const asset = path.join(desktopRoot, relative)
     assert.equal(fs.existsSync(asset), true, `${relative} must exist`)
@@ -39,6 +43,12 @@ test('desktop packaging and renderer ship the enterprise brand artwork', () => {
 
   const brandMark = fs.readFileSync(path.join(desktopRoot, 'assets', 'brand', 'hermes-mark.svg'), 'utf8')
   assert.match(brandMark, /aria-label="Hermes"/)
+  assert.equal(packageJson.build.icon, 'assets/brand/hermes-mark-hires.png')
+  assert.equal(packageJson.build.win.icon, 'assets/brand/hermes-mark-hires.ico')
+  assert.deepEqual(packageJson.build.extraResources.slice(1), [
+    { from: 'assets/brand/hermes-mark-hires.ico', to: 'brand-icon.ico' },
+    { from: 'src/fonts/LICENSE-HarmonyOS-Sans.txt', to: 'licenses/LICENSE-HarmonyOS-Sans.txt' }
+  ])
 })
 
 test('upstream MIT attribution remains present', () => {

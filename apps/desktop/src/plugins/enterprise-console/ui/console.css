@@ -99,15 +99,14 @@
   --ec-focus-ring: color-mix(in srgb, var(--ui-accent) 55%, transparent);
 
   /* -- Typography --------------------------------------------------------
-     Exact Adobe Source Han Sans CN 2.005R (思源黑体), bundled locally under
-     OFL-1.1. Scoped to the console so core surfaces keep the host's own sans.
-     The host system stack remains the final fallback. */
-  font-family: 'Source Han Sans CN', var(--dt-font-sans);
+     HarmonyOS Sans SC, bundled as original Huawei font files with the
+     accompanying license. The host system stack remains the final fallback. */
+  font-family: 'HarmonyOS Sans SC', var(--dt-font-sans);
 }
 
 /* Bundled CJK metrics differ from the design's original commercial face, so the
    approved 13px body is pinned here rather than inherited: the design's density
-   depends on it, and Source Han's larger x-height would otherwise read heavier
+   depends on it, and an unbounded host font fallback would otherwise read heavier
    at the host's default size. Line-height is set with it — 13/20 is the
    approved rhythm and the two must move together or rows drift off the 40px
    grid. */

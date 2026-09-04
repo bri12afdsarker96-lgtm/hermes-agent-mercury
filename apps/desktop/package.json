@@ -195,7 +195,7 @@
       }
     ],
     "artifactName": "Hermes-企业助手-${version}-${arch}.${ext}",
-    "icon": "assets/icon",
+    "icon": "assets/brand/hermes-mark-hires.png",
     "directories": {
       "output": "release"
     },
@@ -214,8 +214,12 @@
         "to": "install-stamp.json"
       },
       {
-        "from": "assets/icon.ico",
-        "to": "icon.ico"
+        "from": "assets/brand/hermes-mark-hires.ico",
+        "to": "brand-icon.ico"
+      },
+      {
+        "from": "src/fonts/LICENSE-HarmonyOS-Sans.txt",
+        "to": "licenses/LICENSE-HarmonyOS-Sans.txt"
       }
     ],
     "asar": true,
@@ -267,6 +271,7 @@
       ]
     },
     "win": {
+      "icon": "assets/brand/hermes-mark-hires.ico",
       "legalTrademarks": "Hermes-企业助手",
       "target": [
         "nsis",

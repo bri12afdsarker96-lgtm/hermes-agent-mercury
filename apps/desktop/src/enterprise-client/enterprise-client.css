@@ -1,23 +1,35 @@
-/* Approved Enterprise Desktop Design System tokens, scoped to our own client. */
+/* HarmonyOS Sans SC is bundled under its original Huawei license; see
+   ../fonts/LICENSE-HarmonyOS-Sans.txt. */
 @font-face {
-  font-family: 'RTWS ShangGo G0';
+  font-family: 'HarmonyOS Sans SC';
   font-style: normal;
   font-weight: 300;
-  src: url('./assets/fonts/RTWSShangGoG0v1-Light.ttf') format('truetype');
+  font-display: swap;
+  src: url('../fonts/HarmonyOS_Sans_SC_Light.ttf') format('truetype');
 }
 
 @font-face {
-  font-family: 'RTWS ShangGo G0';
+  font-family: 'HarmonyOS Sans SC';
   font-style: normal;
   font-weight: 400;
-  src: url('./assets/fonts/RTWSShangGoG0v1-Regular.ttf') format('truetype');
+  font-display: swap;
+  src: url('../fonts/HarmonyOS_Sans_SC_Regular.ttf') format('truetype');
 }
 
 @font-face {
-  font-family: 'RTWS ShangGo G0';
+  font-family: 'HarmonyOS Sans SC';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/HarmonyOS_Sans_SC_Medium.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
   font-style: normal;
   font-weight: 700;
-  src: url('./assets/fonts/RTWSShangGoG0v1-Bold.ttf') format('truetype');
+  font-display: swap;
+  src: url('../fonts/HarmonyOS_Sans_SC_Bold.ttf') format('truetype');
 }
 
 .hesc-root {

@@ -100,7 +100,7 @@ design. Porting any of them was rejected.
 | `_ds_bundle.js`, `_ds_manifest.json`, `window.HermesEnterpriseDesktopDesignSystem_89ae01` | Design-tool preview runtime and global namespace |
 | `_adherence.oxlintrc.json` | An **oxlint** config; this repo runs ESLint |
 | `ui_kits/**/data.js` | Fabricated business data (王琳 / 4031群 / ¥500). `DESIGN_PREVIEW_ONLY` — fixtures and visual harness only, never a runtime path |
-| `fonts/` — RTWS ShangGo G0 | 13 MB of TTFs for a commercial CJK family with **no licence file anywhere in the package**. Rejected for distribution. Replaced by exact Adobe Source Han Sans CN under OFL-1.1 — see below |
+| `fonts/` — RTWS ShangGo G0 | 13 MB of TTFs for a commercial CJK family with **no licence file anywhere in the package**. Rejected for distribution. Replaced by unmodified HarmonyOS Sans SC files with Huawei's license retained — see `HARMONYOS_SANS_PROVENANCE.md` |
 | `assets/brand/*.png` | Brand marks traced from AI renders, no vector master. The app ships a real logo |
 
 ## Typography

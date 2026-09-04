@@ -17,7 +17,7 @@ test expectations.
 | Concern | Authoritative source |
 | --- | --- |
 | Shell geometry, colours, typography, spacing and state tokens | `tokens/*.css` and `components/**` in the Enterprise Desktop Design System |
-| Brand asset and self-hosted Chinese typeface | `assets/brand/**` and `fonts/RTWSShangGoG0v1-*.ttf` in the Enterprise Desktop Design System |
+| Brand asset and typography reference | `assets/brand/**` and the type rules in the Enterprise Desktop Design System; runtime distribution uses licensed HarmonyOS Sans SC |
 | Login, role workbenches and business-page composition | `ui_kits/enterprise-desktop/*.jsx` and `refs/ref1-login.png` through `refs/ref7-conversations.png` |
 | Data truth, capability state and unavailable behaviour | `TRUTH_MATRIX.md`, current Hermes_AI contracts, and the desktop catalog/controllers |
 | Electron lifecycle, IPC, token custody and transport | existing Mercury Electron/main-process bridge |
@@ -58,7 +58,7 @@ accessibility checks).
 
 The shared shell is the owned `Titlebar (44px) + AppSidebar + TopHeader (56px)
 + StatusBar (40px)` composition. It has a Chinese first paint, self-hosted
-RTWS ShangGo G0 type, owned mark, light enterprise token palette, and no
+HarmonyOS Sans SC type, owned mark, light enterprise token palette, and no
 upstream chat/session rail.
 
 The server's raw role is never trusted as a layout shortcut; it is a display
