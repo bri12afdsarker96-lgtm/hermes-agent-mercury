@@ -1,9 +1,10 @@
 # Hermes Project — platform login closure handoff
 
-**Status:** implementation and infrastructure closure completed; human-owned
-desktop/product acceptance remains outstanding.  This document records observed
-state on 2026-09-04 (Asia/Shanghai).  It contains no passwords, private keys,
-access tokens, or personal-account identifiers.
+**Status:** controlled candidate implementation and infrastructure deployment
+completed; it is **not** a formal release and human-owned desktop/product
+acceptance remains outstanding.  This document records observed state on
+2026-09-04 (Asia/Shanghai).  It contains no passwords, private keys, access
+tokens, or personal-account identifiers.
 
 ## 1. Scope and repository authority
 
@@ -27,10 +28,10 @@ old SHA as a current upstream claim.
 | --- | --- | --- |
 | Mercury `main` | `60c2ed58f71cd78f9b8d9d9721e4ebed63c93ab5` | Baseline only; not the installed enterprise candidate. |
 | Desktop package candidate | PR [#70](https://github.com/bri12afdsarker96-lgtm/hermes-agent-mercury/pull/70), `b63d9b9016a78e779c7a97e5687e6a8ddfa826bb` | Draft; installed on the validation PC.  Its CI is green. |
-| Desktop dependency chain | [#66](https://github.com/bri12afdsarker96-lgtm/hermes-agent-mercury/pull/66) -> [#69](https://github.com/bri12afdsarker96-lgtm/hermes-agent-mercury/pull/69) -> [#70](https://github.com/bri12afdsarker96-lgtm/hermes-agent-mercury/pull/70) | Keep Draft.  #66 is `UNSTABLE` because its historical check set contains two failures; triage/re-run it before any stack merge. |
+| Desktop dependency chain | [#66](https://github.com/bri12afdsarker96-lgtm/hermes-agent-mercury/pull/66) -> [#69](https://github.com/bri12afdsarker96-lgtm/hermes-agent-mercury/pull/69) -> [#70](https://github.com/bri12afdsarker96-lgtm/hermes-agent-mercury/pull/70) | Keep Draft.  #66 is currently `UNSTABLE`: `Review label gate` and `All required checks pass` are failing merge gates.  Resolve the review-label policy first, then verify that the aggregate gate recovers before any stack merge. |
 | Server deployment base | `7e3a4bb8241e584589fa97483c0f8971bbe85ae2` on `codex/server-principal-provisioning-decisions-01` | Prior production candidate baseline. |
 | Server platform-login candidate | PR [#156](https://github.com/bri12afdsarker96-lgtm/Hermes_AI/pull/156), `a64dda4520b5ced3671304714dcadb0aeaf7c112` | Draft with all Linux, Windows, WeCom and PostgreSQL/RLS checks green.  The cloud server runs this exact detached SHA for validation; it was not merged. |
-| Server companion deployment change | PR [#155](https://github.com/bri12afdsarker96-lgtm/Hermes_AI/pull/155), `85213704bdeec26b6968a324e58f2f69b590b76d` | Green and ready for reviewer decision; not silently merged by this closure. |
+| Server companion deployment change | PR [#155](https://github.com/bri12afdsarker96-lgtm/Hermes_AI/pull/155), `85213704bdeec26b6968a324e58f2f69b590b76d` | Green and non-Draft, but its base is the Server integration candidate line rather than `main`; keep that dependency explicit in review and do not silently merge it in this closure. |
 | Lifecycle audit line | PR [#148](https://github.com/bri12afdsarker96-lgtm/Hermes_AI/pull/148), `54a46c735d20bf37725233166428878a8e5b06fa` | Green Draft; keep separate from the platform-login change. |
 
 **Do not merge the stacked Desktop chain or the Server candidate merely because
@@ -113,7 +114,9 @@ The next colleague owns these acceptance tests, in this order:
 
 ## 6. Local-worktree closure performed
 
-No local-only source commit remains hidden from GitHub.
+No currently active, named product work branch is ahead of its tracked GitHub
+branch.  This does **not** mean the object database contains no local-only
+history.
 
 | Location | Closure result |
 | --- | --- |
@@ -122,6 +125,7 @@ No local-only source commit remains hidden from GitHub.
 | Server candidate worktree | Clean at `a64dda45`, pushed as PR #156. |
 | Six clean auxiliary Server worktrees | Fast-forwarded to their tracked remote branches; no history rewrite and no unpushed local commit. |
 | Local `codex/principal-lifecycle-audit` name | Only a local alias for the already-pushed `origin/codex/principal-token-reissue` commit `052fd0ad`; it contains no unique work to upload. |
+| Historical Server object lines | Local history still includes commits that are not referenced by `origin` (a refreshed ref scan found 28; another audit found 31 under a different ref set).  They may contain source/test changes, but have no active remote branch or review target.  Do not bulk-delete or bulk-push them; inventory each candidate and create a narrowly scoped review branch only when a maintainer identifies it as needed. |
 
 ## 7. Rollback and operating safeguards
 
