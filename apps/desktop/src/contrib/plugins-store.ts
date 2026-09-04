@@ -8,7 +8,7 @@
  * activate/deactivate handles, so toggling never needs an app reload.
  */
 
-import { atom } from 'nanostores'
+import { atom, type ReadableAtom } from 'nanostores'
 
 export type PluginKind = 'bundled' | 'disk' | 'runtime'
 export type PluginStatus = 'disabled' | 'error' | 'loaded'
@@ -122,5 +122,61 @@ export async function setPluginEnabled(id: string, enabled: boolean): Promise<vo
   } else {
     handle.deactivate()
     patchPlugin(id, { status: 'disabled' })
+  }
+}
+
+// --- Capability-driven eligibility (Enterprise Console L1 activation) ---------
+// Some plugins appear based on a live, non-secret availability signal (an
+// authenticated enterprise session) rather than a static default. This drives
+// the EXISTING activate/deactivate handles from that signal composed with the
+// user's explicit choice — no second plugin manager, no `defaultEnabled` flip.
+
+const eligibility = new Map<string, ReadableAtom<boolean>>()
+
+/** Resolve whether an eligibility-bound plugin should currently be registered,
+ *  and drive its existing handle to match. The explicit user/admin decision
+ *  ALWAYS wins; absent a decision, availability decides. Never writes a
+ *  decision (auto-enable must not masquerade as a manual choice, or a later
+ *  revoke would not turn it back off). Idempotent (guards on live status). */
+function reconcileEligible(id: string): void {
+  const handle = handles.get(id)
+
+  if (!handle) {
+    return
+  }
+
+  const decisions = $pluginDecisions.get()
+  const available = eligibility.get(id)?.get() ?? false
+  const want = id in decisions ? decisions[id] : available
+  const loaded = $pluginRecords.get()[id]?.status === 'loaded'
+
+  if (want && !loaded) {
+    void handle.activate()
+  } else if (!want && loaded) {
+    handle.deactivate()
+    patchPlugin(id, { status: 'disabled' })
+  }
+}
+
+/**
+ * Bind a plugin's registration to a reactive, non-secret availability atom,
+ * composed with the existing localStorage manual override. Re-runs the EXISTING
+ * activate/deactivate handles whenever availability or the user's decision
+ * changes, so the product entry appears on an authenticated enterprise session
+ * and disappears on revocation — with an explicit disable always winning.
+ * Returns a disposer. Only a boolean ever enters here; no bearer/secret.
+ */
+export function bindEligibility(id: string, available: ReadableAtom<boolean>): () => void {
+  eligibility.set(id, available)
+
+  const unsubAvail = available.listen(() => reconcileEligible(id))
+  const unsubDecision = $pluginDecisions.listen(() => reconcileEligible(id))
+
+  reconcileEligible(id)
+
+  return () => {
+    unsubAvail()
+    unsubDecision()
+    eligibility.delete(id)
   }
 }

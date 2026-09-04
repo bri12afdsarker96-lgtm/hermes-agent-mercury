@@ -1,9 +1,9 @@
 {
   "name": "hermes",
-  "productName": "hermes_Agent",
+  "productName": "Hermes-企业助手",
   "private": true,
   "version": "0.17.0",
-  "description": "Native desktop shell for hermes_Agent.",
+  "description": "Hermes-企业助手 — enterprise desktop.",
   "author": "Nous Research",
   "repository": {
     "type": "git",
@@ -183,9 +183,9 @@
   },
   "build": {
     "electronVersion": "40.10.2",
-    "appId": "com.nousresearch.hermes",
-    "productName": "hermes_Agent",
-    "executableName": "Hermes",
+    "appId": "com.qiqiaoban.hermes-enterprise-assistant",
+    "productName": "Hermes-企业助手",
+    "executableName": "HermesEnterpriseAssistant",
     "protocols": [
       {
         "name": "Hermes Protocol",
@@ -194,7 +194,7 @@
         ]
       }
     ],
-    "artifactName": "hermes_Agent-${version}-${os}-${arch}.${ext}",
+    "artifactName": "Hermes-企业助手-${version}-${arch}.${ext}",
     "icon": "assets/icon",
     "directories": {
       "output": "release"
@@ -230,12 +230,12 @@
       "entitlements": "electron/entitlements.mac.plist",
       "entitlementsInherit": "electron/entitlements.mac.inherit.plist",
       "extendInfo": {
-        "CFBundleDisplayName": "hermes_Agent",
-        "CFBundleExecutable": "Hermes",
-        "CFBundleName": "hermes_Agent",
-        "NSAudioCaptureUsageDescription": "hermes_Agent uses audio capture for voice conversations.",
-        "NSCameraUsageDescription": "hermes_Agent uses the camera when a plugin or feature you enable requests it.",
-        "NSMicrophoneUsageDescription": "hermes_Agent uses the microphone for voice input and voice conversations."
+        "CFBundleDisplayName": "Hermes-企业助手",
+        "CFBundleExecutable": "HermesEnterpriseAssistant",
+        "CFBundleName": "Hermes-企业助手",
+        "NSAudioCaptureUsageDescription": "Hermes-企业助手 uses audio capture for voice conversations.",
+        "NSCameraUsageDescription": "Hermes-企业助手 uses the camera when a plugin or feature you enable requests it.",
+        "NSMicrophoneUsageDescription": "Hermes-企业助手 uses the microphone for voice input and voice conversations."
       },
       "gatekeeperAssess": false,
       "hardenedRuntime": true,
@@ -245,7 +245,7 @@
       ]
     },
     "dmg": {
-      "title": "Install hermes_Agent",
+      "title": "Install Hermes-企业助手",
       "backgroundColor": "#f5f5f7",
       "iconSize": 96,
       "window": {
@@ -267,7 +267,7 @@
       ]
     },
     "win": {
-      "legalTrademarks": "hermes_Agent",
+      "legalTrademarks": "Hermes-企业助手",
       "target": [
         "nsis",
         "msi"
@@ -277,7 +277,7 @@
     "linux": {
       "category": "Development",
       "maintainer": "Nous Research <support@nousresearch.com>",
-      "synopsis": "Native desktop shell for hermes_Agent.",
+      "synopsis": "Hermes-企业助手 — enterprise desktop.",
       "target": [
         "AppImage",
         "deb",
@@ -288,8 +288,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
-      "shortcutName": "hermes_Agent",
-      "uninstallDisplayName": "hermes_Agent",
+      "shortcutName": "Hermes-企业助手",
+      "uninstallDisplayName": "Hermes-企业助手",
       "warningsAsErrors": false
     }
   }

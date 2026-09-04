@@ -28,6 +28,7 @@ import {
   shell,
   systemPreferences
 } from 'electron'
+import type { WebContents } from 'electron'
 import nodePty from 'node-pty'
 
 import { classifyActiveRuntime } from './active-runtime-state'
@@ -128,6 +129,18 @@ import {
 } from './desktop-uninstall'
 import { describeDevCdpDecision, resolveDevCdpPort } from './dev-cdp'
 import { installEmbedReferer } from './embed-referer'
+import { resolveEnterpriseOriginCandidate } from './enterprise-origin-candidate'
+import {
+  buildAutoConnectResult,
+  classifyConnectError,
+  ENTERPRISE_MAX_UPLOAD_BYTES,
+  EnterpriseSessionStore,
+  isAllowedEnterpriseMethod,
+  normalizeEnterpriseApiOriginOrNull,
+  resolveEnterpriseUrl,
+  sanitizeMultipartContentType,
+  uploadByteLength
+} from './enterprise-transport'
 import { createEventDeduper } from './event-dedupe'
 import {
   buildTerminalScript,
@@ -4746,11 +4759,16 @@ function multipartBody(upload) {
   const boundary = `----hermes-${crypto.randomBytes(12).toString('hex')}`
   const filename = String(upload.filename || 'file').replace(/["\r\n]/g, '_')
 
+  // Sanitize the renderer-supplied Content-Type: strip CR/LF/NUL/control chars
+  // and validate the MIME essence, so it can never inject extra multipart
+  // headers or parts. `filename` is already CRLF/quote-stripped above.
+  const contentType = sanitizeMultipartContentType(upload.contentType)
+
   const body = Buffer.concat([
     Buffer.from(
       `--${boundary}\r\n` +
         `Content-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
-        `Content-Type: ${upload.contentType || 'application/octet-stream'}\r\n\r\n`
+        `Content-Type: ${contentType}\r\n\r\n`
     ),
     Buffer.from(upload.bytes),
     Buffer.from(`\r\n--${boundary}--\r\n`)
@@ -6982,6 +7000,12 @@ function _storeNativeTokens(baseUrl: string, tokens: NativeTokenSet) {
 function _clearNativeTokens(baseUrl: string) {
   _nativeTokens.delete(baseUrl)
   _persistNativeTokens(baseUrl, null)
+  // WAVE-7 §10-C/§10-D: the native bearer just died (logout, expired with no
+  // refresh token, or a terminally-rejected refresh). Any enterprise session
+  // still holding a snapshot of it is now stale — tear them all down fail-closed
+  // so a stale bearer is never retained past the native session that minted it.
+  // A later re-probe rebuilds a fresh session from the current native token.
+  destroyAllEnterpriseSessions()
 }
 
 // True when we hold native bearer tokens for this gateway (the native-flow
@@ -10671,7 +10695,7 @@ function spawnSecondaryWindow({ sessionId, watch }: { sessionId?: string; watch?
     height: SESSION_WINDOW_MIN_HEIGHT,
     minWidth: SESSION_WINDOW_MIN_WIDTH,
     minHeight: SESSION_WINDOW_MIN_HEIGHT,
-    title: 'Hermes',
+    title: 'Hermes-企业助手',
     titleBarStyle: 'hidden',
     titleBarOverlay: getTitleBarOverlayOptions(),
     trafficLightPosition: IS_MAC ? WINDOW_BUTTON_POSITION : undefined,
@@ -10773,7 +10797,7 @@ function createInstanceWindow() {
     ...nextInstanceBounds(),
     minWidth: WINDOW_MIN_WIDTH,
     minHeight: WINDOW_MIN_HEIGHT,
-    title: 'Hermes',
+    title: 'Hermes-企业助手',
     titleBarStyle: 'hidden',
     titleBarOverlay: getTitleBarOverlayOptions(),
     trafficLightPosition: IS_MAC ? WINDOW_BUTTON_POSITION : undefined,
@@ -11629,7 +11653,7 @@ function createWindow() {
     ...computeWindowOptions(savedWindowState, screen.getAllDisplays()),
     minWidth: WINDOW_MIN_WIDTH,
     minHeight: WINDOW_MIN_HEIGHT,
-    title: 'Hermes',
+    title: 'Hermes-企业助手',
     // Frameless title bar on every platform so the renderer can paint the
     // "hide sidebar" button (and other left-side titlebar tools) flush with
     // the top edge — matching the macOS layout where the traffic lights sit
@@ -12885,7 +12909,12 @@ async function fetchJsonForBackend(
 }
 
 ipcMain.handle('hermes:connection-config:probe', async (_event, rawUrl) => probeRemoteAuthMode(rawUrl))
-ipcMain.handle('hermes:connection-config:oauth-login', async (_event, rawUrl) => {
+
+// One implementation for both Settings' explicit gateway sign-in and the
+// product-owned Enterprise Desktop entry. The latter supplies a main-resolved
+// connection below, so no renderer can turn this into an arbitrary OAuth URL
+// launcher or receive the resulting bearer.
+async function signInToRemoteGateway(rawUrl) {
   // Capability-gated login (RFC 8252). Probe the gateway's public /api/status:
   //   - advertises "native_pkce" in auth_flows → run the system-browser +
   //     loopback + PKCE flow. No embedded webview, tokens held by the app
@@ -12919,6 +12948,11 @@ ipcMain.handle('hermes:connection-config:oauth-login', async (_event, rawUrl) =>
       // Confirmed sign-in — release the reauth latch so the next
       // startHermes() re-dials instead of replaying the stale rejection.
       remoteReauthFailure = null
+      // WAVE-7 §10-A: a native session now exists. Ring the existing
+      // connection-applied seam so the enterprise console re-probes and can
+      // reach AUTHENTICATED without an app restart (reuses onConnectionApplied;
+      // no new channel).
+      sendConnectionApplied()
 
       return { ok: true, baseUrl, connected: true }
     } catch (error) {
@@ -12945,16 +12979,23 @@ ipcMain.handle('hermes:connection-config:oauth-login', async (_event, rawUrl) =>
   }
 
   return { ok: true, baseUrl, connected }
-})
+}
+
+ipcMain.handle('hermes:connection-config:oauth-login', async (_event, rawUrl) => signInToRemoteGateway(rawUrl))
 ipcMain.handle('hermes:connection-config:oauth-logout', async (_event, rawUrl) => {
   const baseUrl = rawUrl ? normalizeRemoteBaseUrl(rawUrl) : ''
   await clearOauthSession(baseUrl || undefined)
 
   // Also drop any native (RFC 8252) bearer tokens for this gateway so a
-  // logout clears BOTH auth shapes.
+  // logout clears BOTH auth shapes. _clearNativeTokens also tears down the
+  // enterprise sessions (WAVE-7 §10-C/§10-D).
   if (baseUrl) {
     _clearNativeTokens(baseUrl)
   }
+
+  // WAVE-7 §10-C: ring the seam so the enterprise console re-probes to UNKNOWN
+  // (no native session) instead of lingering AUTHENTICATED until an app restart.
+  sendConnectionApplied()
 
   // Report against the SAME liveness notion the Settings indicator uses
   // (AT-or-RT cookie, or a native token) so a logout that left any session
@@ -13438,6 +13479,322 @@ ipcMain.handle('hermes:api', async (_event, request) => {
   return handleHermesApiRequest(request).finally(releaseProfileDeletion)
 })
 
+// ── Enterprise Client transport ──────────────────────────────────────────────
+// The bearer for an EXTERNAL Hermes web server lives HERE, in the main process,
+// per renderer (WebContents) — never persisted, never returned to any renderer.
+// Each connect mints an opaque sessionId bound to the sender; every request /
+// disconnect must match BOTH the sender AND the current sessionId, so a stale
+// transport can neither borrow a newer credential nor tear down a newer session.
+// Requests are constrained to `/api/*` and injected in main via the existing
+// `fetchJson` engine (no browser Origin — the server's strict-Origin / no-CORS
+// posture stays intact). Consumed by the independent client's runtime adapter.
+const enterpriseSessions = new EnterpriseSessionStore()
+const enterpriseWiredSenders = new Set<number>()
+
+/** Only the primary desktop shell may establish or use an enterprise session.
+ * Overlay, quick-entry, and helper windows share the preload but are not
+ * client-capable renderers; sender/session fencing alone is insufficient. */
+function isEnterpriseClientSender(sender: WebContents): boolean {
+  return !sender.isDestroyed() && mainWindow?.webContents.id === sender.id
+}
+
+// WAVE-7 §10-C/§10-D: drop every wired enterprise session (and its main-held
+// bearer snapshot). Invoked when the native token dies so no stale enterprise
+// bearer outlives the native session that minted it; the next re-probe rebuilds.
+function destroyAllEnterpriseSessions(): void {
+  for (const senderId of enterpriseWiredSenders) {
+    enterpriseSessions.destroySender(senderId)
+  }
+
+  enterpriseWiredSenders.clear()
+}
+
+// First-enterprise-login remains a native, main-owned operation. The renderer
+// cannot provide a URL, token, password, or identity; it merely asks this
+// already-configured desktop to start the existing PKCE flow. Requiring an
+// OAuth remote route and a trusted enterprise origin prevents a successful
+// gateway login from being presented as a usable enterprise session when the
+// second authority plane has not been configured.
+ipcMain.handle('hermes:enterprise:begin-login', async (event) => {
+  rememberLog('[enterprise-login] native sign-in requested')
+
+  if (!isEnterpriseClientSender(event.sender)) {
+    rememberLog('[enterprise-login] rejected: sender is not the primary desktop window')
+    return { code: 'forbidden_sender', message: 'enterprise login unavailable', ok: false }
+  }
+
+  const enterpriseOrigin = normalizeEnterpriseApiOriginOrNull(
+    resolveEnterpriseOriginCandidate({
+      processEnv: process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN,
+      windowsUserEnvReader: () => readWindowsUserEnvVar('HERMES_DESKTOP_ENTERPRISE_ORIGIN')
+    })
+  )
+
+  if (!enterpriseOrigin) {
+    rememberLog('[enterprise-login] rejected: trusted enterprise origin is not configured')
+    return { code: 'no_enterprise_origin', message: 'enterprise API origin is not configured', ok: false }
+  }
+
+  let gatewayRoute
+
+  try {
+    // Do not call resolveRemoteBackend here: that helper intentionally rejects
+    // an OAuth route with no pre-existing native session, which is correct for
+    // normal backend traffic but makes a first sign-in impossible. This branch
+    // needs only the trusted, persisted dial target; signInToRemoteGateway
+    // obtains the native session immediately afterwards.
+    gatewayRoute = resolveDesktopRemoteRoute({
+      config: readDesktopConnectionConfig(),
+      env: {
+        token: process.env.HERMES_DESKTOP_REMOTE_TOKEN,
+        url: process.env.HERMES_DESKTOP_REMOTE_URL
+      },
+      profile: primaryProfileKey(),
+      registry: readDesktopConnectionsRegistry()
+    })
+  } catch {
+    rememberLog('[enterprise-login] rejected: configured gateway route could not be resolved')
+    return { code: 'gateway_unavailable', message: 'enterprise gateway is not configured', ok: false }
+  }
+
+  if (!gatewayRoute || gatewayRoute.kind === 'ssh' || gatewayRoute.authMode !== 'oauth') {
+    rememberLog('[enterprise-login] rejected: no OAuth gateway is configured')
+    return { code: 'no_oauth_gateway', message: 'enterprise OAuth gateway is not configured', ok: false }
+  }
+
+  try {
+    rememberLog('[enterprise-login] starting configured native OAuth flow')
+    const result = await signInToRemoteGateway(gatewayRoute.url)
+
+    rememberLog(`[enterprise-login] native flow completed: connected=${result.connected}`)
+    return result.connected
+      ? { ok: true }
+      : { code: 'login_not_completed', message: 'enterprise login was not completed', ok: false }
+  } catch {
+    rememberLog('[enterprise-login] native flow failed before completion')
+    return { code: 'gateway_unavailable', message: 'enterprise gateway is unavailable', ok: false }
+  }
+})
+
+// B16-OL · One-login. Establish the enterprise session ENTIRELY in main from the
+// existing native OAuth bearer — no URL/token pasted in the renderer, no bearer
+// crossing to the renderer. Topology is fixed (OL-council): the Agent gateway and
+// the Hermes_AI Enterprise `/api/*` plane are DISTINCT origins, so:
+//   * the enterprise origin comes from TRUSTED main-owned config
+//     (HERMES_DESKTOP_ENTERPRISE_ORIGIN), never the renderer, never assumed equal
+//     to the gateway;
+//   * the native bearer is minted against the GATEWAY origin and deliberately
+//     federated to the enterprise origin, where the Hermes_AI server verifies it
+//     (upstream-native-bearer federated whoami, PR #130). Sending it anywhere but
+//     the configured trusted origin is forbidden.
+// Idempotent per sender; returns only {ok, sessionId, baseUrl} (bearer stripped).
+ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
+  if (!isEnterpriseClientSender(event.sender)) {
+    return { code: 'forbidden_sender', message: 'enterprise session unavailable', ok: false }
+  }
+
+  const senderId = event.sender.id
+
+  // B16-OL · Trusted main-owned enterprise origin resolution.
+  //
+  //   1. process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN, when present and
+  //      non-blank, is authoritative for this process. An explicit-but-invalid
+  //      value is forwarded verbatim so the existing normalizer can fail
+  //      closed; the resolver never silently substitutes a different origin
+  //      (which would let a misconfigured launcher smuggle traffic).
+  //   2. When the explicit process env is absent/blank, fall back to the
+  //      live HKCU\Environment value on Windows via the existing
+  //      readWindowsUserEnvVar seam. GUI apps launched from Explorer inherit
+  //      a stale env snapshot, so a value set via `setx` after login is
+  //      invisible to process.env; the registry read closes that gap.
+  //      Off-Windows the helper returns null without spawning.
+  const enterpriseOrigin = normalizeEnterpriseApiOriginOrNull(
+    resolveEnterpriseOriginCandidate({
+      processEnv: process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN,
+      // Lazy callback: the resolver only invokes this when the explicit
+      // process env is absent or blank, so explicit non-blank values
+      // never trigger a `reg` spawn.
+      windowsUserEnvReader: () =>
+        readWindowsUserEnvVar('HERMES_DESKTOP_ENTERPRISE_ORIGIN')
+    })
+  )
+
+  if (!enterpriseOrigin) {
+    // No trusted enterprise origin configured -> one-login unavailable (UNKNOWN);
+    // the console stays hidden. Never guess an origin or request a renderer bearer.
+    return { code: 'no_enterprise_origin', message: 'enterprise API origin is not configured', ok: false }
+  }
+
+  let bearer: string | null = null
+
+  try {
+    const remote = await resolveRemoteBackend(primaryProfileKey())
+    const gatewayBaseUrl = remote?.baseUrl
+
+    if (gatewayBaseUrl) {
+      // Bearer is minted for (and refreshed against) the GATEWAY origin.
+      bearer = await ensureNativeAccessToken(gatewayBaseUrl).catch(() => null)
+    }
+  } catch {
+    bearer = null
+  }
+
+  if (!bearer) {
+    rememberLog('[enterprise-auth] auto-connect rejected: no native session')
+    // No authenticated native session -> cannot authenticate (UNKNOWN/unavailable),
+    // never a fake AUTHENTICATED.
+    return { code: 'no_native_session', message: 'no authenticated native session', ok: false }
+  }
+
+  let sessionId: string
+
+  try {
+    sessionId = enterpriseSessions.autoConnect(senderId, enterpriseOrigin, bearer)
+  } catch (err) {
+    rememberLog('[enterprise-auth] auto-connect rejected: session creation failed')
+    return { ok: false, ...classifyConnectError(err) }
+  }
+
+  if (!enterpriseWiredSenders.has(senderId)) {
+    enterpriseWiredSenders.add(senderId)
+    event.sender.once('destroyed', () => {
+      enterpriseSessions.destroySender(senderId)
+      enterpriseWiredSenders.delete(senderId)
+    })
+  }
+
+  const session = enterpriseSessions.resolve(senderId, sessionId)
+
+  if (!session) {
+    rememberLog('[enterprise-auth] auto-connect rejected: session unavailable')
+    return { code: 'network', message: 'session unavailable', ok: false }
+  }
+
+  rememberLog('[enterprise-auth] enterprise session ready')
+  return buildAutoConnectResult(session)
+})
+
+ipcMain.handle('hermes:enterprise:disconnect', (event, payload) => {
+  if (!isEnterpriseClientSender(event.sender)) {
+    return { ok: false }
+  }
+
+  const removed = enterpriseSessions.disconnect(event.sender.id, payload?.sessionId)
+
+  return { ok: removed }
+})
+
+ipcMain.handle('hermes:enterprise:request', async (event, req) => {
+  if (!isEnterpriseClientSender(event.sender)) {
+    return { code: 'forbidden_sender', kind: 'error', message: 'not connected', status: 0 }
+  }
+
+  const session = enterpriseSessions.resolve(event.sender.id, req?.sessionId)
+
+  if (!session) {
+    return { code: 'network', kind: 'error', message: 'not connected', status: 0 }
+  }
+
+  const method = req?.method || 'GET'
+
+  if (!isAllowedEnterpriseMethod(method)) {
+    return { code: 'error', kind: 'error', message: 'method not allowed', status: 0 }
+  }
+
+  let url: string
+
+  try {
+    // Structural /api/* + origin guard: never an arbitrary SSRF proxy.
+    url = resolveEnterpriseUrl(session.baseUrl, req?.path)
+  } catch {
+    return { code: 'error', kind: 'error', message: 'invalid path', status: 0 }
+  }
+
+  try {
+    const data = await fetchJson(url, '', {
+      bearer: session.token,
+      body: req?.body,
+      method: String(method).toUpperCase()
+    })
+
+    rememberLog('[enterprise-auth] enterprise request succeeded')
+    return { data, kind: 'ok' }
+  } catch (err) {
+    // fetchJson rejects Error('<status>: <text>') for HTTP >= 400, else a
+    // transport error. Surface status + a coarse code only — never the response
+    // text (which can echo input) nor the bearer.
+    const message = err instanceof Error ? err.message : ''
+    const match = /^(\d{3}):/.exec(message)
+
+    if (match) {
+      rememberLog(`[enterprise-auth] enterprise request rejected: HTTP ${match[1]}`)
+      return { code: 'http', kind: 'error', message: `request failed (${match[1]})`, status: Number(match[1]) }
+    }
+
+    rememberLog('[enterprise-auth] enterprise request failed: network')
+    return { code: 'network', kind: 'error', message: 'cannot reach the Hermes server', status: 0 }
+  }
+})
+
+// Multipart upload (knowledge-upload) — same fencing + path guard as request;
+// reuses fetchJson's existing multipart (`options.upload`, field name "file").
+ipcMain.handle('hermes:enterprise:upload', async (event, req) => {
+  if (!isEnterpriseClientSender(event.sender)) {
+    return { code: 'forbidden_sender', kind: 'error', message: 'not connected', status: 0 }
+  }
+
+  const session = enterpriseSessions.resolve(event.sender.id, req?.sessionId)
+
+  if (!session) {
+    return { code: 'network', kind: 'error', message: 'not connected', status: 0 }
+  }
+
+  // Reject a malformed or oversize payload in main BEFORE the network fetch, so
+  // a compromised renderer can neither make main buffer an unbounded body nor
+  // pass a non-buffer shape into `Buffer.from`. The server stays the final
+  // authority on size; this is a cheap defence-in-depth guard.
+  const byteLength = uploadByteLength(req?.bytes)
+
+  if (byteLength === null) {
+    return { code: 'error', kind: 'error', message: 'invalid upload', status: 0 }
+  }
+
+  if (byteLength > ENTERPRISE_MAX_UPLOAD_BYTES) {
+    return { code: 'too_large', kind: 'error', message: 'file exceeds the 50 MiB limit', status: 0 }
+  }
+
+  let url: string
+
+  try {
+    url = resolveEnterpriseUrl(session.baseUrl, req?.path)
+  } catch {
+    return { code: 'error', kind: 'error', message: 'invalid path', status: 0 }
+  }
+
+  try {
+    const data = await fetchJson(url, '', {
+      bearer: session.token,
+      method: 'POST',
+      upload: {
+        bytes: req?.bytes,
+        contentType: req?.contentType,
+        filename: String(req?.filename || 'file')
+      }
+    })
+
+    return { data, kind: 'ok' }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : ''
+    const match = /^(\d{3}):/.exec(message)
+
+    if (match) {
+      return { code: 'http', kind: 'error', message: `request failed (${match[1]})`, status: Number(match[1]) }
+    }
+
+    return { code: 'network', kind: 'error', message: 'cannot reach the Hermes server', status: 0 }
+  }
+})
+
 // One deduper per cross-window cue — the choke point every window shares. Main
 // handles IPC serially, so the first window to claim a key wins with no race.
 const isDuplicateNotification = createEventDeduper()
@@ -13465,7 +13822,7 @@ ipcMain.handle('hermes:notify', (_event, payload) => {
   const actions = Array.isArray(payload?.actions) ? payload.actions : []
 
   const notification = new Notification({
-    title: payload?.title || 'Hermes',
+    title: payload?.title || 'Hermes-企业助手',
     body: payload?.body || '',
     silent: Boolean(payload?.silent),
     actions: actions.map(action => ({ type: 'button', text: String(action?.text || '') }))

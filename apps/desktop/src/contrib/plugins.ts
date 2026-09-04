@@ -13,8 +13,9 @@
  *    — the agent's/user's doors, watched + hot-reloaded by the runtime loader.
  */
 
+import { eligibilityAtomFor } from './enterprise-eligibility'
 import { createPluginContext, type HermesPlugin } from './plugin'
-import { pluginActive, publishPlugin } from './plugins-store'
+import { bindEligibility, pluginActive, publishPlugin } from './plugins-store'
 import { watchRuntimePlugins } from './runtime-loader'
 
 const modules = import.meta.glob<{ default: HermesPlugin }>('../plugins/*/plugin.{js,ts,tsx}', { eager: true })
@@ -73,7 +74,16 @@ export function discoverBundledPlugins(): void {
 
     publishPlugin({ ...record, status: 'disabled' }, { activate, deactivate })
 
-    if (pluginActive(plugin.id, plugin.defaultEnabled ?? true)) {
+    // A plugin registered as availability-gated (e.g. the Enterprise Console)
+    // is driven by its eligibility atom composed with the user's decision, via
+    // the same activate/deactivate handles — the entry appears on an
+    // authenticated enterprise session and a manual disable still wins. Every
+    // other plugin keeps the one-shot default/decision gate unchanged.
+    const eligibilityAtom = eligibilityAtomFor(plugin.id)
+
+    if (eligibilityAtom) {
+      bindEligibility(plugin.id, eligibilityAtom)
+    } else if (pluginActive(plugin.id, plugin.defaultEnabled ?? true)) {
       activate()
     }
   }
