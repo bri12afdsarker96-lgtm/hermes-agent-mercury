@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 
 import { CapabilityPolicyPanel } from './capability-policy-panel'
-import { enterpriseRoleLabel } from './role-presentation'
 import { PrincipalProvisioningPanel } from './principal-provisioning-panel'
+import { enterpriseRoleLabel } from './role-presentation'
 import type { EnterpriseClientRuntime, EnterpriseIdentity } from './runtime'
 
 interface AuditEvent {
