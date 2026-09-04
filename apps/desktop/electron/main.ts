@@ -13640,6 +13640,7 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
   }
 
   if (!bearer) {
+    rememberLog('[enterprise-auth] auto-connect rejected: no native session')
     // No authenticated native session -> cannot authenticate (UNKNOWN/unavailable),
     // never a fake AUTHENTICATED.
     return { code: 'no_native_session', message: 'no authenticated native session', ok: false }
@@ -13650,6 +13651,7 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
   try {
     sessionId = enterpriseSessions.autoConnect(senderId, enterpriseOrigin, bearer)
   } catch (err) {
+    rememberLog('[enterprise-auth] auto-connect rejected: session creation failed')
     return { ok: false, ...classifyConnectError(err) }
   }
 
@@ -13664,9 +13666,11 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
   const session = enterpriseSessions.resolve(senderId, sessionId)
 
   if (!session) {
+    rememberLog('[enterprise-auth] auto-connect rejected: session unavailable')
     return { code: 'network', message: 'session unavailable', ok: false }
   }
 
+  rememberLog('[enterprise-auth] enterprise session ready')
   return buildAutoConnectResult(session)
 })
 
@@ -13713,6 +13717,7 @@ ipcMain.handle('hermes:enterprise:request', async (event, req) => {
       method: String(method).toUpperCase()
     })
 
+    rememberLog('[enterprise-auth] enterprise request succeeded')
     return { data, kind: 'ok' }
   } catch (err) {
     // fetchJson rejects Error('<status>: <text>') for HTTP >= 400, else a
@@ -13722,9 +13727,11 @@ ipcMain.handle('hermes:enterprise:request', async (event, req) => {
     const match = /^(\d{3}):/.exec(message)
 
     if (match) {
+      rememberLog(`[enterprise-auth] enterprise request rejected: HTTP ${match[1]}`)
       return { code: 'http', kind: 'error', message: `request failed (${match[1]})`, status: Number(match[1]) }
     }
 
+    rememberLog('[enterprise-auth] enterprise request failed: network')
     return { code: 'network', kind: 'error', message: 'cannot reach the Hermes server', status: 0 }
   }
 })
