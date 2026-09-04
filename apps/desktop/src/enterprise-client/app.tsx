@@ -348,7 +348,7 @@ export function EnterpriseClientApp() {
     )
   }
 
-  const activeDefinition = visibleWorkspaces.find(workspace => workspace.id === activeWorkspace) ?? WORKSPACES[0]
+  const activeDefinition = visibleWorkspaces.find(workspace => workspace.id === activeWorkspace) ?? visibleWorkspaces[0]!
 
   return (
     <EnterpriseClientShell
