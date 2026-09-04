@@ -296,7 +296,48 @@ describe('resolveEnterpriseOriginCandidate · T8 off-Windows: no `reg` spawn, re
   })
 })
 
-describe('resolveEnterpriseOriginCandidate · T9 renderer is never involved', () => {
+describe('resolveEnterpriseOriginCandidate · T9 packaged Windows prefers its live durable user setting', () => {
+  test('a current HKCU value replaces a stale inherited process environment value', () => {
+    const spy = makeSpyReader(OTHER_VALID_HTTPS)
+
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: VALID_LOOPBACK_HTTP,
+      preferWindowsUserEnv: true,
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, OTHER_VALID_HTTPS)
+    assert.equal(spy.count(), 1)
+  })
+
+  test('a malformed durable value still reaches the normalizer and fails closed', () => {
+    const spy = makeSpyReader(INVALID_NON_LOOPBACK_HTTP)
+
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: VALID_HTTPS,
+      preferWindowsUserEnv: true,
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, INVALID_NON_LOOPBACK_HTTP)
+    assert.equal(spy.count(), 1)
+  })
+
+  test('falls back to the inherited value when the durable user setting is absent', () => {
+    const spy = makeSpyReader(null)
+
+    const out = resolveEnterpriseOriginCandidate({
+      processEnv: VALID_HTTPS,
+      preferWindowsUserEnv: true,
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, VALID_HTTPS)
+    assert.equal(spy.count(), 1)
+  })
+})
+
+describe('resolveEnterpriseOriginCandidate · T10 renderer is never involved', () => {
   test('signature accepts no IPC/renderer parameter and has no implicit event source', () => {
     // Structural guarantee: the helper takes only the two candidate
     // accessors. There is no `event.sender`, no IPC channel, no
@@ -304,14 +345,15 @@ describe('resolveEnterpriseOriginCandidate · T9 renderer is never involved', ()
     // would fail to compile if a renderer-coupled source were added.
     const acceptedKeys: ReadonlyArray<keyof Parameters<typeof resolveEnterpriseOriginCandidate>[0]> = [
       'processEnv',
+      'preferWindowsUserEnv',
       'windowsUserEnvReader'
     ]
 
-    assert.deepEqual(acceptedKeys, ['processEnv', 'windowsUserEnvReader'])
+    assert.deepEqual(acceptedKeys, ['processEnv', 'preferWindowsUserEnv', 'windowsUserEnvReader'])
   })
 })
 
-describe('resolveEnterpriseOriginCandidate · T10 no bearer/token returned or persisted by the seam', () => {
+describe('resolveEnterpriseOriginCandidate · T11 no bearer/token returned or persisted by the seam', () => {
   test('return value is the picked URL candidate or null — never a credential object', () => {
     const spy = makeSpyReader(VALID_HTTPS)
 

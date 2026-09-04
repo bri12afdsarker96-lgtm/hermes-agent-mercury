@@ -13528,6 +13528,7 @@ ipcMain.handle('hermes:enterprise:begin-login', async (event) => {
   const enterpriseOrigin = normalizeEnterpriseApiOriginOrNull(
     resolveEnterpriseOriginCandidate({
       processEnv: process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN,
+      preferWindowsUserEnv: true,
       windowsUserEnvReader: () => readWindowsUserEnvVar('HERMES_DESKTOP_ENTERPRISE_ORIGIN')
     })
   )
@@ -13599,23 +13600,17 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
 
   // B16-OL · Trusted main-owned enterprise origin resolution.
   //
-  //   1. process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN, when present and
-  //      non-blank, is authoritative for this process. An explicit-but-invalid
-  //      value is forwarded verbatim so the existing normalizer can fail
-  //      closed; the resolver never silently substitutes a different origin
-  //      (which would let a misconfigured launcher smuggle traffic).
-  //   2. When the explicit process env is absent/blank, fall back to the
-  //      live HKCU\Environment value on Windows via the existing
-  //      readWindowsUserEnvVar seam. GUI apps launched from Explorer inherit
-  //      a stale env snapshot, so a value set via `setx` after login is
-  //      invisible to process.env; the registry read closes that gap.
-  //      Off-Windows the helper returns null without spawning.
+  //   1. For the packaged Windows app, the live HKCU\Environment value is
+  //      the durable configuration authority. Explorer-launched processes
+  //      retain a stale environment block after `setx`, so it must not
+  //      override the current user setting.
+  //   2. When no durable value exists, use the inherited process value.
+  //      Every chosen value still passes through the existing normalizer;
+  //      malformed configuration fails closed and no renderer input is used.
   const enterpriseOrigin = normalizeEnterpriseApiOriginOrNull(
     resolveEnterpriseOriginCandidate({
       processEnv: process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN,
-      // Lazy callback: the resolver only invokes this when the explicit
-      // process env is absent or blank, so explicit non-blank values
-      // never trigger a `reg` spawn.
+      preferWindowsUserEnv: true,
       windowsUserEnvReader: () =>
         readWindowsUserEnvVar('HERMES_DESKTOP_ENTERPRISE_ORIGIN')
     })
