@@ -77,21 +77,6 @@
   src: url('./fonts/JetBrainsMono-Italic.woff2') format('woff2');
 }
 
-/* Source Han Sans CN (思源黑体) — exact Adobe 2.005R CN subset variable WOFF2.
-   Source: adobe-fonts/source-han-sans tag 2.005R,
-   Variable/WOFF2/OTF/Subset/SourceHanSansCN-VF.otf.woff2.
-   SIL OFL-1.1; see ./fonts/LICENSE-SourceHanSansCN.txt. Bundled locally,
-   never fetched at runtime. The Enterprise Console opts in; core typography
-   remains host-owned. A single variable file covers the approved UI's 400–700
-   weights without shipping duplicate static CJK fonts. */
-@font-face {
-  font-family: 'Source Han Sans CN';
-  font-style: normal;
-  font-weight: 200 900;
-  font-display: swap;
-  src: url('./fonts/SourceHanSansCN-VF.woff2') format('woff2');
-}
-
 /* HarmonyOS Sans SC is our desktop product face. Original, unmodified font
    files and Huawei's license notice are bundled under ./fonts/. */
 @font-face {
