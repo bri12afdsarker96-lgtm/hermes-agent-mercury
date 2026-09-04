@@ -1,6 +1,7 @@
+import './enterprise-design-tokens.css'
 import './enterprise-client.css'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { AssistantPage } from './assistant-page'
 import { ConversationsPage } from './conversations-page'
@@ -8,17 +9,26 @@ import { EnterpriseClientShell, EnterpriseStatusBadge } from './enterprise-desig
 import { GovernancePage } from './governance-page'
 import { HandoffsPage } from './handoffs-page'
 import { KnowledgePage } from './knowledge-page'
+import { EnterpriseLoginPage } from './login-page'
 import {
+  enterpriseRoleLabel,
+  enterpriseWorkbenchPresentation,
+  type EnterpriseWorkspaceId,
+  enterpriseWorkspaces
+} from './role-presentation'
+import {
+  beginEnterpriseLogin,
   connectEnterpriseClient,
   type EnterpriseClientRuntime,
   type EnterpriseHealth,
   type EnterpriseIdentity,
   type EnterpriseMetrics
 } from './runtime'
+import { canReadMetricAggregation, workbenchAggregate } from './workbench-metrics'
 import { WorkflowsPage } from './workflows-page'
 
 type ConnectionState = 'error' | 'loading' | 'ready' | 'unavailable'
-type WorkspaceId = 'assistant' | 'conversations' | 'governance' | 'handoffs' | 'knowledge' | 'reminders' | 'workbench'
+type WorkspaceId = EnterpriseWorkspaceId
 
 interface ClientSnapshot {
   health: EnterpriseHealth
@@ -32,16 +42,6 @@ interface WorkspaceDefinition {
   id: WorkspaceId
   label: string
 }
-
-const WORKSPACES: WorkspaceDefinition[] = [
-  { description: '连接状态与运营概览', glyph: '01', id: 'workbench', label: '工作台' },
-  { description: '基于 Hermes runtime 的智能协作', glyph: '02', id: 'assistant', label: '智能助手' },
-  { description: '企业渠道与人工协同', glyph: '03', id: 'conversations', label: '会话中心' },
-  { description: '经授权的人工坐席交接', glyph: '04', id: 'handoffs', label: '人工协同' },
-  { description: '企业知识与检索工作流', glyph: '05', id: 'knowledge', label: '知识空间' },
-  { description: '提醒、任务和业务跟进', glyph: '06', id: 'reminders', label: '工作流' },
-  { description: '身份、权限与审计', glyph: '07', id: 'governance', label: '治理中心' }
-]
 
 function humanConnectionState(state: ConnectionState): string {
   if (state === 'loading') {
@@ -98,13 +98,15 @@ function Workbench({ snapshot, state }: { snapshot: ClientSnapshot | null; state
   const health = snapshot?.health
   const alerts = snapshot?.metrics.alerts
   const serviceValue = health ? (health.ok ? '正常' : '异常') : '—'
+  const presentation = enterpriseWorkbenchPresentation(identity?.role)
+  const aggregate = workbenchAggregate(identity, snapshot?.metrics)
 
   return (
     <section className="hesc-page" data-testid="enterprise-client-workbench">
       <header className="hesc-page-header">
         <div>
-          <h1>我的工作台</h1>
-          <p>企业运行态、身份范围与当前能力状态均来自已连接的服务端。</p>
+          <h1>{presentation.title}</h1>
+          <p>{presentation.purpose}</p>
         </div>
         <EnterpriseStatusBadge tone={statusTone(state)}>{humanConnectionState(state)}</EnterpriseStatusBadge>
       </header>
@@ -127,6 +129,11 @@ function Workbench({ snapshot, state }: { snapshot: ClientSnapshot | null; state
           <div className="hesc-card-value">{identity ? capabilityCount(identity) : '—'}</div>
           <p className="hesc-card-note">LIVE 且已启用的服务端能力</p>
         </article>
+        <article className="hesc-card">
+          <div className="hesc-card-label">{aggregate.label}</div>
+          <div className="hesc-card-value">{aggregate.value}</div>
+          <p className="hesc-card-note">{aggregate.note}</p>
+        </article>
       </div>
 
       <div className="hesc-grid">
@@ -143,7 +150,7 @@ function Workbench({ snapshot, state }: { snapshot: ClientSnapshot | null; state
             </div>
             <div>
               <dt>角色</dt>
-              <dd>{identity?.role ?? '—'}</dd>
+              <dd>{identity ? enterpriseRoleLabel(identity.role) : '—'}</dd>
             </div>
             <div>
               <dt>主体标识</dt>
@@ -198,11 +205,14 @@ export function EnterpriseClientApp() {
       runtime = runtime ?? (await connectEnterpriseClient())
       runtimeRef.current = runtime
 
-      const [health, identity, metrics] = await Promise.all([
+      const [health, identity] = await Promise.all([
         runtime.get<EnterpriseHealth>('/api/health'),
-        runtime.get<EnterpriseIdentity>('/api/whoami'),
-        runtime.get<EnterpriseMetrics>('/api/metrics?window=24h')
+        runtime.get<EnterpriseIdentity>('/api/whoami')
       ])
+
+      const metrics = canReadMetricAggregation(identity)
+        ? await runtime.get<EnterpriseMetrics>('/api/metrics?window=24h').catch(() => ({}))
+        : {}
 
       setSnapshot({ health, identity, metrics })
       setConnectionState('ready')
@@ -219,6 +229,27 @@ export function EnterpriseClientApp() {
     }
   }, [])
 
+  const beginLogin = useCallback(async () => {
+    setConnectionState('loading')
+    setError(null)
+
+    const result = await beginEnterpriseLogin()
+
+    if (!result.ok) {
+      setConnectionState('error')
+      setError(
+        result.code === 'no_enterprise_origin' || result.code === 'no_oauth_gateway'
+          ? '企业登录服务尚未完成配置，请联系平台管理员。'
+          : result.code === 'login_not_completed'
+            ? '企业身份登录未完成，请在打开的浏览器窗口中完成登录后返回客户端。'
+            : '无法启动企业身份登录，请检查企业网络连接后重试。'
+      )
+      return
+    }
+
+    await refresh()
+  }, [refresh])
+
   useEffect(() => {
     document.title = 'Hermes Enterprise'
     void refresh()
@@ -226,7 +257,33 @@ export function EnterpriseClientApp() {
     return releaseRuntime
   }, [refresh, releaseRuntime])
 
-  const activeDefinition = WORKSPACES.find(workspace => workspace.id === activeWorkspace) ?? WORKSPACES[0]
+  const workspaces: WorkspaceDefinition[] = useMemo(
+    () => enterpriseWorkspaces(snapshot?.identity),
+    [snapshot?.identity.effective_permissions, snapshot?.identity.role]
+  )
+
+  useEffect(() => {
+    if (!workspaces.some(workspace => workspace.id === activeWorkspace)) {
+      setActiveWorkspace(workspaces[0]?.id ?? 'workbench')
+    }
+  }, [activeWorkspace, workspaces])
+
+  if (!snapshot && connectionState !== 'ready') {
+    return (
+      <EnterpriseLoginPage
+        busy={connectionState === 'loading'}
+        error={error}
+        onLogin={() => void beginLogin()}
+        status={humanConnectionState(connectionState)}
+      />
+    )
+  }
+
+  const activeDefinition = workspaces.find(workspace => workspace.id === activeWorkspace) ?? workspaces[0]
+
+  if (!activeDefinition) {
+    return null
+  }
 
   return (
     <EnterpriseClientShell
@@ -237,12 +294,12 @@ export function EnterpriseClientApp() {
       navigationLabel="企业客户端主导航"
       onSelectWorkspace={workspaceId => setActiveWorkspace(workspaceId as WorkspaceId)}
       productChannel="企业工作台"
-      productName="Hermes Enterprise"
-      scopeLabel={snapshot?.identity.role ?? '权限由服务端确定'}
-      statusbarDetail="runtime bridge: token-free / authority: server"
+      productName="Hermes Enterprise Desktop"
+      scopeLabel={enterpriseRoleLabel(snapshot?.identity.role)}
+      statusbarDetail="安全连接 · 服务端权限"
       statusbarLabel="Hermes Enterprise Desktop"
       tenantLabel={snapshot?.identity.tenant_id ?? '正在解析租户范围'}
-      workspaces={WORKSPACES}
+      workspaces={workspaces}
     >
         {activeWorkspace === 'workbench' ? <Workbench snapshot={snapshot} state={connectionState} /> : null}
         {activeWorkspace === 'assistant' ? <AssistantPage /> : null}
@@ -253,7 +310,11 @@ export function EnterpriseClientApp() {
         {activeWorkspace === 'governance' ? <GovernancePage runtime={runtimeRef.current} /> : null}
         {activeWorkspace === 'knowledge' ? <KnowledgePage runtime={runtimeRef.current} /> : null}
         {activeWorkspace === 'reminders' ? (
-          <WorkflowsPage principalId={snapshot?.identity.principal_id} runtime={runtimeRef.current} />
+          <WorkflowsPage
+            principalId={snapshot?.identity.principal_id}
+            role={snapshot?.identity.role}
+            runtime={runtimeRef.current}
+          />
         ) : null}
         {activeWorkspace !== 'assistant' &&
         activeWorkspace !== 'conversations' &&

@@ -1,5 +1,5 @@
 /**
- * Enterprise Console visual evidence.
+ * Owned Enterprise Desktop frame evidence.
  *
  * This stays inside the real Electron shell and exercises the production
  * preload → IPC transport → session FSM → eligibility → plugin route chain.
@@ -8,11 +8,12 @@
  * provider replies. No bearer, renderer login, second shell, or production
  * authority is introduced.
  *
- * Unlike the legacy soft visual helper, these assertions are hard gates:
- * a missing baseline or a pixel diff fails the test. Refresh intentionally via
- * `npx playwright test e2e/enterprise-visual.spec.ts --update-snapshots`.
- * The Linux baselines were committed only after the first hard missing-baseline
- * run produced all four actuals and those exact actuals were manually reviewed.
+ * The former pixel snapshots captured the generic Hermes chat chrome and are
+ * intentionally not reused. Until a reviewer compares fresh Linux captures to
+ * the product-owned reference screens, this suite is a hard semantic frame
+ * gate: it proves the Chinese Enterprise root, role-derived navigation and
+ * absence of the old ConsoleShell. A new pixel baseline may only be added after
+ * that review; `--update-snapshots` is not an approval mechanism.
  *
  * REMEDIATION-03 edits (scope: harness-only):
  *   1. Lifecycle cap: per-test timeout 60_000 ms (was the implicit 300_000 ms
@@ -267,7 +268,6 @@ const VISUAL_TEST_TIMEOUT_MS = 120_000
 
 async function setupEnterpriseVisualFixture(): Promise<MockBackendFixture> {
   const fixture = await setupMockBackend({
-    beforeFirstWindow: installEnterpriseEvidenceServer,
     // REM-03: do not pass `headless: true` so the renderer runs in a real
     // Xvfb-backed Chromium compositor instead of headless mode; the prior
     // headless flag interacted badly with the fixture window-state seed.
@@ -277,14 +277,21 @@ async function setupEnterpriseVisualFixture(): Promise<MockBackendFixture> {
     installErrorGuard: false,
   })
 
-  // This evidence route is not the chat composer. Generic waitForAppReady waits
-  // for gateway-backed chat readiness and can time out after the Enterprise
-  // navigation is already usable. Gate on the exact real shell → Enterprise
-  // route → dashboard seam that this test actually exercises.
-  const enterpriseNav = fixture.page.getByRole('button', { name: 'Enterprise', exact: true })
-  await expect(enterpriseNav).toBeVisible({ timeout: 15_000 })
-  await enterpriseNav.click()
-  await expect(fixture.page.getByTestId('console-page-dashboard')).toBeVisible({ timeout: 15_000 })
+  // Electron's production handler registration completes while the first
+  // BrowserWindow is being constructed. Installing our contract mock before
+  // that point lets the production registration overwrite it, which makes the
+  // renderer correctly fail closed but prevents this fixture from proving the
+  // owned role UI. Replace the handler only after the window exists, then
+  // reload so EnterpriseClientApp reconnects through the normal preload IPC
+  // bridge. This remains renderer → preload → ipcMain evidence; no browser
+  // fetch or renderer credential is introduced.
+  await installEnterpriseEvidenceServer(fixture.app)
+  await fixture.page.reload()
+
+  // The owned EnterpriseClientApp is the product root. Do not navigate through
+  // a generic Hermes sidebar button: that was the old visual authority.
+  await expect(fixture.page.getByTestId('enterprise-client-root')).toBeVisible({ timeout: 15_000 })
+  await expect(fixture.page.getByTestId('enterprise-client-workbench')).toBeVisible({ timeout: 15_000 })
 
   // Suppress the transient `Update ready` overlay before the viewport proof
   // begins, so the screenshot captures a notification-free baseline.
@@ -315,20 +322,11 @@ async function cleanupEnterpriseVisualFixture(
 // test because each test now performs its own cold Electron launch + close.
 test.describe.configure({ mode: 'serial', retries: 0, timeout: VISUAL_TEST_TIMEOUT_MS })
 
-// One test per evidence viewport, each with its own fixture lifecycle.
-// Originally a single serialised test ran all four viewports inside one test
-// body, which exceeded any single-test timeout on cold CI runners (each
-// viewport costs ~1 minute of real wall-clock). Four independent tests point
-// a single-viewport regression at the exact viewport that broke.
-//
-// The four baselines already exist (commit 8d39946903 / 2c07f6762
-// from W5 foundation work) and Playwright locates them by
-// `<test-title>-<snapshot-name>-<platform>.png`. Because every test
-// uses the same snapshot name (`enterprise-operator-home-${w}x${h}.png`),
-// each test gets a UNIQUE title so the four baselines are matched
-// 1:1 against the four tests.
+// One test per evidence viewport, each with its own fixture lifecycle. The
+// four desktop targets remain active while the owned pixel baseline is under
+// review, so a compact shell or a hidden Chinese navigation cannot slip in.
 for (const { height, width } of EVIDENCE_VIEWPORTS) {
-  test(`operator home has hard visual baseline at ${width}x${height}`, async () => {
+  test(`owned operator workbench has the Chinese product frame at ${width}x${height}`, async () => {
     let fixture: MockBackendFixture | null = null
     try {
       fixture = await setupEnterpriseVisualFixture()
@@ -354,17 +352,16 @@ for (const { height, width } of EVIDENCE_VIEWPORTS) {
         )
       })
 
-      // Re-dismiss any notification that may have re-appeared (defence in depth;
-      // bounded so the screenshot is never silently skipped if the overlay is
-      // stuck on screen).
+      // Re-dismiss any notification that may have re-appeared before proving
+      // the product frame.
       await dismissTransientUpdateOverlay(page)
 
       // Spec-owned role=alert check replaces the generic fixture-installed
       // afterEach guard for this spec only. Do not suppress real errors.
       await assertNoErrorAlert(page)
 
-      // Authoritative natural-log viewport marker: prove dimensions BEFORE
-      // screenshot so the GitHub job log itself proves the readiness state.
+      // Authoritative natural-log viewport marker: prove dimensions and the
+      // owned product frame before a reviewed pixel baseline exists.
       const readyActualApp = await app.evaluate(({ BrowserWindow }) => {
         const win = BrowserWindow.getAllWindows()[0]
         const [w, h] = win ? win.getContentSize() : [0, 0]
@@ -379,14 +376,19 @@ for (const { height, width } of EVIDENCE_VIEWPORTS) {
         `VISUAL_VIEWPORT_READY target=${width}x${height} electron=${readyActualApp.width}x${readyActualApp.height} renderer=${readyActualPage.width}x${readyActualPage.height}`,
       )
 
-      await expect(page).toHaveScreenshot(`enterprise-operator-home-${width}x${height}.png`, {
-        animations: 'disabled',
-        caret: 'hide',
-        timeout: 30_000,
-      })
+      const root = page.getByTestId('enterprise-client-root')
+      await expect(root).toContainText('Hermes Enterprise Desktop')
+      await expect(root).toContainText('企业工作台')
+      await expect(root).toContainText('我的工作台')
+      await expect(page.getByRole('navigation', { name: '企业客户端主导航' })).toContainText('工作台')
+      await expect(page.getByRole('navigation', { name: '企业客户端主导航' })).toContainText('我的任务')
+      await expect(page.getByRole('navigation', { name: '企业客户端主导航' })).toContainText('企业知识')
+      await expect(page.getByRole('navigation', { name: '企业客户端主导航' })).toContainText('AI 助理')
+      await expect(page.getByTestId('console-page-dashboard')).toHaveCount(0)
+      await expect(page.getByText('Enterprise Console', { exact: true })).toHaveCount(0)
 
       // eslint-disable-next-line no-console
-      console.log(`VISUAL_VIEWPORT_SCREENSHOT_PASS target=${width}x${height}`)
+      console.log(`OWNED_ENTERPRISE_FRAME_READY target=${width}x${height}`)
     } finally {
       // Close the Electron app BEFORE the test body returns, even on failure.
       await cleanupEnterpriseVisualFixture(fixture, `${width}x${height}`)
