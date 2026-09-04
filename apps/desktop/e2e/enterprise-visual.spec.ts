@@ -277,14 +277,26 @@ async function setupEnterpriseVisualFixture(): Promise<MockBackendFixture> {
     installErrorGuard: false,
   })
 
-  // This evidence route is not the chat composer. Generic waitForAppReady waits
-  // for gateway-backed chat readiness and can time out after the Enterprise
-  // navigation is already usable. Gate on the exact real shell → Enterprise
-  // route → dashboard seam that this test actually exercises.
-  const enterpriseNav = fixture.page.getByRole('button', { name: 'Enterprise', exact: true })
-  await expect(enterpriseNav).toBeVisible({ timeout: 15_000 })
-  await enterpriseNav.click()
+  // Enterprise is now the product's full-window first route. It no longer
+  // leaves an upstream-shell sidebar button mounted to click, so the evidence
+  // must prove the real root takeover → enterprise shell → dashboard chain
+  // rather than reach for a retired navigation affordance.
+  await expect
+    .poll(() => fixture.page.evaluate(() => window.location.hash))
+    .toContain('/console')
+  await expect(fixture.page.getByTestId('enterprise-console')).toBeVisible({ timeout: 15_000 })
   await expect(fixture.page.getByTestId('console-page-dashboard')).toBeVisible({ timeout: 15_000 })
+  // Route visibility is deliberately not the visual-ready condition: the
+  // Dashboard mounts while its authoritative health + metrics queries are
+  // still pending. Capture only after both mock-backed reads have reached
+  // their declared states so the baseline cannot accidentally freeze the
+  // login/connecting transition as the product surface.
+  await expect(fixture.page.getByTestId('console-health-state')).toHaveText('healthy', {
+    timeout: 15_000,
+  })
+  await expect(fixture.page.getByTestId('console-metrics-state')).toHaveText('loaded', {
+    timeout: 15_000,
+  })
 
   // Suppress the transient `Update ready` overlay before the viewport proof
   // begins, so the screenshot captures a notification-free baseline.
