@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { reconcileAfterConflict } from './authority-reconciliation'
 import type { EnterpriseClientRuntime } from './runtime'
 
 interface BusinessTask {
@@ -69,6 +70,7 @@ export function BusinessTasksPanel({
   const [assignments, setAssignments] = useState<TaskAssignment[]>([])
   const [assignmentState, setAssignmentState] = useState<LoadState>('unavailable')
   const [available, setAvailable] = useState<boolean | null>(null)
+  const [conflictNotice, setConflictNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [resolutionNote, setResolutionNote] = useState('')
   const [reloadToken, setReloadToken] = useState(0)
@@ -83,6 +85,7 @@ export function BusinessTasksPanel({
       setAssignments([])
       setAssignmentState('unavailable')
       setAvailable(null)
+      setConflictNotice(null)
       setError(null)
       setSelectedTaskId(null)
       setState('unavailable')
@@ -179,6 +182,7 @@ export function BusinessTasksPanel({
     }
 
     setActionState(path)
+    setConflictNotice(null)
     setError(null)
 
     try {
@@ -186,11 +190,24 @@ export function BusinessTasksPanel({
       setResolutionNote('')
       setReloadToken(current => current + 1)
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'cannot complete business task action')
+      const message = reason instanceof Error ? reason.message : 'cannot complete business task action'
+
+      const reconciled = await reconcileAfterConflict(reason, async () => {
+        setReloadToken(current => current + 1)
+      })
+
+      if (reconciled) {
+        setConflictNotice(message)
+
+      } else {
+        setError(message)
+      }
     } finally {
       setActionState(null)
     }
   }
+
+  const presentationError = error ?? conflictNotice
 
   return (
     <article className="hesc-card hesc-attempts-card" data-testid="enterprise-client-business-tasks">
@@ -209,11 +226,11 @@ export function BusinessTasksPanel({
         </span>
       </div>
 
-      {error ? (
+      {presentationError ? (
         <div className="hesc-error" role="status">
           <div>
             <strong>企业任务服务响应异常</strong>
-            <span>{error}</span>
+            <span>{presentationError}</span>
           </div>
         </div>
       ) : null}
