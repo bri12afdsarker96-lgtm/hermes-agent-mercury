@@ -172,6 +172,9 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   // Enterprise Console (P3-M4A): native one-login is token-free in the
   // renderer; main returns only an opaque sessionId and fences every request.
   enterprise: {
+    // Starts the configured gateway's native PKCE flow. No renderer-supplied
+    // address or credential crosses this boundary.
+    beginLogin: () => ipcRenderer.invoke('hermes:enterprise:begin-login'),
     // B16-OL · one-login: main resolves the trusted enterprise origin + native
     // bearer itself; the renderer passes NO url/token and gets back only
     // { ok, sessionId, baseUrl } (or { ok:false, code, message }).

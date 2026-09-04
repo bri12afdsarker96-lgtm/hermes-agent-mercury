@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { connectEnterpriseClient } from './runtime'
+import { beginEnterpriseLogin, connectEnterpriseClient } from './runtime'
 
 type EnterpriseResponse =
   { data: unknown; kind: 'ok' } | { code: string; kind: 'error'; message: string; status: number }
@@ -12,6 +12,7 @@ function installBridge(response: EnterpriseResponse = { data: { ok: true }, kind
       ok: true as const,
       sessionId: 'opaque-session'
     })),
+    beginLogin: vi.fn(async () => ({ ok: true as const })),
     disconnect: vi.fn(async () => ({ ok: true })),
     request: vi.fn(async () => response)
   }
@@ -26,6 +27,20 @@ afterEach(() => {
 })
 
 describe('Enterprise client runtime adapter', () => {
+  it('starts login only through the token-free main bridge', async () => {
+    const bridge = installBridge()
+
+    await expect(beginEnterpriseLogin()).resolves.toEqual({ ok: true })
+    expect(bridge.beginLogin).toHaveBeenCalledWith()
+  })
+
+  it('fails closed when the login bridge is unavailable', async () => {
+    await expect(beginEnterpriseLogin()).resolves.toMatchObject({
+      code: 'bridge_unavailable',
+      ok: false
+    })
+  })
+
   it('uses the token-free main bridge and fences requests with its opaque session', async () => {
     const bridge = installBridge({ data: { ok: true }, kind: 'ok' })
     const runtime = await connectEnterpriseClient()

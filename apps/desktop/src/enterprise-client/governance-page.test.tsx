@@ -57,6 +57,7 @@ describe('GovernancePage', () => {
     render(<GovernancePage runtime={runtime} />)
 
     expect(await screen.findByText('管理员')).toBeTruthy()
+    expect(await screen.findByText('企业管理员')).toBeTruthy()
     expect(await screen.findByText('binding.revoked')).toBeTruthy()
     expect(await screen.findByText('binding.created')).toBeTruthy()
     expect(screen.getByText('已启用')).toBeTruthy()

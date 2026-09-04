@@ -16,9 +16,9 @@ describe('Enterprise design system foundation', () => {
         navigationLabel="企业客户端主导航"
         onSelectWorkspace={onSelectWorkspace}
         productChannel="企业工作台"
-        productName="Hermes Enterprise"
-        scopeLabel="Operator"
-        statusbarDetail="authority: server"
+        productName="Hermes Enterprise Desktop"
+        scopeLabel="企业管理员"
+        statusbarDetail="安全连接 · 服务端权限"
         statusbarLabel="Hermes Enterprise Desktop"
         tenantLabel="tenant-a"
         workspaces={[
@@ -33,6 +33,9 @@ describe('Enterprise design system foundation', () => {
     expect(screen.getByRole('navigation', { name: '企业客户端主导航' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '工作台' }).getAttribute('aria-current')).toBe('page')
     expect(screen.getByText('服务端事实')).toBeTruthy()
+    expect(screen.getByText('企业工作台')).toBeTruthy()
+    expect(screen.getAllByText('企业管理员')).toHaveLength(2)
+    expect(screen.getByLabelText('全局搜索尚未接入')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: '知识空间' }))
 
