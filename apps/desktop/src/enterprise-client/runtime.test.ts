@@ -14,7 +14,8 @@ function installBridge(response: EnterpriseResponse = { data: { ok: true }, kind
     })),
     beginLogin: vi.fn(async () => ({ ok: true as const })),
     disconnect: vi.fn(async () => ({ ok: true })),
-    request: vi.fn(async () => response)
+    request: vi.fn(async () => response),
+    upload: vi.fn(async () => response)
   }
 
   ;(window as unknown as { hermesDesktop?: unknown }).hermesDesktop = { enterprise: bridge }
@@ -58,6 +59,20 @@ describe('Enterprise client runtime adapter', () => {
       body: { msg_id: 'handoff-1' },
       method: 'POST',
       path: '/api/handoff-claim',
+      sessionId: 'opaque-session'
+    })
+
+    const bytes = new Uint8Array([72, 101, 114, 109, 101, 115]).buffer
+    await expect(runtime.upload!('/api/knowledge-upload', {
+      bytes,
+      contentType: 'text/plain',
+      filename: 'readme.txt'
+    })).resolves.toEqual({ ok: true })
+    expect(bridge.upload).toHaveBeenCalledWith({
+      bytes,
+      contentType: 'text/plain',
+      filename: 'readme.txt',
+      path: '/api/knowledge-upload',
       sessionId: 'opaque-session'
     })
 
