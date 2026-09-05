@@ -206,7 +206,7 @@ test('a credentialed 401 fails fast for reauth instead of reporting a dead sessi
     (error: any) => {
       assert.equal(isReauthRequiredError(error), true)
       assert.equal(error.needsOauthLogin, true)
-      assert.match(error.message, /remote gateway session has expired/i)
+      assert.match(error.message, /远程企业服务会话已失效/)
 
       return true
     }

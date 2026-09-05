@@ -2,6 +2,22 @@ name: E2E Desktop
 
 on:
   workflow_call:
+    inputs:
+      test_path:
+        description: Optional Playwright path for a scoped evidence run.
+        required: false
+        type: string
+        default: ''
+      timeout_minutes:
+        description: Job timeout budget in minutes for scoped reusable E2E callers.
+        required: false
+        type: number
+        default: 20
+      xvfb_screen:
+        description: Xvfb screen geometry (e.g. 1280x1024x24) for scoped reusable E2E callers.
+        required: false
+        type: string
+        default: 1280x1024x24
     outputs:
       review_status:
         description: Screenshot and visual-diff status for the CI review comment.
@@ -18,7 +34,7 @@ jobs:
   e2e:
     name: Playwright E2E (Linux)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     outputs:
       review_status: ${{ steps.review-status.outputs.review_status }}
     steps:
@@ -105,14 +121,15 @@ jobs:
       - name: Run Playwright E2E tests
         working-directory: apps/desktop
         run: |
+          TEST_PATH='${{ inputs.test_path }}'
           if [ "${{ github.ref_name }}" = "main" ]; then
             echo "On main — generating/updating baseline screenshots"
-            npm run build && xvfb-run -a --server-args="-screen 0 1280x1024x24" \
-              npx playwright test --reporter=list --update-snapshots
+            npm run build && xvfb-run -a --server-args="-screen 0 ${{ inputs.xvfb_screen }}" \
+              npx playwright test ${TEST_PATH:+"$TEST_PATH"} --reporter=list --update-snapshots
           else
             echo "On PR — comparing against cached baselines"
-            npm run build && xvfb-run -a --server-args="-screen 0 1280x1024x24" \
-              npx playwright test --reporter=list
+            npm run build && xvfb-run -a --server-args="-screen 0 ${{ inputs.xvfb_screen }}" \
+              npx playwright test ${TEST_PATH:+"$TEST_PATH"} --reporter=list
           fi
         env:
           CI: 'true'

@@ -1,9 +1,38 @@
 import { describe, expect, it } from 'vitest'
 
-import { NEW_CHAT_ROUTE, primaryRouteSelectedSessionId, sessionRoute, SETTINGS_ROUTE } from './routes'
+import { registry } from '@/contrib/registry'
+
+import { contributedRoutes, NEW_CHAT_ROUTE, primaryRouteSelectedSessionId, ROUTES_AREA, sessionRoute, SETTINGS_ROUTE } from './routes'
 
 const SESS_A = 'sess-a'
 const SESS_B = 'sess-b'
+
+describe('contributedRoutes', () => {
+  it('carries the fullWindow flag from a route contribution (enterprise product chrome)', () => {
+    const dispose = registry.registerMany([
+      {
+        area: ROUTES_AREA,
+        data: { fullWindow: true, path: '/console' },
+        id: 'test-fullwindow',
+        render: () => null
+      },
+      {
+        area: ROUTES_AREA,
+        data: { path: '/kanban' },
+        id: 'test-plain',
+        render: () => null
+      }
+    ])
+
+    try {
+      const routes = contributedRoutes()
+      expect(routes.find(route => route.path === '/console')?.fullWindow).toBe(true)
+      expect(routes.find(route => route.path === '/kanban')?.fullWindow).toBeUndefined()
+    } finally {
+      dispose()
+    }
+  })
+})
 
 describe('primaryRouteSelectedSessionId', () => {
   it('prefers the routed session id over a stale/different store selection (#59305)', () => {

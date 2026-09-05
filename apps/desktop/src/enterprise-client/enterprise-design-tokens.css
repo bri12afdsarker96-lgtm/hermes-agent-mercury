@@ -1,0 +1,112 @@
+/*
+ * Hermes Enterprise Desktop Design System — production token subset.
+ *
+ * Source: D:\GitHub\Hermes Enterprise Desktop Design System\tokens\*.css
+ * Values are vendored here so the packaged desktop has no runtime dependency
+ * on the design-source directory. Keep components on semantic aliases below;
+ * base ramps exist only to preserve the source token relationships.
+ */
+:where(.hesc-root, .hesc-login) {
+  --blue-50: #f4f8ff;
+  --blue-100: #edf5fe;
+  --blue-200: #c7ddfd;
+  --blue-500: #1668f5;
+  --blue-600: #0e58dc;
+  --blue-700: #0c4cbe;
+  --teal-50: #e8f8f5;
+  --teal-500: #29b6a8;
+  --teal-600: #1d9a8e;
+  --orange-50: #fff4ea;
+  --orange-100: #ffe6d1;
+  --orange-600: #e06806;
+  --purple-50: #f6efff;
+  --purple-500: #8b5cf6;
+  --green-50: #ebfef5;
+  --green-100: #d2f9e5;
+  --green-600: #0e9a58;
+  --red-50: #fef1f0;
+  --red-100: #fddcd9;
+  --red-600: #d92d20;
+  --neutral-0: #ffffff;
+  --neutral-25: #fbfcfe;
+  --neutral-50: #f7f9fc;
+  --neutral-75: #f3f5fa;
+  --neutral-100: #edf1f7;
+  --neutral-200: #e6ebf2;
+  --neutral-300: #d5dce7;
+  --neutral-400: #aab3c2;
+  --neutral-500: #8b95a7;
+  --neutral-600: #5f6a7e;
+  --neutral-900: #16223c;
+
+  --theme-primary: var(--blue-500);
+  --theme-primary-hover: var(--blue-600);
+  --theme-primary-active: var(--blue-700);
+  --theme-primary-soft: var(--blue-100);
+  --theme-primary-soft-border: var(--blue-200);
+  --ui-focus-ring: color-mix(in oklch, var(--blue-500) 35%, transparent);
+  --ui-bg-canvas: var(--neutral-25);
+  --ui-bg-chrome: var(--neutral-75);
+  --ui-bg-sidebar: var(--neutral-0);
+  --ui-bg-surface: var(--neutral-0);
+  --ui-bg-secondary: var(--neutral-50);
+  --ui-bg-tertiary: var(--neutral-100);
+  --ui-row-hover: var(--neutral-50);
+  --ui-nav-active: var(--blue-100);
+  --ui-stroke-primary: var(--neutral-300);
+  --ui-stroke-secondary: var(--neutral-200);
+  --ui-stroke-tertiary: var(--neutral-100);
+  --ui-text-primary: var(--neutral-900);
+  --ui-text-secondary: var(--neutral-600);
+  --ui-text-tertiary: var(--neutral-500);
+  --ui-text-inverse: var(--neutral-0);
+  --status-success-fg: var(--green-600);
+  --status-success-bg: var(--green-50);
+  --status-success-border: var(--green-100);
+  --status-warning-fg: var(--orange-600);
+  --status-warning-bg: var(--orange-50);
+  --status-warning-border: var(--orange-100);
+  --status-danger-fg: var(--red-600);
+  --status-danger-bg: var(--red-50);
+  --status-danger-border: var(--red-100);
+  --status-progress-fg: var(--teal-600);
+  --status-progress-bg: var(--teal-50);
+  --module-assistant: var(--blue-500);
+  --module-followup: var(--teal-500);
+  --module-knowledge: var(--purple-500);
+
+  --titlebar-height: 44px;
+  --header-height: 56px;
+  --statusbar-height: 40px;
+  --sidebar-width: 250px;
+  --sidebar-width-sm: 216px;
+  --content-max-width: 1600px;
+  --page-inset-x: 28px;
+  --grid-gutter: 16px;
+  --card-padding: 20px;
+  --card-padding-compact: 16px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-full: 999px;
+  --text-page-title: 26px;
+  --text-page-title-lh: 34px;
+  --text-section: 15px;
+  --text-section-lh: 22px;
+  --text-kpi: 34px;
+  --text-kpi-lh: 40px;
+  --text-body-lg: 14px;
+  --text-body: 13px;
+  --text-body-lh: 20px;
+  --text-label: 12px;
+  --text-label-lh: 18px;
+  --text-micro: 11px;
+  --text-micro-lh: 16px;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --tracking-tight: -0.01em;
+  --font-sans: 'HarmonyOS Sans SC', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: ui-monospace, monospace;
+  --shadow-card: 0 1px 2px rgb(22 34 60 / 4%), 0 1px 12px rgb(22 34 60 / 3%);
+}

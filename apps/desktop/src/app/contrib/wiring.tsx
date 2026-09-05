@@ -21,10 +21,12 @@ import { FindBar } from '@/components/find-bar'
 import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overlay'
 import { NotificationStack } from '@/components/notifications'
 import { DesktopOnboardingOverlay } from '@/components/onboarding'
-import { $newSessionTabAction, registerPaneCloser } from '@/components/pane-shell/tree/store'
+import { $hiddenTreePanes, $newSessionTabAction, registerPaneCloser, setTreePaneHidden } from '@/components/pane-shell/tree/store'
 import { FloatingPet } from '@/components/pet/floating-pet'
 import { RemoteDisplayBanner } from '@/components/remote-display-banner'
 import { emitGatewayEvent } from '@/contrib/events'
+import { useContributions } from '@/contrib/react/use-contributions'
+import { registry } from '@/contrib/registry'
 import { getLatestSessionMessages } from '@/hermes'
 import { type ChatMessage, chatMessageText, preserveLocalAssistantErrors, toChatMessages } from '@/lib/chat-messages'
 import { isMessagingSource } from '@/lib/session-source'
@@ -90,8 +92,10 @@ import { resetProjectTreeState } from '../right-sidebar/files/use-project-tree'
 import { PersistentTerminal } from '../right-sidebar/terminal/persistent'
 import { closeAllTerminals } from '../right-sidebar/terminal/terminals'
 import {
+  contributedRoutes,
   CRON_ROUTE,
   navigateToWorkspacePage,
+  ROUTES_AREA,
   routeSessionId,
   sessionRoute,
   SETTINGS_ROUTE,
@@ -153,6 +157,12 @@ const StarmapView = lazy(async () => ({ default: (await import('../starmap')).St
 // WiringActions/WiringApi contracts all live in sibling modules — this file is
 // the controller that assembles them.
 export { WiredPane } from './context'
+
+// Panes the full-window effect hid (restore exactly these on exit — never
+// clobber the user's own collapse state). Module-scoped on purpose: a ref
+// synced inside useEffect is banned by no-restricted-syntax, and this set is
+// only read/written by the one effect below.
+let fullWindowHiddenPaneIds: string[] = []
 
 export function ContribWiring({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
@@ -235,6 +245,37 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   useEffect(() => {
     syncWorkspaceRoute(location.pathname)
   }, [location.pathname])
+
+  // STEP 7 — upstream product chrome stands down on a full-window page. A
+  // contributed route may declare `fullWindow` (the enterprise product route
+  // does): while it is active, every LEFT-zone pane (sessions, files, Bot
+  // Mode) and the statusbar stand down, so the page's own enterprise chrome
+  // is the primary product frame. Both return the moment the route leaves the
+  // page — only panes THIS effect hid are restored, so a user's own collapse
+  // state survives.
+  useContributions(ROUTES_AREA)
+  const fullWindowPage = contributedRoutes().some(route => route.path === location.pathname && route.fullWindow)
+
+  useEffect(() => {
+    if (fullWindowPage) {
+      const hiddenBefore = new Set($hiddenTreePanes.get())
+      fullWindowHiddenPaneIds = registry
+        .getArea('panes')
+        .map(c => ({ id: c.id, placement: (c.data as { placement?: string } | undefined)?.placement }))
+        .filter(pane => pane.placement === 'left' && !hiddenBefore.has(pane.id))
+        .map(pane => pane.id)
+
+      for (const paneId of fullWindowHiddenPaneIds) {
+        setTreePaneHidden(paneId, true)
+      }
+    } else {
+      for (const paneId of fullWindowHiddenPaneIds) {
+        setTreePaneHidden(paneId, false)
+      }
+
+      fullWindowHiddenPaneIds = []
+    }
+  }, [fullWindowPage])
 
   const {
     agentsOpen,
@@ -951,22 +992,23 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   // node's keys leaves its element reference intact, so `WiredPane` (memoized)
   // bails on that pane subtree — panes render independently of one another.
   const sidebarNode = useMemo(
-    () => <SidebarSurface actions={actions} currentView={currentView} />,
-    [actions, currentView]
+    () => (fullWindowPage ? null : <SidebarSurface actions={actions} currentView={currentView} />),
+    [actions, currentView, fullWindowPage]
   )
 
   const terminalNode = useMemo(() => <TerminalSurface />, [])
 
   const statusbarNode = useMemo(
-    () => (
-      <StatusbarSurface
-        actions={actions}
-        agentsOpen={agentsOpen}
-        chatOpen={chatOpen}
-        commandCenterOpen={commandCenterOpen}
-      />
-    ),
-    [actions, agentsOpen, chatOpen, commandCenterOpen]
+    () =>
+      fullWindowPage ? null : (
+        <StatusbarSurface
+          actions={actions}
+          agentsOpen={agentsOpen}
+          chatOpen={chatOpen}
+          commandCenterOpen={commandCenterOpen}
+        />
+      ),
+    [actions, agentsOpen, chatOpen, commandCenterOpen, fullWindowPage]
   )
 
   // The voice cap changes only on config load; the gateway instance + all
@@ -1052,8 +1094,15 @@ export function ContribWiring({ children }: { children: ReactNode }) {
       {/* The full real overlay set (mirrors DesktopController's `overlays`). */}
       <RemoteDisplayBanner />
       {!isAuxiliaryWindow() && <DesktopInstallOverlay />}
-      {!isAuxiliaryWindow() && (
+      {!isAuxiliaryWindow() && !fullWindowPage && (
         <DesktopOnboardingOverlay
+          // The enterprise product frame owns the full window on /console
+          // (R5-D/REM-02): the upstream provider-setup onboarding is NOT
+          // mounted there — its internal `requested` state (fresh install, no
+          // provider) would keep driving the setup choice even with
+          // enabled=false. The Design-System Login bootstrap presents the
+          // honest session state instead. Outside the enterprise route the
+          // upstream boot/onboarding experience is unchanged.
           enabled={gatewayState === 'open'}
           onCompleted={() => {
             void refreshHermesConfig()

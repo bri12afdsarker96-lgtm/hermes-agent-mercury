@@ -33,6 +33,7 @@ import {
   watchContributedPanes
 } from '@/components/pane-shell/tree/store'
 import { SidebarProvider } from '@/components/ui/sidebar'
+import { $enterpriseAvailable, registerEligibility } from '@/contrib/enterprise-eligibility'
 import { discoverBundledPlugins } from '@/contrib/plugins'
 import { Slot } from '@/contrib/react/slot'
 import { useContributions } from '@/contrib/react/use-contributions'
@@ -43,6 +44,7 @@ import { Download, FileText, LayoutDashboard, PanelBottom, Terminal, Upload, Zap
 import { type KeybindContribution, KEYBINDS_AREA } from '@/lib/keybinds/actions'
 import { TRANSCRIPT_DIRECTIVE_AREA, type TranscriptDirectiveContribution } from '@/lib/transcript-directives'
 import { setYoloEnabled } from '@/lib/yolo-session'
+import { bootstrapEnterpriseSession } from '@/plugins/enterprise-console/one-login'
 import { pruneComposerPopoutZones } from '@/store/composer-popout'
 import {
   $fileBrowserOpen,
@@ -414,6 +416,21 @@ registry.registerMany([
 ])
 
 declareDefaultTree(DEFAULT_TREE)
+
+// R4-A / R5-B product ownership (REM-02): RootRouteTakeover routes every
+// fresh launch to /console, so the enterprise-console plugin must be active
+// BEFORE any enterprise session exists — the unauthenticated first paint is
+// the Design-System Login bootstrap, and the AUTHENTICATED/UNAUTHENTICATED
+// split lives INSIDE ConsoleShell (Login surface vs enterprise shell), never
+// in plugin activation. `$enterpriseAvailable` is a constant-true product
+// flag (non-secret); the user's explicit Plugins toggle still wins because
+// the loader composes the atom with the persisted decision.
+$enterpriseAvailable.set(true)
+registerEligibility('enterprise-console', $enterpriseAvailable)
+
+// B16-OL · one-login: probe the native session once at boot. No URL/token is
+// pasted; the bearer stays in main. Safe no-op without the desktop bridge.
+bootstrapEnterpriseSession()
 
 // Bundled plugins load AFTER core, so a same-id contribution from a plugin
 // deliberately overrides the core default (last writer wins). Third-party

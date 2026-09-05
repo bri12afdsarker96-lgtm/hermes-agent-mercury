@@ -141,7 +141,7 @@ export const zh: Translations = {
       elevenLabsRejectedKey: 'ElevenLabs 拒绝了该 API key (401)。',
       diskFull: '磁盘已满 — 请腾出一些空间后再试。',
       gatewayAuthFailed: '网关认证失败 — 请检查你的 API_SERVER_KEY。',
-      methodNotAllowed: '桌面后端拒绝了该请求 (405 Method Not Allowed)。请尝试重启 hermes_Agent。',
+      methodNotAllowed: '桌面后端拒绝了该请求（405）。请尝试重启 Hermes 企业助手。',
       microphonePermission: '麦克风权限已被拒绝。',
       openaiRejectedApiKey: 'OpenAI 拒绝了该 API key。',
       openaiRejectedApiKeyWithStatus: status => `OpenAI 拒绝了该 API key (${status} invalid_api_key)。`,
@@ -439,7 +439,7 @@ export const zh: Translations = {
       advanced: '高级'
     },
     searchPlaceholder: {
-      about: '关于 hermes_Agent',
+      about: '关于 Hermes 企业助手',
       config: '搜索设置…',
       gateway: '网关连接…',
       keys: '搜索 API 密钥…',
@@ -783,7 +783,7 @@ export const zh: Translations = {
       }
     }),
     about: {
-      heading: 'hermes_Agent',
+      heading: 'Hermes 企业助手',
       attribution: '基于 Nous Research 的 Hermes Agent · MIT License',
       version: value => `版本 ${value}`,
       versionUnavailable: '版本不可用',
@@ -934,7 +934,7 @@ export const zh: Translations = {
       title: '网关连接',
       envOverride: '环境变量覆盖',
       intro:
-        'hermes_Agent 默认会启动自己的本地网关。当你希望此应用控制另一台机器上或可信代理后的现有 Hermes 后端时，可以使用远程网关。网关连接属于本机级设置；profile 是从所连接的网关中发现的。',
+        'Hermes 企业助手默认会启动自己的本地服务。当你希望此应用控制另一台机器上或可信代理后的现有企业服务时，可以使用远程网关。网关连接属于本机级设置；工作区从所连接的网关中发现。',
       envOverrideTitle: '环境变量正在控制此桌面会话。',
       envOverrideDesc: '取消设置 HERMES_DESKTOP_REMOTE_URL 和 HERMES_DESKTOP_REMOTE_TOKEN 后才会使用下面保存的设置。',
       modeTitle: '连接模式',
@@ -1013,7 +1013,7 @@ export const zh: Translations = {
       enterUrlFirst: '请先输入远程 URL。',
       restartingTitle: '网关连接正在重启',
       savedTitle: '网关设置已保存',
-      restartingMessage: 'hermes_Agent 将使用已保存设置重新连接（界面保持打开）。',
+      restartingMessage: 'Hermes 企业助手将使用已保存设置重新连接（界面保持打开）。',
       savedMessage: '已保存，下一次重启生效。',
       connectedTo: (baseUrl, version) => `已连接到 ${baseUrl}${version ? ` · Hermes ${version}` : ''}`,
       reachableTitle: '远程网关可访问',
@@ -1056,7 +1056,7 @@ export const zh: Translations = {
       sshErrHostKey: '自上次连接以来主机密钥已更改。请确认这是预期的，然后运行 ssh-keygen -R <host> 并重新连接。',
       sshErrNotInstalled:
         '远程主机上未安装 Hermes。请在远程安装（curl -fsSL https://hermes-agent.nousresearch.com/install.sh | sh）或设置 Hermes 路径。',
-      sshErrPlatform: '不支持的远程平台。hermes_Agent 的 SSH 模式支持 Linux、macOS 和 Windows 远程主机。',
+      sshErrPlatform: '不支持的远程平台。Hermes 企业助手的 SSH 模式支持 Linux、macOS 和 Windows 远程主机。',
       sshErrTimeout: 'SSH 连接超时。主机可能无法访问或处于休眠状态。',
       sshErrUpdateRequired: '使用 Desktop SSH 连接前，请更新远程主机上的 Hermes。',
       sshErrUnknown: 'SSH 连接失败。'
@@ -2660,16 +2660,16 @@ export const zh: Translations = {
     viewDocs: '查看安装文档',
     installTo: '将安装到',
     retryAfterRun: '我已运行 -- 重试',
-    setupChoiceTitle: '设置 hermes_Agent',
+    setupChoiceTitle: '设置 Hermes 企业助手',
     setupChoiceDesc: '将此应用连接到你已运行的 Hermes 网关，或在这台电脑上本地安装 Hermes。',
     connectExistingTitle: '连接到现有 Hermes',
     connectExistingShort: '连接现有环境',
     connectExistingDesc: '使用会话令牌或浏览器登录连接远程后端。不会启动本地安装。',
     installLocalTitle: '本地安装 Hermes',
     installLocalDesc: '下载 Hermes，创建 Python 环境，并在这台电脑上运行后端。',
-    localStartUnavailable: '无法启动本地安装。请重启 hermes_Agent 后重试。',
+    localStartUnavailable: '无法启动本地服务。请重启 Hermes 企业助手后重试。',
     remoteSetupTitle: '连接到现有 Hermes',
-    remoteSetupDesc: '输入网关 URL。hermes_Agent 会检测需要令牌还是浏览器登录。',
+    remoteSetupDesc: '输入企业服务地址。Hermes 企业助手会检测需要访问令牌还是浏览器登录。',
     remoteUrlTitle: '网关 URL',
     remoteUrlDesc: '使用 Hermes 网关的基础 URL；远程地址请包含 https://。',
     remoteUrlPlaceholder: 'https://gateway.example.com/hermes',
@@ -2694,7 +2694,7 @@ export const zh: Translations = {
     applyRemote: '应用并重新连接',
     backToSetup: '返回',
     failedTitle: '安装失败',
-    settingUpTitle: '正在设置 hermes_Agent',
+    settingUpTitle: '正在设置 Hermes 企业助手',
     finishingTitle: '正在收尾',
     failedDesc:
       '某个安装步骤失败。在 Windows 上，如果另一个 Hermes CLI 或桌面实例正在运行，可能会出现这种情况。请停止正在运行的 Hermes 实例后重试。可查看下面的详情或 desktop 日志中的完整记录。',
@@ -2716,7 +2716,7 @@ export const zh: Translations = {
   },
 
   onboarding: {
-    headerTitle: '开始设置 hermes_Agent',
+    headerTitle: '开始设置 Hermes 企业助手',
     headerDesc: '连接模型提供方即可开始对话。大多数选项只需一次点击。',
     preparingInstall: 'Hermes 正在完成安装。首次运行通常不到一分钟。',
     starting: '正在启动 Hermes…',
@@ -2867,7 +2867,7 @@ export const zh: Translations = {
       update: '更新',
       updateInProgress: '正在更新',
       commitsBehind: (count, branch) => `落后 ${branch} ${count} 个提交`,
-      desktopVersion: version => `hermes_Agent v${version}`,
+      desktopVersion: version => `Hermes 企业助手 v${version}`,
       backendVersion: version => `后端 v${version}`,
       clientLabel: version => `客户端 v${version}`,
       connectionSsh: host => `SSH: ${host}`,

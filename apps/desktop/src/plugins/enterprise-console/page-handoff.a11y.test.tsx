@@ -1,0 +1,176 @@
+/**
+ * Handoff page — a11y / keyboard test (LINE F).
+ *
+ * Per LINE F §P8: keyboard reachable actions, focus visible, status
+ * not color-only, dialog/form labels, empty/error text readable.
+ *
+ * Pure render-only checks. No controller changes.
+ *
+ * Per P1-VIS-V2-REMEDIATION-01:
+ *   - The 4 V0 tests are the W1-C contract preserved verbatim.
+ *   - 2 status-strip tests updated: text now asserts the honest
+ *     product copy "Handoff service available/unavailable" — no
+ *     `/api/handoff-*` developer paths leak into the visible product
+ *     UI.
+ */
+
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { cleanup, render, screen } from '@testing-library/react'
+import type { ReactNode } from 'react'
+import { afterEach, describe, expect, it } from 'vitest'
+
+import { HandoffsView } from './page-handoff.view'
+
+function wrap(node: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+  return render(<QueryClientProvider client={client}>{node}</QueryClientProvider>)
+}
+
+afterEach(cleanup)
+
+describe('Handoff a11y (LINE F)', () => {
+  it('Handoff queue panel exposes one real level-2 heading with accessible name "Handoff queue"', () => {
+    wrap(
+      <HandoffsView
+        available
+        handoffRowActionsSlot={() => null}
+        handoffs={[]}
+        handoffsError={null}
+        handoffsIsPending={false}
+      />,
+    )
+    const heading = screen.getByRole('heading', { level: 2, name: 'Handoff queue' })
+    expect(heading).toBeTruthy()
+    expect(heading.tagName.toLowerCase()).toBe('h2')
+  })
+
+  it('empty state text is informative', () => {
+    wrap(
+      <HandoffsView
+        available
+        handoffRowActionsSlot={() => null}
+        handoffs={[]}
+        handoffsError={null}
+        handoffsIsPending={false}
+      />,
+    )
+    expect(screen.getByText(/^no handoffs/)).toBeTruthy()
+  })
+
+  it('handoff row exposes aria-label combining msgId + threadId + state + age', () => {
+    wrap(
+      <HandoffsView
+        available
+        handoffRowActionsSlot={() => null}
+        handoffs={[
+          {
+            msgId: 'm1',
+            text: 'help',
+            threadId: 't1',
+            agentDisplay: 'unclaimed',
+            statusDisplay: '',
+            state: 'parked',
+            ageSeconds: 30,
+            ageTone: 'warn',
+            stateTone: 'muted',
+            canClaim: true,
+            canReply: false,
+            canRequeue: false,
+            stateLabel: 'parked',
+          },
+        ]}
+        handoffsError={null}
+        handoffsIsPending={false}
+      />,
+    )
+    const row = screen.getByTestId('console-handoff-row-m1')
+    expect(row.getAttribute('aria-label')).toContain('m1')
+    expect(row.getAttribute('aria-label')).toContain('t1')
+    expect(row.getAttribute('aria-label')).toContain('parked')
+    expect(row.getAttribute('aria-label')).toContain('30s')
+  })
+
+  it('status is NOT color-only: state text in DOM', () => {
+    wrap(
+      <HandoffsView
+        available
+        handoffRowActionsSlot={() => null}
+        handoffs={[
+          {
+            msgId: 'm2',
+            text: 'urgent',
+            threadId: 't2',
+            agentDisplay: 'agent-1',
+            statusDisplay: ' · claimed',
+            state: 'escalated',
+            ageSeconds: 90,
+            ageTone: 'bad',
+            stateTone: 'warn',
+            canClaim: false,
+            canReply: false,
+            canRequeue: false,
+            stateLabel: 'escalated',
+          },
+        ]}
+        handoffsError={null}
+        handoffsIsPending={false}
+      />,
+    )
+    expect(screen.getByText('escalated')).toBeTruthy()
+    expect(screen.getByLabelText('state escalated')).toBeTruthy()
+    expect(screen.getByLabelText('age 90 seconds')).toBeTruthy()
+  })
+
+  // V2-R3 remediation — visible product copy is honest availability
+  // language; no internal /api/ paths leak into the visible product UI.
+  it('productized status strip uses honest availability copy (available)', () => {
+    wrap(
+      <HandoffsView
+        available
+        handoffRowActionsSlot={() => null}
+        handoffs={[
+          {
+            msgId: 'm1',
+            text: 'help',
+            threadId: 't1',
+            agentDisplay: 'unclaimed',
+            statusDisplay: '',
+            state: 'parked',
+            ageSeconds: 30,
+            ageTone: 'warn',
+            stateTone: 'muted',
+            canClaim: true,
+            canReply: false,
+            canRequeue: false,
+            stateLabel: 'parked',
+          },
+        ]}
+        handoffsError={null}
+        handoffsIsPending={false}
+      />,
+    )
+    const strip = screen.getByTestId('console-handoffs-status')
+    expect(strip).toBeTruthy()
+    expect(strip.getAttribute('data-ec-state')).toBe('available')
+    expect(strip.textContent).toMatch(/Handoff service available/)
+    expect(strip.textContent).toMatch(/1 handoff\b/)
+    expect(strip.textContent).not.toMatch(/\/api\//)
+  })
+
+  it('productized status strip uses honest availability copy (unavailable)', () => {
+    wrap(
+      <HandoffsView
+        available={false}
+        handoffRowActionsSlot={() => null}
+        handoffs={[]}
+        handoffsError={null}
+        handoffsIsPending={false}
+      />,
+    )
+    const strip = screen.getByTestId('console-handoffs-status')
+    expect(strip.getAttribute('data-ec-state')).toBe('unavailable')
+    expect(strip.textContent).toMatch(/Handoff service unavailable/)
+    expect(strip.textContent).not.toMatch(/\/api\//)
+  })
+})

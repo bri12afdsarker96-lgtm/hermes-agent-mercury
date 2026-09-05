@@ -45,8 +45,16 @@ one-off at the call site.
 
 ## Information architecture
 
-- **Chat is the home surface.** The transcript and composer stay primary; tools,
-  previews, files, review, and terminal complement the conversation.
+- **Enterprise Workspace is a distinct product root.** `EnterpriseClientShell`
+  (`src/enterprise-client/enterprise-design-system.tsx`) owns the role-neutral
+  enterprise titlebar, navigation, header and status bar. It is not a second
+  implementation of the generic Hermes chat shell: enterprise controllers feed
+  it server-authoritative identity, capability and connection presentation
+  state, while the Agent remains a capability within the workbench.
+- **Chat is a capability surface, not the Enterprise home.** Within the
+  Enterprise Workspace, the assistant transcript and composer support a
+  business task; tools, previews, files, review and terminal complement that
+  task rather than replacing the role-based workbench.
 - **Pages are durable destinations.** Chat, Skills, Messaging, and Artifacts
   remain in shell chrome. Do not hide a distinct product noun inside an
   unrelated page.
@@ -60,6 +68,11 @@ one-off at the call site.
 - **One action, one home.** A command may have keyboard, palette, and visible
   affordances, but they invoke the same action and state. Do not fork behavior
   per entry point.
+
+`EnterpriseStatusBadge` is the enterprise product's presentational status
+primitive. Its controller supplies the wording and tone from authoritative
+state; the component must never make a permission, capability or connectivity
+decision locally.
 - **Projects own workspace cwd.** Use Sidebar → Projects for local folders and
   worktrees; do not reintroduce a per-session/right-sidebar folder-picker flow.
 
@@ -234,6 +247,19 @@ Notes:
   `nous-girl` mark on a white tile, softly rounded, identical in light/dark.
   It replaced scattered Sparkles glyphs in updates / onboarding / about. Use it
   for hero/brand moments; don't reintroduce decorative star/sparkle icons.
+
+## Bundled typefaces
+
+- Fonts ship with the app; nothing is fetched from a font CDN at runtime. The
+  `@font-face` rules live at the top of `src/styles.css`, the files in
+  `src/fonts/`, and each face carries its licence.
+- **JetBrains Mono** (Apache-2.0) is the bundled terminal/code face.
+- **HarmonyOS Sans SC** is the product-wide interface face, including the
+  shared desktop shell and Enterprise Console. Its four original, unmodified
+  weight files and Huawei licence notice live in `src/fonts/`; see
+  `docs/enterprise-console/HARMONYOS_SANS_PROVENANCE.md`.
+- Adding a face means adding its licence file in the same change. A typeface
+  without a licence in-tree does not ship.
 
 ## Motion
 

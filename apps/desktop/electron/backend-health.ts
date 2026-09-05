@@ -36,7 +36,7 @@ export interface HermesReadyOptions {
 }
 
 export const REMOTE_SESSION_EXPIRED_MESSAGE =
-  'Your remote gateway session has expired. Open Settings → Gateway and click "Sign in" again.'
+  '远程企业服务会话已失效。请打开“设置 → 网关”，然后重新登录。'
 
 export function isMissingHealthEndpointError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? '')

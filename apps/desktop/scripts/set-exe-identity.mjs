@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// set-exe-identity.mjs — stamp the Hermes icon + version metadata onto the
+// set-exe-identity.mjs — stamp the Hermes product mark + version metadata onto the
 // built Hermes.exe using rcedit, completely decoupled from electron-builder's
 // signing path.
 //
@@ -50,8 +50,8 @@ async function stampExeIdentity(exe, desktopRoot = resolve(import.meta.dirname, 
     throw new Error(`target exe not found: ${exe}`)
   }
 
-  // Icon lives at apps/desktop/assets/icon.ico
-  const icon = join(desktopRoot, 'assets', 'icon.ico')
+  // The ICO is generated from the product's high-resolution Hermes mark.
+  const icon = join(desktopRoot, 'assets', 'brand', 'hermes-mark-hires.ico')
   if (!existsSync(icon)) {
     throw new Error(`icon not found: ${icon}`)
   }
@@ -62,14 +62,14 @@ async function stampExeIdentity(exe, desktopRoot = resolve(import.meta.dirname, 
   await rcedit(exe, {
     icon,
     'version-string': {
-      ProductName: 'hermes_Agent',
-      FileDescription: 'hermes_Agent',
-      CompanyName: 'Nous Research',
+      ProductName: 'Hermes-企业助手',
+      FileDescription: 'Hermes-企业助手',
+      CompanyName: '七巧板',
       LegalCopyright: 'Copyright (c) 2026 Nous Research'
     }
   })
 
-  console.log('[set-exe-identity] done — hermes_Agent icon + identity stamped')
+  console.log('[set-exe-identity] done — Hermes-企业助手 icon + identity stamped')
 }
 
 export { stampExeIdentity }

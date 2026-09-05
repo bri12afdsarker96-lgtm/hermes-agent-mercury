@@ -105,6 +105,7 @@ describe('isRemoteReauthFailure', () => {
 describe('isRemoteReauthError', () => {
   it('recognizes auth-shaped boot errors', () => {
     expect(isRemoteReauthError('Your remote gateway session has expired.')).toBe(true)
+    expect(isRemoteReauthError('远程企业服务会话已失效。请重新登录。')).toBe(true)
     expect(isRemoteReauthError('OAuth: please sign in')).toBe(true)
   })
 
