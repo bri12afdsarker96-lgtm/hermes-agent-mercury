@@ -16,10 +16,10 @@ describe('Enterprise design system foundation', () => {
         navigationLabel="企业客户端主导航"
         onSelectWorkspace={onSelectWorkspace}
         productChannel="企业工作台"
-        productName="Hermes Enterprise Desktop"
+        productName="Hermes-企业助手"
         scopeLabel="企业管理员"
         statusbarDetail="安全连接 · 服务端权限"
-        statusbarLabel="Hermes Enterprise Desktop"
+        statusbarLabel="Hermes-企业助手"
         tenantLabel="tenant-a"
         workspaces={[
           { glyph: '01', id: 'workbench', label: '工作台' },

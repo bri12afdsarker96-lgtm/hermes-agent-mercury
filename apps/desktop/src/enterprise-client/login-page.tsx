@@ -1,10 +1,18 @@
+import { useState } from 'react'
+
 import hermesMark from './assets/hermes-mark.svg'
 
 export interface EnterpriseLoginPageProps {
   busy: boolean
   error: string | null
-  onLogin: () => void
+  onLogin: (loginName: string, password: string) => void
+  onOpenLogs: () => void
   status: string
+}
+
+export interface EnterprisePasswordChangePageProps {
+  error: string | null
+  onComplete: (currentPassword: string, newPassword: string) => Promise<void>
 }
 
 /**
@@ -12,12 +20,22 @@ export interface EnterpriseLoginPageProps {
  * Hermes_AI: the renderer never asks for or retains a token, password, or a
  * self-registration identity.
  */
-export function EnterpriseLoginPage({ busy, error, onLogin, status }: EnterpriseLoginPageProps) {
+export function EnterpriseLoginPage({ busy, error, onLogin, onOpenLogs, status }: EnterpriseLoginPageProps) {
+  const [loginName, setLoginName] = useState('')
+  const [password, setPassword] = useState('')
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const submittedPassword = password
+    setPassword('')
+    onLogin(loginName.trim(), submittedPassword)
+  }
+
   return (
     <main className="hesc-login" data-testid="enterprise-login-root">
       <header className="hesc-login-titlebar">
         <img alt="" aria-hidden="true" src={hermesMark} />
-        <span>Hermes Enterprise Desktop</span>
+        <span>Hermes-企业助手</span>
       </header>
       <div className="hesc-login-content">
         <section aria-labelledby="enterprise-login-product" className="hesc-login-brand">
@@ -25,7 +43,7 @@ export function EnterpriseLoginPage({ busy, error, onLogin, status }: Enterprise
             <img alt="" aria-hidden="true" src={hermesMark} />
             <span>
               <strong>HERMES</strong>
-              <small>Hermes Enterprise Desktop</small>
+              <small>Hermes-企业助手</small>
             </span>
           </div>
           <div>
@@ -40,7 +58,7 @@ export function EnterpriseLoginPage({ busy, error, onLogin, status }: Enterprise
             </ul>
           </div>
           <div aria-label="企业身份保障" className="hesc-login-features">
-            <span><b>✓</b><i>单点登录</i><small>企业身份一步登录</small></span>
+            <span><b>✓</b><i>企业账号登录</i><small>账号密码在客户端内完成验证</small></span>
             <span><b>⌁</b><i>凭据安全保存</i><small>令牌不进入渲染层</small></span>
             <span><b>⌘</b><i>权限自动同步</i><small>角色变更服务端生效</small></span>
           </div>
@@ -56,10 +74,100 @@ export function EnterpriseLoginPage({ busy, error, onLogin, status }: Enterprise
             {status}
           </div>
           {error ? <p className="hesc-login-error">{error}</p> : null}
-          <button className="hesc-login-action" disabled={busy} onClick={onLogin} type="button">
-            {busy ? '正在验证企业身份…' : '使用企业账号登录'}
-          </button>
-          <p className="hesc-login-help">企业连接由受控桌面身份通道发起。本客户端不提供自助注册，请联系企业管理员开通或恢复账号。</p>
+          <form className="hesc-login-form" onSubmit={submit}>
+            <label>
+              登录账号
+              <input
+                autoComplete="username"
+                disabled={busy}
+                onChange={event => setLoginName(event.target.value)}
+                placeholder="请输入企业登录账号"
+                value={loginName}
+              />
+            </label>
+            <label>
+              登录密码
+              <input
+                autoComplete="current-password"
+                disabled={busy}
+                minLength={12}
+                onChange={event => setPassword(event.target.value)}
+                placeholder="请输入登录密码"
+                type="password"
+                value={password}
+              />
+            </label>
+            <button className="hesc-login-action" disabled={busy || !loginName.trim() || password.length < 12} type="submit">
+              {busy ? '正在验证账号…' : '登录企业工作台'}
+            </button>
+          </form>
+          {error ? <button className="hesc-login-log-action" onClick={onOpenLogs} type="button">打开运行日志</button> : null}
+          <p className="hesc-login-help">账号由平台管理员或企业管理员开通。本客户端不提供自助注册；密码和会话凭据不会写入客户端运行日志。</p>
+        </section>
+      </div>
+    </main>
+  )
+}
+
+/** First-login rotation is deliberately a blocking product surface, not a
+ * dismissible notification. The actual bearer rotation remains in Electron
+ * main and the two password fields are cleared immediately after submit. */
+export function EnterprisePasswordChangePage({ error, onComplete }: EnterprisePasswordChangePageProps) {
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const mismatch = confirmPassword.length > 0 && newPassword !== confirmPassword
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (busy || mismatch || currentPassword.length < 12 || newPassword.length < 12) {
+      return
+    }
+
+    const submittedCurrent = currentPassword
+    const submittedNew = newPassword
+    setCurrentPassword('')
+    setNewPassword('')
+    setConfirmPassword('')
+    setBusy(true)
+
+    try {
+      await onComplete(submittedCurrent, submittedNew)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <main className="hesc-login" data-testid="enterprise-password-change-root">
+      <header className="hesc-login-titlebar">
+        <img alt="" aria-hidden="true" src={hermesMark} />
+        <span>Hermes-企业助手</span>
+      </header>
+      <div className="hesc-login-content hesc-password-change-content">
+        <section className="hesc-login-brand">
+          <div>
+            <h1>首次登录需要修改初始密码</h1>
+            <p className="hesc-login-lede">这是由企业管理员签发的一次性初始密码。修改完成后，旧会话会在服务器立即失效。</p>
+          </div>
+        </section>
+        <section aria-labelledby="enterprise-password-change-heading" className="hesc-login-panel">
+          <div>
+            <h2 id="enterprise-password-change-heading">设置新的登录密码</h2>
+            <p>新密码至少 12 个字符，请勿与初始密码相同。</p>
+          </div>
+          {error ? <p className="hesc-login-error" role="status">{error}</p> : null}
+          <form className="hesc-login-form" onSubmit={event => void submit(event)}>
+            <label>当前初始密码<input autoComplete="current-password" disabled={busy} onChange={event => setCurrentPassword(event.target.value)} type="password" value={currentPassword} /></label>
+            <label>新登录密码<input autoComplete="new-password" disabled={busy} minLength={12} onChange={event => setNewPassword(event.target.value)} type="password" value={newPassword} /></label>
+            <label>确认新登录密码<input autoComplete="new-password" disabled={busy} minLength={12} onChange={event => setConfirmPassword(event.target.value)} type="password" value={confirmPassword} /></label>
+            {mismatch ? <p className="hesc-login-error">两次输入的新密码不一致。</p> : null}
+            <button className="hesc-login-action" disabled={busy || mismatch || currentPassword.length < 12 || newPassword.length < 12} type="submit">
+              {busy ? '正在更新密码…' : '确认并进入工作台'}
+            </button>
+          </form>
         </section>
       </div>
     </main>

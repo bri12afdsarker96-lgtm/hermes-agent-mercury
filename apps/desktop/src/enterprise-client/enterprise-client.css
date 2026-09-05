@@ -56,7 +56,8 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 18px;
+  /* Electron's native Windows caption controls occupy the right edge. */
+  padding: 0 164px 0 18px;
   border-bottom: 1px solid var(--ui-stroke-secondary);
   background: var(--ui-bg-chrome);
   -webkit-app-region: drag;
@@ -77,6 +78,12 @@
 }
 .hesc-title-spacer {
   flex: 1;
+}
+.hesc-title-connection {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
 }
 .hesc-connection-dot {
   width: 7px;
@@ -500,6 +507,60 @@
   overflow: auto;
   margin-top: 12px;
 }
+.hesc-scroll-region {
+  max-height: min(46vh, 460px);
+  overscroll-behavior: contain;
+}
+.hesc-scroll-region-compact {
+  max-height: min(43vh, 410px);
+}
+.hesc-scroll-region .hesc-table thead {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  background: var(--ui-bg-surface);
+}
+.hesc-inline-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hesc-inline-action input {
+  width: 74px;
+  min-width: 0;
+}
+.hesc-platform-table td,
+.hesc-platform-table th {
+  white-space: nowrap;
+}
+.hesc-checkbox-control {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.hesc-dialog-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--ui-text-primary) 32%, transparent);
+}
+.hesc-dialog {
+  width: min(440px, 100%);
+  border: 1px solid var(--ui-stroke-secondary);
+  border-radius: 10px;
+  padding: 22px;
+  background: var(--ui-bg-surface);
+  box-shadow: var(--shadow-float);
+}
+.hesc-dialog h2 { margin: 0; font-size: 18px; }
+.hesc-dialog p { margin: 10px 0 0; color: var(--ui-text-secondary); line-height: 1.6; }
+.hesc-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .hesc-table {
   width: 100%;
   border-collapse: collapse;
@@ -1072,6 +1133,153 @@
 .hesc-login-action:disabled {
   cursor: not-allowed;
   opacity: 0.58;
+}
+.hesc-login-secondary {
+  min-height: 36px;
+  border: 1px solid var(--ui-stroke-secondary);
+  border-radius: 7px;
+  background: var(--ui-bg-surface);
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+  font: inherit;
+}
+.hesc-login-secondary:hover:not(:disabled) {
+  border-color: var(--theme-primary);
+  color: var(--theme-primary);
+}
+.hesc-login-secondary:disabled { cursor: not-allowed; opacity: 0.58; }
+.hesc-login-form {
+  display: grid;
+  gap: 12px;
+}
+
+.hesc-tenant-ai-layout {
+  align-items: stretch;
+}
+
+.hesc-ai-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hesc-ai-select-label {
+  display: grid;
+  gap: 7px;
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.hesc-ai-select-label select {
+  min-height: 34px;
+  border: 1px solid var(--ui-stroke-secondary);
+  border-radius: 6px;
+  background: var(--ui-bg-base);
+  color: var(--ui-text-primary);
+  font: inherit;
+  padding: 0 9px;
+}
+
+.hesc-ai-reminder-note {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--theme-primary-soft-border);
+  border-radius: 8px;
+  background: var(--theme-primary-soft);
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 12px;
+}
+
+.hesc-ai-reminder-note strong {
+  color: var(--theme-primary-hover);
+}
+
+.hesc-ai-file-row {
+  align-items: center;
+  border: 1px dashed var(--ui-stroke-secondary);
+  border-radius: 7px;
+  color: var(--ui-text-tertiary);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 8px;
+  padding: 9px;
+}
+
+.hesc-action-secondary {
+  background: var(--ui-bg-base);
+  border: 1px solid var(--theme-primary-soft-border);
+  color: var(--theme-primary-hover);
+}
+
+.hesc-text-action {
+  border: 0;
+  background: transparent;
+  color: var(--theme-primary-hover);
+  cursor: pointer;
+  font: inherit;
+  padding: 3px 4px;
+}
+
+.hesc-visually-hidden {
+  height: 1px;
+  margin: -1px;
+  opacity: 0;
+  overflow: hidden;
+  position: absolute;
+  width: 1px;
+}
+
+.hesc-inline-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hesc-success-copy {
+  color: var(--status-success-fg);
+  font-size: 12px;
+  margin: 12px 0 0;
+}
+
+.hesc-tenant-model-list {
+  margin-top: 16px;
+}
+.hesc-login-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  font-weight: var(--weight-medium);
+}
+.hesc-login-form input {
+  min-height: 40px;
+  border: 1px solid var(--ui-stroke-primary);
+  border-radius: 7px;
+  padding: 8px 10px;
+  background: var(--ui-bg-surface);
+  color: var(--ui-text-primary);
+  font: inherit;
+}
+.hesc-login-form input:focus { border-color: var(--theme-primary); outline: none; }
+.hesc-login-log-action,
+.hesc-log-action {
+  min-height: 36px;
+  border: 1px solid var(--ui-stroke-secondary);
+  border-radius: 7px;
+  background: var(--ui-bg-surface);
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+  font: inherit;
+}
+.hesc-login-log-action:hover,
+.hesc-log-action:hover {
+  border-color: var(--theme-primary);
+  color: var(--theme-primary);
 }
 .hesc-login-help {
   margin: -8px 0 0;

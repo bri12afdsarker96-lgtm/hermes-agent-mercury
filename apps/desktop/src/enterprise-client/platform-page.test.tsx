@@ -39,7 +39,7 @@ describe('PlatformPage', () => {
     ))
 
     const post = vi.fn(async <T,>(path: string) => (
-      (path === '/api/platform-tenant-admins'
+      (path === '/api/principals'
         ? {
             name: '林乔',
             onboarding_state: 'awaiting_federated_identity_binding',
@@ -62,8 +62,9 @@ describe('PlatformPage', () => {
     fireEvent.change(screen.getByLabelText('企业管理员姓名'), { target: { value: '林乔' } })
     fireEvent.click(screen.getByRole('button', { name: '任命企业管理员' }))
 
-    await waitFor(() => expect(post).toHaveBeenCalledWith('/api/platform-tenant-admins', {
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/api/principals', {
       name: '林乔',
+      role: 'tenant_admin',
       tenant_id: 'tenant-earlybird'
     }))
     expect(await screen.findByText(/完成前不能登录客户端/)).toBeTruthy()

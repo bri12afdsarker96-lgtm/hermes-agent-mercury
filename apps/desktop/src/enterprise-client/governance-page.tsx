@@ -4,6 +4,7 @@ import { CapabilityPolicyPanel } from './capability-policy-panel'
 import { PrincipalProvisioningPanel } from './principal-provisioning-panel'
 import { enterpriseRoleLabel } from './role-presentation'
 import type { EnterpriseClientRuntime, EnterpriseIdentity } from './runtime'
+import { TenantAiConfigPanel } from './tenant-ai-config-panel'
 
 interface AuditEvent {
   action?: string
@@ -286,6 +287,8 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
       <CapabilityPolicyPanel runtime={runtime} />
 
       <PrincipalProvisioningPanel identity={identity} runtime={runtime} />
+
+      {identity?.role === 'tenant_admin' ? <TenantAiConfigPanel runtime={runtime} /> : null}
 
       <article className="hesc-card hesc-audit-card">
         <div className="hesc-section-heading">

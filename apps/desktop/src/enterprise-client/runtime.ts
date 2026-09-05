@@ -70,6 +70,13 @@ export interface EnterpriseClientRuntime {
 
 export type EnterpriseLoginResult = { ok: true } | { code: string; message: string; ok: false }
 
+interface EnterpriseConnectedSession {
+  baseUrl: string
+  mustChangePassword?: boolean
+  ok: true
+  sessionId: string
+}
+
 /** Starts the configured, main-owned PKCE flow without exposing any auth
  * material or endpoint selection to the renderer. */
 export async function beginEnterpriseLogin(): Promise<EnterpriseLoginResult> {
@@ -84,6 +91,36 @@ export async function beginEnterpriseLogin(): Promise<EnterpriseLoginResult> {
   } catch {
     return { code: 'gateway_unavailable', message: 'enterprise gateway is unavailable', ok: false }
   }
+}
+
+/**
+ * Exchanges a Chinese-labelled enterprise account/password form in Electron
+ * main. The password is cleared by the caller immediately after this promise
+ * starts; only an opaque, sender-fenced session id returns to the renderer.
+ */
+export async function beginEnterprisePasswordLogin(
+  loginName: string,
+  password: string
+): Promise<EnterpriseConnectedSession> {
+  const bridge = window.hermesDesktop?.enterprise
+
+  if (!bridge?.loginWithPassword) {
+    throw enterpriseNetworkError()
+  }
+
+  let connected: Awaited<ReturnType<typeof bridge.loginWithPassword>>
+
+  try {
+    connected = await bridge.loginWithPassword({ loginName, password })
+  } catch {
+    throw enterpriseNetworkError()
+  }
+
+  if (!connected.ok) {
+    throw enterpriseNetworkError()
+  }
+
+  return connected
 }
 
 export interface EnterpriseClientOptions {
@@ -115,6 +152,33 @@ export async function connectEnterpriseClient(options: EnterpriseClientOptions =
     throw enterpriseNetworkError()
   }
 
+  return enterpriseRuntimeFromSession(enterpriseBridge, connected, options)
+}
+
+export async function connectEnterpriseClientWithPassword(
+  loginName: string,
+  password: string,
+  options: EnterpriseClientOptions = {}
+): Promise<{ mustChangePassword: boolean; runtime: EnterpriseClientRuntime }> {
+  const bridge = window.hermesDesktop?.enterprise
+
+  if (!bridge) {
+    throw enterpriseNetworkError()
+  }
+
+  const connected = await beginEnterprisePasswordLogin(loginName, password)
+
+  return {
+    mustChangePassword: connected.mustChangePassword === true,
+    runtime: enterpriseRuntimeFromSession(bridge, connected, options)
+  }
+}
+
+function enterpriseRuntimeFromSession(
+  enterpriseBridge: NonNullable<Window['hermesDesktop']['enterprise']>,
+  connected: EnterpriseConnectedSession,
+  options: EnterpriseClientOptions
+): EnterpriseClientRuntime {
   const { sessionId } = connected
 
   async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {

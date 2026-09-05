@@ -74,8 +74,10 @@ export function EnterpriseClientShell({
         <img alt="" aria-hidden="true" className="hesc-brand-mark" src={hermesMark} />
         <strong className="hesc-product-name">{productName}</strong>
         <div className="hesc-title-spacer" />
-        <span className="hesc-connection-dot" data-state={indicatorState} />
-        <span className="hesc-title-status">{connectionStatus}</span>
+        <div className="hesc-title-connection">
+          <span className="hesc-connection-dot" data-state={indicatorState} />
+          <span className="hesc-title-status">{connectionStatus}</span>
+        </div>
       </header>
 
       <aside className="hesc-sidebar">

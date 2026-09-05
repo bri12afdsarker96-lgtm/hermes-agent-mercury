@@ -13579,6 +13579,93 @@ ipcMain.handle('hermes:enterprise:begin-login', async (event) => {
   }
 })
 
+// Account/password sign-in is a first-class enterprise path.  It is kept in
+// main for the same reason as native OAuth: the renderer cannot choose an API
+// origin, retain a bearer, or turn itself into an arbitrary network proxy.
+ipcMain.handle('hermes:enterprise:login-password', async (event, payload) => {
+  if (!isEnterpriseClientSender(event.sender)) {
+    rememberLog('[enterprise-login] password sign-in rejected: sender is not the primary desktop window')
+    return { code: 'forbidden_sender', message: 'enterprise login unavailable', ok: false }
+  }
+
+  const loginName = typeof payload?.loginName === 'string' ? payload.loginName.trim() : ''
+  const password = typeof payload?.password === 'string' ? payload.password : ''
+
+  // Keep these bounds aligned with Hermes_AI. Neither value is ever logged.
+  if (!loginName || loginName.length > 64 || password.length < 12 || password.length > 256) {
+    rememberLog('[enterprise-login] password sign-in rejected: malformed credentials')
+    return { code: 'invalid_credentials', message: '账号或密码格式不正确', ok: false }
+  }
+
+  const enterpriseOrigin = normalizeEnterpriseApiOriginOrNull(
+    resolveEnterpriseOriginCandidate({
+      processEnv: process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN,
+      preferWindowsUserEnv: true,
+      windowsUserEnvReader: () => readWindowsUserEnvVar('HERMES_DESKTOP_ENTERPRISE_ORIGIN')
+    })
+  )
+
+  if (!enterpriseOrigin) {
+    rememberLog('[enterprise-login] password sign-in rejected: trusted enterprise origin is not configured')
+    return { code: 'no_enterprise_origin', message: 'enterprise API origin is not configured', ok: false }
+  }
+
+  let response: { must_change_password?: unknown; token?: unknown }
+
+  try {
+    response = await fetchJson(`${enterpriseOrigin}/api/login`, '', {
+      body: { name: loginName, password },
+      headers: { Origin: enterpriseOrigin },
+      method: 'POST'
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : ''
+    const match = /^(\d{3}):/.exec(message)
+    rememberLog(`[enterprise-login] password sign-in rejected: ${match ? `HTTP ${match[1]}` : 'network'}`)
+    return {
+      code: match ? 'invalid_credentials' : 'network',
+      message: match ? '账号或密码不正确，或账号已停用' : '无法连接企业服务',
+      ok: false
+    }
+  }
+
+  const bearer = typeof response.token === 'string' ? response.token : ''
+
+  if (!bearer) {
+    rememberLog('[enterprise-login] password sign-in rejected: server returned no session')
+    return { code: 'invalid_credentials', message: '账号登录未完成', ok: false }
+  }
+
+  let sessionId: string
+
+  try {
+    // A password credential is an explicit sign-in, so supersede any prior
+    // sender session instead of silently refreshing a different identity.
+    sessionId = enterpriseSessions.connect(event.sender.id, enterpriseOrigin, bearer)
+  } catch (err) {
+    rememberLog('[enterprise-login] password sign-in rejected: session creation failed')
+    return { ok: false, ...classifyConnectError(err) }
+  }
+
+  if (!enterpriseWiredSenders.has(event.sender.id)) {
+    enterpriseWiredSenders.add(event.sender.id)
+    event.sender.once('destroyed', () => {
+      enterpriseSessions.destroySender(event.sender.id)
+      enterpriseWiredSenders.delete(event.sender.id)
+    })
+  }
+
+  const session = enterpriseSessions.resolve(event.sender.id, sessionId)
+
+  if (!session) {
+    rememberLog('[enterprise-login] password sign-in rejected: session unavailable')
+    return { code: 'network', message: 'session unavailable', ok: false }
+  }
+
+  rememberLog('[enterprise-login] password sign-in accepted')
+  return { ...buildAutoConnectResult(session), mustChangePassword: response.must_change_password === true }
+})
+
 // B16-OL · One-login. Establish the enterprise session ENTIRELY in main from the
 // existing native OAuth bearer — no URL/token pasted in the renderer, no bearer
 // crossing to the renderer. Topology is fixed (OL-council): the Agent gateway and
@@ -13708,13 +13795,37 @@ ipcMain.handle('hermes:enterprise:request', async (event, req) => {
   }
 
   try {
+    // Enterprise writes originate in Electron main, not a browser renderer.
+    // This is derived only from the normalized, main-held session origin; a
+    // renderer must never be able to choose an Origin for this request.
+    const enterpriseOrigin = new URL(session.baseUrl).origin
+    const operation = `${String(method).toUpperCase()} ${new URL(url).pathname}`
     const data = await fetchJson(url, '', {
       bearer: session.token,
       body: req?.body,
+      headers: { Origin: enterpriseOrigin },
       method: String(method).toUpperCase()
     })
 
-    rememberLog('[enterprise-auth] enterprise request succeeded')
+    // Hermes_AI intentionally rotates the browser bearer when a temporary
+    // password is changed. Consume that bearer inside main and strip it from
+    // the response before it can cross the IPC boundary.
+    if (new URL(url).pathname === '/api/password-change' && data && typeof data === 'object') {
+      const passwordChange = data as { token?: unknown; [key: string]: unknown }
+      const rotatedBearer = typeof passwordChange.token === 'string' ? passwordChange.token : ''
+
+      if (!rotatedBearer) {
+        rememberLog('[enterprise] POST /api/password-change rejected: no rotated session')
+        return { code: 'http', kind: 'error', message: 'password rotation did not return a session', status: 500 }
+      }
+
+      enterpriseSessions.autoConnect(event.sender.id, session.baseUrl, rotatedBearer)
+      const { token: _token, ...safeData } = passwordChange
+      rememberLog(`[enterprise] ${operation} succeeded`)
+      return { data: safeData, kind: 'ok' }
+    }
+
+    rememberLog(`[enterprise] ${operation} succeeded`)
     return { data, kind: 'ok' }
   } catch (err) {
     // fetchJson rejects Error('<status>: <text>') for HTTP >= 400, else a
@@ -13724,11 +13835,11 @@ ipcMain.handle('hermes:enterprise:request', async (event, req) => {
     const match = /^(\d{3}):/.exec(message)
 
     if (match) {
-      rememberLog(`[enterprise-auth] enterprise request rejected: HTTP ${match[1]}`)
+      rememberLog(`[enterprise] ${String(method).toUpperCase()} ${new URL(url).pathname} rejected: HTTP ${match[1]}`)
       return { code: 'http', kind: 'error', message: `request failed (${match[1]})`, status: Number(match[1]) }
     }
 
-    rememberLog('[enterprise-auth] enterprise request failed: network')
+    rememberLog(`[enterprise] ${String(method).toUpperCase()} ${new URL(url).pathname} failed: network`)
     return { code: 'network', kind: 'error', message: 'cannot reach the Hermes server', status: 0 }
   }
 })
@@ -13769,8 +13880,10 @@ ipcMain.handle('hermes:enterprise:upload', async (event, req) => {
   }
 
   try {
+    const enterpriseOrigin = new URL(session.baseUrl).origin
     const data = await fetchJson(url, '', {
       bearer: session.token,
+      headers: { Origin: enterpriseOrigin },
       method: 'POST',
       upload: {
         bytes: req?.bytes,
@@ -13779,15 +13892,18 @@ ipcMain.handle('hermes:enterprise:upload', async (event, req) => {
       }
     })
 
+    rememberLog(`[enterprise] POST ${new URL(url).pathname} upload succeeded`)
     return { data, kind: 'ok' }
   } catch (err) {
     const message = err instanceof Error ? err.message : ''
     const match = /^(\d{3}):/.exec(message)
 
     if (match) {
+      rememberLog(`[enterprise] POST ${new URL(url).pathname} upload rejected: HTTP ${match[1]}`)
       return { code: 'http', kind: 'error', message: `request failed (${match[1]})`, status: Number(match[1]) }
     }
 
+    rememberLog(`[enterprise] POST ${new URL(url).pathname} upload failed: network`)
     return { code: 'network', kind: 'error', message: 'cannot reach the Hermes server', status: 0 }
   }
 })
@@ -14439,6 +14555,34 @@ ipcMain.on('hermes:logs:renderer-error', (_event, report) => {
   const { label, boundary, message, componentStack } = report && typeof report === 'object' ? report : {}
   rememberLog(formatRendererBoundaryReport(label, boundary, message, componentStack))
   flushDesktopLogBufferSync()
+})
+
+const ENTERPRISE_ACTIVITY_EVENTS = new Set(['connection_failed', 'connection_ready', 'workspace_opened'])
+const ENTERPRISE_ACTIVITY_WORKSPACES = new Set([
+  'assistant', 'conversations', 'governance', 'handoffs',
+  'knowledge', 'platform', 'reminders', 'workbench'
+])
+
+// A renderer can only request an allowlisted event plus a known workspace ID.
+// In particular, it cannot put form input, a response body, a password, an API
+// key, a tenant name, a token, or an arbitrary diagnostic string into desktop.log.
+ipcMain.on('hermes:logs:enterprise-activity', (ipcEvent, activity) => {
+  if (!isEnterpriseClientSender(ipcEvent.sender) || !activity || typeof activity !== 'object') {
+    return
+  }
+
+  const event = typeof activity.event === 'string' ? activity.event : ''
+  const workspace = typeof activity.workspace === 'string' ? activity.workspace : ''
+
+  if (!ENTERPRISE_ACTIVITY_EVENTS.has(event)) {
+    return
+  }
+
+  if (workspace && !ENTERPRISE_ACTIVITY_WORKSPACES.has(workspace)) {
+    return
+  }
+
+  rememberLog(`[enterprise-ui] ${event}${workspace ? ` workspace=${workspace}` : ''}`)
 })
 
 function isExecutableFile(filePath) {

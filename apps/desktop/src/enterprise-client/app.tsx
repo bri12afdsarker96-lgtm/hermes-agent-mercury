@@ -10,7 +10,7 @@ import { EnterpriseClientShell, EnterpriseStatusBadge } from './enterprise-desig
 import { GovernancePage } from './governance-page'
 import { HandoffsPage } from './handoffs-page'
 import { KnowledgePage } from './knowledge-page'
-import { EnterpriseLoginPage } from './login-page'
+import { EnterpriseLoginPage, EnterprisePasswordChangePage } from './login-page'
 import { PlatformPage } from './platform-page'
 import {
   enterpriseRoleLabel,
@@ -20,8 +20,8 @@ import {
   enterpriseWorkspaces
 } from './role-presentation'
 import {
-  beginEnterpriseLogin,
   connectEnterpriseClient,
+  connectEnterpriseClientWithPassword,
   type EnterpriseClientError,
   type EnterpriseClientRuntime,
   type EnterpriseHealth,
@@ -215,6 +215,7 @@ export function EnterpriseClientApp() {
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>('workbench')
   const [connectionState, setConnectionState] = useState<ConnectionState>('unavailable')
   const [error, setError] = useState<string | null>(null)
+  const [passwordChangeRequired, setPasswordChangeRequired] = useState(false)
   const [snapshot, setSnapshot] = useState<ClientSnapshot | null>(null)
   const generationRef = useRef(0)
   const runtimeRef = useRef<EnterpriseClientRuntime | null>(null)
@@ -251,11 +252,12 @@ export function EnterpriseClientApp() {
     let runtime: EnterpriseClientRuntime | null = existingRuntime
 
     try {
-      // Re-entering the foreground must ask main for the latest native OAuth
-      // bearer. `autoConnect` keeps the opaque session stable while updating
-      // that main-process credential; reusing the renderer runtime here would
-      // otherwise keep sending an expired bearer after the system refreshed it.
-      runtime = renewSession || !runtime
+      // Keep the already fenced main-process session alive across focus and
+      // workspace switches. Password accounts have no OAuth bearer to renew;
+      // replacing their session on every foreground event was the source of a
+      // visible disconnect. A confirmed 401/403 still clears the session via
+      // `onAuthenticationRequired`, and a cold start builds a new one here.
+      runtime = !runtime
         ? await connectEnterpriseClient({ onAuthenticationRequired: releaseAuthentication })
         : runtime
 
@@ -303,30 +305,38 @@ export function EnterpriseClientApp() {
     }
   }, [releaseAuthentication])
 
-  const beginLogin = useCallback(async () => {
-    setConnectionState('loading')
-    setError(null)
-
-    const result = await beginEnterpriseLogin()
-
-    if (!result.ok) {
-      setConnectionState('error')
-      setError(
-        result.code === 'no_enterprise_origin' || result.code === 'no_oauth_gateway'
-          ? '企业登录服务尚未完成配置，请联系平台管理员。'
-          : result.code === 'login_not_completed'
-            ? '企业身份登录未完成，请在打开的浏览器窗口中完成登录后返回客户端。'
-            : '无法启动企业身份登录，请检查企业网络连接后重试。'
-      )
-
+  const beginPasswordLogin = useCallback(async (loginName: string, password: string) => {
+    if (!loginName || !password) {
       return
     }
 
-    await refresh()
-  }, [refresh])
+    setConnectionState('loading')
+    setError(null)
+
+    try {
+      releaseRuntime()
+      const connected = await connectEnterpriseClientWithPassword(loginName, password, {
+        onAuthenticationRequired: releaseAuthentication
+      })
+      runtimeRef.current = connected.runtime
+      setPasswordChangeRequired(connected.mustChangePassword)
+      await refresh(false)
+    } catch (reason) {
+      setConnectionState('error')
+      setError(reason instanceof Error ? reason.message : '账号登录未完成，请检查企业网络后重试。')
+    }
+  }, [refresh, releaseAuthentication, releaseRuntime])
+
+  const openRuntimeLogs = useCallback(() => {
+    void window.hermesDesktop?.revealLogs()
+  }, [])
+
+  const recordEnterpriseActivity = useCallback((event: 'connection_failed' | 'connection_ready' | 'workspace_opened', workspace?: WorkspaceId) => {
+    window.hermesDesktop?.reportEnterpriseActivity?.({ event, workspace })
+  }, [])
 
   useEffect(() => {
-    document.title = 'Hermes Enterprise'
+    document.title = 'Hermes-企业助手'
     void refresh()
 
     return releaseRuntime
@@ -350,6 +360,16 @@ export function EnterpriseClientApp() {
     }
   }, [refresh])
 
+  useEffect(() => {
+    if (connectionState === 'ready') {
+      recordEnterpriseActivity('connection_ready')
+    }
+
+    if (connectionState === 'error') {
+      recordEnterpriseActivity('connection_failed')
+    }
+  }, [connectionState, recordEnterpriseActivity])
+
   const authoritySnapshot = currentAuthoritySnapshot(snapshot, connectionState)
   const authorityRuntime = connectionState === 'ready' ? runtimeRef.current : null
 
@@ -364,18 +384,49 @@ export function EnterpriseClientApp() {
     }
   }, [activeWorkspace, visibleWorkspaces])
 
+  useEffect(() => {
+    if (connectionState === 'ready' && visibleWorkspaces.some(workspace => workspace.id === activeWorkspace)) {
+      recordEnterpriseActivity('workspace_opened', activeWorkspace)
+    }
+  }, [activeWorkspace, connectionState, recordEnterpriseActivity, visibleWorkspaces])
+
   if (!snapshot && connectionState !== 'ready') {
     return (
       <EnterpriseLoginPage
         busy={connectionState === 'loading'}
         error={error}
-        onLogin={() => void beginLogin()}
+        onLogin={(loginName, password) => void beginPasswordLogin(loginName, password)}
+        onOpenLogs={openRuntimeLogs}
         status={humanConnectionState(connectionState)}
       />
     )
   }
 
   const activeDefinition = visibleWorkspaces.find(workspace => workspace.id === activeWorkspace) ?? visibleWorkspaces[0]!
+
+  if (passwordChangeRequired && authorityRuntime) {
+    return (
+      <EnterprisePasswordChangePage
+        error={error}
+        onComplete={async (currentPassword, newPassword) => {
+          try {
+            setError(null)
+            if (!authorityRuntime.post) {
+              throw new Error('当前企业服务不支持密码修改')
+            }
+            await authorityRuntime.post('/api/password-change', {
+              current_password: currentPassword,
+              new_password: newPassword
+            })
+            setPasswordChangeRequired(false)
+            await refresh(false)
+          } catch (reason) {
+            setError(reason instanceof Error ? reason.message : '密码修改未完成')
+          }
+        }}
+      />
+    )
+  }
 
   return (
     <EnterpriseClientShell
@@ -392,10 +443,10 @@ export function EnterpriseClientApp() {
         }
       }}
       productChannel="企业工作台"
-      productName="Hermes Enterprise Desktop"
+      productName="Hermes-企业助手"
       scopeLabel={enterpriseRoleLabel(authoritySnapshot?.identity.role)}
       statusbarDetail="安全连接 · 服务端权限"
-      statusbarLabel="Hermes Enterprise Desktop"
+      statusbarLabel="Hermes-企业助手"
       tenantLabel={authoritySnapshot?.identity.tenant_id ?? (
         authoritySnapshot?.identity.role === 'super_admin' ? '平台级全局范围' : '正在解析租户范围'
       )}
@@ -403,7 +454,12 @@ export function EnterpriseClientApp() {
     >
         {activeDefinition.id === 'platform' ? <PlatformPage runtime={authorityRuntime} /> : null}
         {activeDefinition.id === 'workbench' ? <Workbench snapshot={authoritySnapshot} state={connectionState} /> : null}
-        {activeDefinition.id === 'assistant' ? <AssistantPage /> : null}
+        {activeDefinition.id === 'assistant' ? (
+          <AssistantPage
+            principalId={authoritySnapshot?.identity.principal_id}
+            runtime={authorityRuntime}
+          />
+        ) : null}
         {activeDefinition.id === 'conversations' ? <ConversationsPage runtime={authorityRuntime} /> : null}
         {activeDefinition.id === 'handoffs' ? (
           <HandoffsPage principalId={authoritySnapshot?.identity.principal_id} runtime={authorityRuntime} />
@@ -435,6 +491,9 @@ export function EnterpriseClientApp() {
             </div>
             <button className="hesc-action" onClick={() => void refresh()} type="button">
               重试连接
+            </button>
+            <button className="hesc-log-action" onClick={openRuntimeLogs} type="button">
+              打开运行日志
             </button>
           </div>
         ) : null}

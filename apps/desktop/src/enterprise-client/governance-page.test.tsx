@@ -31,6 +31,15 @@ describe('GovernancePage', () => {
         }
       }
 
+      if (path === '/api/tenant-ai-config') {
+        return {
+          configured: false,
+          encryption_ready: true,
+          models: [],
+          providers: [{ default_model: 'deepseek-chat', key: 'deepseek', label: 'DeepSeek' }]
+        }
+      }
+
       if (path === '/api/audit-detail?event_id=1ad15d1f-b0c7-4b72-8c90-e81565bc9dd1') {
         return {
           event: {
@@ -63,6 +72,7 @@ describe('GovernancePage', () => {
     expect(screen.getByText('已启用')).toBeTruthy()
     expect(get).toHaveBeenCalledWith('/api/whoami')
     expect(get).toHaveBeenCalledWith('/api/audit-list')
+    expect(get).toHaveBeenCalledWith('/api/tenant-ai-config')
     expect(get).toHaveBeenCalledWith('/api/audit-detail?event_id=1ad15d1f-b0c7-4b72-8c90-e81565bc9dd1')
     expect(get).toHaveBeenCalledWith('/api/audit-correlate?resource_ref=binding-1')
   })

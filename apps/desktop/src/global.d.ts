@@ -184,6 +184,10 @@ declare global {
        */
       enterprise?: {
         beginLogin: () => Promise<{ ok: true } | { code: string; message: string; ok: false }>
+        loginWithPassword: (payload: { loginName: string; password: string }) => Promise<
+          | { baseUrl: string; mustChangePassword: boolean; ok: true; sessionId: string }
+          | { code: string; message: string; ok: false }
+        >
         autoConnect: () => Promise<
           { baseUrl: string; ok: true; sessionId: string } | { code: string; message: string; ok: false }
         >
@@ -279,6 +283,11 @@ declare global {
         boundary: string
         message: string
         componentStack: string
+      }) => void
+      /** Enum-only enterprise test telemetry; no user input or credential crosses this bridge. */
+      reportEnterpriseActivity?: (activity: {
+        event: 'connection_failed' | 'connection_ready' | 'workspace_opened'
+        workspace?: 'assistant' | 'conversations' | 'governance' | 'handoffs' | 'knowledge' | 'platform' | 'reminders' | 'workbench'
       }) => void
       readDir: (path: string) => Promise<HermesReadDirResult>
       gitRoot?: (path: string) => Promise<string | null>

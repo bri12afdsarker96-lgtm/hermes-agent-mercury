@@ -175,6 +175,10 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     // Starts the configured gateway's native PKCE flow. No renderer-supplied
     // address or credential crosses this boundary.
     beginLogin: () => ipcRenderer.invoke('hermes:enterprise:begin-login'),
+    // Passwords are accepted only for the duration of this IPC call.  Main
+    // resolves the enterprise origin, exchanges them for an opaque session,
+    // and never returns either the password or bearer to the renderer.
+    loginWithPassword: payload => ipcRenderer.invoke('hermes:enterprise:login-password', payload),
     // B16-OL · one-login: main resolves the trusted enterprise origin + native
     // bearer itself; the renderer passes NO url/token and gets back only
     // { ok, sessionId, baseUrl } (or { ok:false, code, message }).
@@ -246,6 +250,9 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   // Fire-and-forget: persists a renderer error-boundary catch (with component
   // stack) to desktop.log so crashes survive the window (#79428).
   reportRendererError: report => ipcRenderer.send('hermes:logs:renderer-error', report),
+  // Enterprise test telemetry is deliberately enum-only: the renderer may
+  // record a screen transition, never a name, request body, password or key.
+  reportEnterpriseActivity: activity => ipcRenderer.send('hermes:logs:enterprise-activity', activity),
   readDir: dirPath => ipcRenderer.invoke('hermes:fs:readDir', dirPath),
   gitRoot: startPath => ipcRenderer.invoke('hermes:fs:gitRoot', startPath),
   revealPath: targetPath => ipcRenderer.invoke('hermes:fs:reveal', targetPath),
