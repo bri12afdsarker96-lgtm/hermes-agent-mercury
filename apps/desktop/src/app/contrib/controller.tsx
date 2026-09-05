@@ -33,6 +33,7 @@ import {
   watchContributedPanes
 } from '@/components/pane-shell/tree/store'
 import { SidebarProvider } from '@/components/ui/sidebar'
+import { $enterpriseAvailable, registerEligibility } from '@/contrib/enterprise-eligibility'
 import { discoverBundledPlugins } from '@/contrib/plugins'
 import { Slot } from '@/contrib/react/slot'
 import { useContributions } from '@/contrib/react/use-contributions'
@@ -43,6 +44,8 @@ import { Download, FileText, LayoutDashboard, PanelBottom, Terminal, Upload, Zap
 import { type KeybindContribution, KEYBINDS_AREA } from '@/lib/keybinds/actions'
 import { TRANSCRIPT_DIRECTIVE_AREA, type TranscriptDirectiveContribution } from '@/lib/transcript-directives'
 import { setYoloEnabled } from '@/lib/yolo-session'
+import { bootstrapEnterpriseSession } from '@/plugins/enterprise-console/one-login'
+import { $sessionState } from '@/plugins/enterprise-console/session'
 import { pruneComposerPopoutZones } from '@/store/composer-popout'
 import {
   $fileBrowserOpen,
@@ -414,6 +417,22 @@ registry.registerMany([
 ])
 
 declareDefaultTree(DEFAULT_TREE)
+
+// The Enterprise Console is availability-gated: it appears on an authenticated
+// enterprise session (a non-secret signal), not via a manual Plugins toggle.
+// Register its eligibility atom BEFORE discovery so the loader binds it through
+// the existing plugin lifecycle. Until the enterprise session feeds
+// `$enterpriseAvailable` it stays false → the console stays hidden, exactly as
+// its `defaultEnabled: false` floor does today.
+registerEligibility('enterprise-console', $enterpriseAvailable)
+
+// B16-OL · one-login: the SHELL (not plugin.register — the plugin is gated on this
+// very signal) projects the session FSM onto `$enterpriseAvailable` (true iff
+// AUTHENTICATED), then probes the native session once. No URL/token is pasted; the
+// bearer stays in main. Subscribe BEFORE the probe so the AUTHENTICATED transition
+// is captured. Safe no-op without the desktop bridge.
+$sessionState.subscribe(state => $enterpriseAvailable.set(state === 'AUTHENTICATED'))
+bootstrapEnterpriseSession()
 
 // Bundled plugins load AFTER core, so a same-id contribution from a plugin
 // deliberately overrides the core default (last writer wins). Third-party
