@@ -13,6 +13,7 @@ export type EnterpriseWorkspaceId =
   | 'governance'
   | 'handoffs'
   | 'knowledge'
+  | 'platform'
   | 'reminders'
   | 'workbench'
 
@@ -131,6 +132,19 @@ const ADMIN_WORKSPACES: readonly EnterpriseWorkspaceDefinition[] = [
   { description: '使用企业 AI 协作能力', glyph: '07', id: 'assistant', label: 'AI 助理' }
 ]
 
+/** Platform authority is deliberately separate from a tenant administrator.
+ * A global super_admin has no tenant_id and must never be sent through
+ * tenant-scoped conversations, governance, knowledge or workflow endpoints. */
+const PLATFORM_WORKSPACES: readonly EnterpriseWorkspaceDefinition[] = [
+  {
+    description: '开通企业租户并查看平台侧租户状态',
+    glyph: '01',
+    id: 'platform',
+    label: '企业开通',
+    requiredPermissions: ['tenant.crud']
+  }
+]
+
 const SAFE_WORKSPACES: readonly EnterpriseWorkspaceDefinition[] = [
   { description: '正在确认企业服务与权限范围', glyph: '01', id: 'workbench', label: '工作台' },
   { description: '使用企业 AI 协作能力', glyph: '02', id: 'assistant', label: 'AI 助理' }
@@ -160,8 +174,12 @@ function candidateWorkspaces(role: string | undefined): readonly EnterpriseWorks
     return SUPERVISOR_WORKSPACES
   }
 
-  if (role === 'tenant_admin' || role === 'super_admin') {
+  if (role === 'tenant_admin') {
     return ADMIN_WORKSPACES
+  }
+
+  if (role === 'super_admin') {
+    return PLATFORM_WORKSPACES
   }
 
   return SAFE_WORKSPACES

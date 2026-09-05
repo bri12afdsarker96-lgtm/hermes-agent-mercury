@@ -141,4 +141,21 @@ describe('EnterpriseClientApp authority lifecycle', () => {
     expect(await screen.findByText('当前身份无权访问此资源')).toBeTruthy()
     expect(bridge.disconnect).not.toHaveBeenCalled()
   })
+
+  it('revalidates with main-owned credentials when the app returns to the foreground', async () => {
+    const bridge = installAuthorityBridge({
+      '/api/health': { data: HEALTH, kind: 'ok' },
+      '/api/metrics?window=24h': { data: METRICS, kind: 'ok' },
+      '/api/whoami': { data: IDENTITY, kind: 'ok' }
+    })
+
+    render(<EnterpriseClientApp />)
+    await screen.findAllByText('企业服务已连接')
+    const initialAutoConnects = bridge.autoConnect.mock.calls.length
+
+    window.dispatchEvent(new Event('focus'))
+
+    await waitFor(() => expect(bridge.autoConnect.mock.calls.length).toBeGreaterThan(initialAutoConnects))
+    expect(bridge.disconnect).not.toHaveBeenCalled()
+  })
 })

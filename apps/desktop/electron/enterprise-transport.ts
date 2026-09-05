@@ -245,20 +245,32 @@ export class EnterpriseSessionStore {
   }
 
   /**
-   * B16-OL · Idempotent per-sender one-login connect. If a live session already
-   * exists for this sender, return its EXISTING opaque sessionId without minting
-   * a second session or rotating the bearer — so the shell probe and the plugin
-   * mount can both call it and converge on one session. Otherwise mint like
-   * ``connect``. Keys on senderId alone (one enterprise login per renderer).
+   * Idempotent per-sender one-login connect.  The opaque renderer session stays
+   * stable while its main-process bearer is replaced with the latest token from
+   * the native OAuth store.  Native access tokens can be refreshed while the
+   * app is backgrounded; retaining the old bearer made an otherwise successful
+   * foreground reconnect fail with 401 until the user logged in again.
+   *
+   * A changed enterprise origin is deliberately a new fenced session.  The
+   * renderer may not retain a session capability across origins.
    */
   autoConnect(senderId: number, baseUrl: unknown, token: unknown): string {
+    const normalized = normalizeEnterpriseBaseUrl(baseUrl)
+    const bearer = String(token ?? '')
+
+    if (!bearer) {
+      throw new Error('missing token')
+    }
+
     const existing = this.#bySender.get(senderId)
 
-    if (existing) {
+    if (existing && existing.baseUrl === normalized) {
+      existing.token = bearer
+
       return existing.sessionId
     }
 
-    return this.connect(senderId, baseUrl, token)
+    return this.connect(senderId, normalized, bearer)
   }
 
   /** B16-OL · The current opaque sessionId for a sender, or null (none / destroyed).

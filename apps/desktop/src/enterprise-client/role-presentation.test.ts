@@ -33,6 +33,12 @@ describe('enterprise role presentation', () => {
     ).toEqual(['运营总览', '会话中心', 'AI 助理'])
   })
 
+  it('keeps the global platform administrator out of tenant-scoped navigation', () => {
+    expect(enterpriseWorkspaces({ effective_permissions: ['*'], role: 'super_admin' }).map(workspace => workspace.id)).toEqual([
+      'platform'
+    ])
+  })
+
   it('fails closed to the safe Chinese navigation for an unknown role', () => {
     expect(enterpriseRoleLabel('unrecognised')).toBe('权限正在确认')
     expect(enterpriseWorkspaces({ effective_permissions: ['*'], role: 'unrecognised' }).map(workspace => workspace.id)).toEqual([

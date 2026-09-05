@@ -259,13 +259,23 @@ describe('B16-OL · one-login pure core (autoConnect / containment / origin)', (
   const SECRET = 'native-bearer-SECRET'
 
   // OL-Q2 · idempotency + fencing
-  it('autoConnect is idempotent per sender: same id, one session, one bearer', () => {
+  it('autoConnect keeps the opaque session stable and refreshes its main-process bearer', () => {
     const store = new EnterpriseSessionStore()
     const sid1 = store.autoConnect(1, BASE, 'tok-a')
-    const sid2 = store.autoConnect(1, BASE, 'tok-a')
+    const sid2 = store.autoConnect(1, BASE, 'tok-b')
     expect(sid2).toBe(sid1)
     expect(store.size()).toBe(1)
-    expect(store.resolve(1, sid1)?.token).toBe('tok-a')
+    expect(store.resolve(1, sid1)?.token).toBe('tok-b')
+  })
+
+  it('autoConnect rotates the fenced session when the trusted enterprise origin changes', () => {
+    const store = new EnterpriseSessionStore()
+    const sidOld = store.autoConnect(1, BASE, 'tok-a')
+    const sidNew = store.autoConnect(1, 'https://enterprise-next.example.com', 'tok-b')
+
+    expect(sidNew).not.toBe(sidOld)
+    expect(store.resolve(1, sidOld)).toBeNull()
+    expect(store.resolve(1, sidNew)?.baseUrl).toBe('https://enterprise-next.example.com')
   })
 
   it('autoConnect keeps senders isolated', () => {

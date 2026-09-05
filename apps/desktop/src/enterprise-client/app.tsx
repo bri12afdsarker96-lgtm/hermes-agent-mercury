@@ -11,6 +11,7 @@ import { GovernancePage } from './governance-page'
 import { HandoffsPage } from './handoffs-page'
 import { KnowledgePage } from './knowledge-page'
 import { EnterpriseLoginPage } from './login-page'
+import { PlatformPage } from './platform-page'
 import {
   enterpriseRoleLabel,
   enterpriseWorkbenchPresentation,
@@ -42,7 +43,7 @@ interface ClientSnapshot {
 
 type WorkspaceDefinition = EnterpriseWorkspaceDefinition
 
-const ALWAYS_VISIBLE_WORKSPACES = new Set<WorkspaceId>(['assistant', 'workbench'])
+const ALWAYS_VISIBLE_WORKSPACES = new Set<WorkspaceId>(['assistant', 'platform', 'workbench'])
 
 /**
  * Hermes_AI owns availability. The local role only changes product wording;
@@ -69,6 +70,7 @@ function workspacesFor(identity: EnterpriseIdentity | undefined): WorkspaceDefin
     return surface !== undefined && surfaces?.[surface]?.available === true
   })
 }
+
 function humanConnectionState(state: ConnectionState): string {
   if (state === 'loading') {
     return '正在连接企业服务'
@@ -239,7 +241,7 @@ export function EnterpriseClientApp() {
     setError(reason.message)
   }, [])
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (renewSession = false) => {
     const generation = generationRef.current + 1
     generationRef.current = generation
     setConnectionState('loading')
@@ -249,13 +251,18 @@ export function EnterpriseClientApp() {
     let runtime: EnterpriseClientRuntime | null = existingRuntime
 
     try {
-      runtime = runtime ?? (await connectEnterpriseClient({ onAuthenticationRequired: releaseAuthentication }))
+      // Re-entering the foreground must ask main for the latest native OAuth
+      // bearer. `autoConnect` keeps the opaque session stable while updating
+      // that main-process credential; reusing the renderer runtime here would
+      // otherwise keep sending an expired bearer after the system refreshed it.
+      runtime = renewSession || !runtime
+        ? await connectEnterpriseClient({ onAuthenticationRequired: releaseAuthentication })
+        : runtime
 
       if (generation !== generationRef.current) {
-        if (runtime !== existingRuntime) {
-          await runtime.disconnect()
-        }
-
+        // A renewed runtime can intentionally share the same opaque session as
+        // the current one. Disconnecting it here would let a superseded refresh
+        // tear down the live foreground session.
         return
       }
 
@@ -311,6 +318,7 @@ export function EnterpriseClientApp() {
             ? '企业身份登录未完成，请在打开的浏览器窗口中完成登录后返回客户端。'
             : '无法启动企业身份登录，请检查企业网络连接后重试。'
       )
+
       return
     }
 
@@ -324,11 +332,30 @@ export function EnterpriseClientApp() {
     return releaseRuntime
   }, [refresh, releaseRuntime])
 
+  useEffect(() => {
+    const reconnectWhenForegrounded = () => {
+      if (document.visibilityState !== 'visible') {
+        return
+      }
+
+      void refresh(true)
+    }
+
+    window.addEventListener('focus', reconnectWhenForegrounded)
+    document.addEventListener('visibilitychange', reconnectWhenForegrounded)
+
+    return () => {
+      window.removeEventListener('focus', reconnectWhenForegrounded)
+      document.removeEventListener('visibilitychange', reconnectWhenForegrounded)
+    }
+  }, [refresh])
+
   const authoritySnapshot = currentAuthoritySnapshot(snapshot, connectionState)
   const authorityRuntime = connectionState === 'ready' ? runtimeRef.current : null
+
   const visibleWorkspaces = useMemo(
     () => workspacesFor(authoritySnapshot?.identity),
-    [authoritySnapshot?.identity?.desktop_surfaces]
+    [authoritySnapshot?.identity]
   )
 
   useEffect(() => {
@@ -369,9 +396,12 @@ export function EnterpriseClientApp() {
       scopeLabel={enterpriseRoleLabel(authoritySnapshot?.identity.role)}
       statusbarDetail="安全连接 · 服务端权限"
       statusbarLabel="Hermes Enterprise Desktop"
-      tenantLabel={authoritySnapshot?.identity.tenant_id ?? '正在解析租户范围'}
+      tenantLabel={authoritySnapshot?.identity.tenant_id ?? (
+        authoritySnapshot?.identity.role === 'super_admin' ? '平台级全局范围' : '正在解析租户范围'
+      )}
       workspaces={visibleWorkspaces}
     >
+        {activeDefinition.id === 'platform' ? <PlatformPage runtime={authorityRuntime} /> : null}
         {activeDefinition.id === 'workbench' ? <Workbench snapshot={authoritySnapshot} state={connectionState} /> : null}
         {activeDefinition.id === 'assistant' ? <AssistantPage /> : null}
         {activeDefinition.id === 'conversations' ? <ConversationsPage runtime={authorityRuntime} /> : null}
@@ -392,6 +422,7 @@ export function EnterpriseClientApp() {
         activeDefinition.id !== 'governance' &&
         activeDefinition.id !== 'handoffs' &&
         activeDefinition.id !== 'knowledge' &&
+        activeDefinition.id !== 'platform' &&
         activeDefinition.id !== 'reminders' &&
         activeDefinition.id !== 'workbench' ? (
           <WorkspacePlaceholder workspace={activeDefinition} />
