@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { KnowledgeGapsPanel } from './knowledge-gaps-panel'
 import type { EnterpriseClientRuntime } from './runtime'
@@ -13,7 +13,13 @@ interface KnowledgeEntry {
 interface EntriesResponse {
   entries?: KnowledgeEntry[]
 }
+interface KnowledgeUploadResponse {
+  filename?: string
+  upload_id?: string
+}
 type LoadState = 'error' | 'loading' | 'ready' | 'unavailable'
+
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 function requestStateLabel(state: LoadState): string {
   if (state === 'loading') {
@@ -37,7 +43,71 @@ export function KnowledgePage({ runtime }: { runtime: EnterpriseClientRuntime | 
   const [entries, setEntries] = useState<KnowledgeEntry[]>([])
   const [entriesState, setEntriesState] = useState<LoadState>('unavailable')
   const [error, setError] = useState<string | null>(null)
+  const [collectionName, setCollectionName] = useState('')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null)
+  const [uploadNotice, setUploadNotice] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+
+  const refreshCollections = useCallback(async () => {
+    if (!runtime) {
+      return
+    }
+
+    const response = await runtime.get<CollectionsResponse>('/api/knowledge-committed')
+    const nextCollections = response.collections ?? []
+
+    setCollections(nextCollections)
+    setSelectedCollection(current =>
+      current && nextCollections.includes(current) ? current : (nextCollections[0] ?? null)
+    )
+  }, [runtime])
+
+  async function uploadKnowledge() {
+    const collection = collectionName.trim()
+
+    if (!runtime?.post || !runtime.upload || !selectedFile || !collection || uploading) {
+      return
+    }
+
+    if (selectedFile.size > MAX_UPLOAD_BYTES) {
+      setError('文件超过 50 MiB 上传上限，请拆分后再试')
+
+      return
+    }
+
+    setError(null)
+    setUploadNotice(null)
+    setUploading(true)
+
+    try {
+      const uploaded = await runtime.upload<KnowledgeUploadResponse>('/api/knowledge-upload', {
+        bytes: await selectedFile.arrayBuffer(),
+        contentType: selectedFile.type || 'application/octet-stream',
+        filename: selectedFile.name
+      })
+
+      const uploadId = uploaded.upload_id
+
+      if (!uploadId) {
+        throw new Error('服务端未返回知识上传标识')
+      }
+
+      await runtime.post('/api/knowledge-commit', {
+        collection,
+        source: uploaded.filename ?? selectedFile.name,
+        upload_id: uploadId
+      })
+      await refreshCollections()
+      setCollectionName('')
+      setSelectedFile(null)
+      setUploadNotice(`“${uploaded.filename ?? selectedFile.name}”已提交到知识集合“${collection}”。`)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'knowledge upload failed')
+    } finally {
+      setUploading(false)
+    }
+  }
 
   useEffect(() => {
     let active = true
@@ -54,18 +124,12 @@ export function KnowledgePage({ runtime }: { runtime: EnterpriseClientRuntime | 
 
     setCollectionsState('loading')
     setError(null)
-    void runtime
-      .get<CollectionsResponse>('/api/knowledge-committed')
-      .then(response => {
+    void refreshCollections()
+      .then(() => {
         if (!active) {
           return
         }
 
-        const nextCollections = response.collections ?? []
-        setCollections(nextCollections)
-        setSelectedCollection(current =>
-          current && nextCollections.includes(current) ? current : (nextCollections[0] ?? null)
-        )
         setCollectionsState('ready')
       })
       .catch(reason => {
@@ -82,7 +146,7 @@ export function KnowledgePage({ runtime }: { runtime: EnterpriseClientRuntime | 
     return () => {
       active = false
     }
-  }, [runtime])
+  }, [refreshCollections, runtime])
 
   useEffect(() => {
     let active = true
@@ -146,6 +210,45 @@ export function KnowledgePage({ runtime }: { runtime: EnterpriseClientRuntime | 
           </div>
         </div>
       ) : null}
+
+      <article className="hesc-card">
+        <h2 className="hesc-section-title">上传企业知识</h2>
+        <p className="hesc-muted-copy">文件先在本企业边界内预览和入库；上传成功后才会提交到指定知识集合。</p>
+        <form
+          className="hesc-provisioning-form"
+          onSubmit={event => {
+            event.preventDefault()
+            void uploadKnowledge()
+          }}
+        >
+          <label>
+            知识集合
+            <input
+              disabled={!runtime?.upload || !runtime?.post || uploading}
+              onChange={event => setCollectionName(event.target.value)}
+              placeholder="例如：员工手册"
+              value={collectionName}
+            />
+          </label>
+          <label>
+            选择文件
+            <input
+              accept=".txt,.md,.pdf,.doc,.docx,.csv,.xlsx"
+              disabled={!runtime?.upload || !runtime?.post || uploading}
+              onChange={event => setSelectedFile(event.currentTarget.files?.[0] ?? null)}
+              type="file"
+            />
+          </label>
+          <button
+            className="hesc-action"
+            disabled={!collectionName.trim() || !selectedFile || !runtime?.upload || !runtime?.post || uploading}
+            type="submit"
+          >
+            {uploading ? '正在上传并提交' : '上传并提交'}
+          </button>
+        </form>
+        {uploadNotice ? <p className="hesc-provisioning-notice" role="status">{uploadNotice}</p> : null}
+      </article>
 
       <div className="hesc-knowledge-layout">
         <aside aria-label="知识集合" className="hesc-card hesc-knowledge-collections">

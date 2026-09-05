@@ -55,10 +55,17 @@ export interface EnterpriseMetrics {
   }
 }
 
+export interface EnterpriseUpload {
+  bytes: ArrayBuffer
+  contentType: string
+  filename: string
+}
+
 export interface EnterpriseClientRuntime {
   disconnect(): Promise<void>
   get<T>(path: string): Promise<T>
   post?<T>(path: string, body: unknown): Promise<T>
+  upload?<T>(path: string, file: EnterpriseUpload): Promise<T>
 }
 
 export type EnterpriseLoginResult = { ok: true } | { code: string; message: string; ok: false }
@@ -139,6 +146,25 @@ export async function connectEnterpriseClient(options: EnterpriseClientOptions =
     },
     async post<T>(path: string, body: unknown) {
       return request<T>('POST', path, body)
+    },
+    async upload<T>(path: string, file: EnterpriseUpload) {
+      try {
+        const response = await enterpriseBridge.upload({ ...file, path, sessionId })
+
+        if (response.kind !== 'ok') {
+          throw enterpriseClientErrorForStatus(response.status)
+        }
+
+        return response.data as T
+      } catch (reason) {
+        const clientError = reason instanceof EnterpriseClientError ? reason : enterpriseNetworkError()
+
+        if (clientError.kind === 'authentication_required') {
+          options.onAuthenticationRequired?.(clientError)
+        }
+
+        throw clientError
+      }
     }
   }
 }
