@@ -471,3 +471,9 @@ renderer CSP = deferred hardening (B-AUD2/5). `READY = NO`, `MERGE = NO`.
   selectors are frozen in `INTERFACE_FREEZE.md` for LANE-C).
 - SERVER_API_GAP 1–5 + REST-seam Option A returned to TOTAL-CONTROL.
 - `READY = NO`, `MERGE = NO`.
+
+## 2026-09-05 · 多客户坐席辅助与普通企微私聊边界
+
+新增独立客户工作区、备注/编号搜索、请求隔离及每客户端 3 并发队列；复用租户知识问答与模型池。修复登录/租户切换后旧助手响应串入新会话，统一企业界面字体。范围、官方接口结论、验证记录及生产缺口详见 CUSTOMER_REPLY_AND_WECOM.md。
+
+已验证：企业 UI 83 项、Electron 企业传输 55 项、三套 TypeScript 检查、所改 TS 的 ESLint、生产 build。服务端另外完成真实 HTTP/磁盘知识/租户模型回归。尚未更新已安装客户端或部署企微工具栏，不宣称已完成客户消息同步/发送。

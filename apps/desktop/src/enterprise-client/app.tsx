@@ -4,6 +4,7 @@ import './enterprise-client.css'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { AssistantPage } from './assistant-page'
+import { assistantSessionFor, releaseAssistantSession } from './assistant-session'
 import { currentAuthoritySnapshot, type EnterpriseConnectionState } from './authority-snapshot'
 import { ConversationsPage } from './conversations-page'
 import { EnterpriseClientShell, EnterpriseStatusBadge } from './enterprise-design-system'
@@ -224,6 +225,7 @@ export function EnterpriseClientApp() {
     generationRef.current += 1
     const runtime = runtimeRef.current
     runtimeRef.current = null
+    releaseAssistantSession(runtime)
     void runtime?.disconnect()
   }, [])
 
@@ -236,6 +238,7 @@ export function EnterpriseClientApp() {
 
     generationRef.current += 1
     runtimeRef.current = null
+    releaseAssistantSession(runtime)
     void runtime?.disconnect()
     setSnapshot(null)
     setConnectionState('error')
@@ -283,6 +286,7 @@ export function EnterpriseClientApp() {
         return
       }
 
+      assistantSessionFor(runtime, identity.tenant_id, identity.principal_id)
       setSnapshot({ health, identity, metrics })
       setConnectionState('ready')
     } catch (reason) {
@@ -291,6 +295,7 @@ export function EnterpriseClientApp() {
       }
 
       if (enterpriseSessionDisposition(reason) === 'release-and-clear') {
+        releaseAssistantSession(runtime)
         void runtime?.disconnect()
 
         if (runtimeRef.current === runtime) {
@@ -315,9 +320,11 @@ export function EnterpriseClientApp() {
 
     try {
       releaseRuntime()
+
       const connected = await connectEnterpriseClientWithPassword(loginName, password, {
         onAuthenticationRequired: releaseAuthentication
       })
+
       runtimeRef.current = connected.runtime
       setPasswordChangeRequired(connected.mustChangePassword)
       await refresh(false)
@@ -411,9 +418,11 @@ export function EnterpriseClientApp() {
         onComplete={async (currentPassword, newPassword) => {
           try {
             setError(null)
+
             if (!authorityRuntime.post) {
               throw new Error('当前企业服务不支持密码修改')
             }
+
             await authorityRuntime.post('/api/password-change', {
               current_password: currentPassword,
               new_password: newPassword
@@ -458,6 +467,7 @@ export function EnterpriseClientApp() {
           <AssistantPage
             principalId={authoritySnapshot?.identity.principal_id}
             runtime={authorityRuntime}
+            tenantId={authoritySnapshot?.identity.tenant_id}
           />
         ) : null}
         {activeDefinition.id === 'conversations' ? <ConversationsPage runtime={authorityRuntime} /> : null}

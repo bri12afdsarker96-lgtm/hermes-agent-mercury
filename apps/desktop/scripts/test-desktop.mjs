@@ -145,11 +145,17 @@ function resolveDmgPath() {
 }
 
 function resolveNsisPath() {
-  // electron-builder NSIS artifactName template is 'hermes_Agent-${version}-${os}-${arch}.${ext}'
+  // The product now intentionally uses its Chinese enterprise name in
+  // `artifactName` (there is no longer a `-win-` segment).  Resolve against
+  // the configured product/version prefix instead of guessing the OS name,
+  // and exclude electron-builder's temporary uninstaller executable.
   if (!exists(RELEASE_ROOT)) return null
+  const prefix = `${PACKAGE_JSON.productName}-${PACKAGE_JSON.version}-`
   const candidates = fs
     .readdirSync(RELEASE_ROOT)
-    .filter(name => /\.exe$/i.test(name) && /win/i.test(name))
+    .filter(name => /\.exe$/i.test(name))
+    .filter(name => name.startsWith(prefix))
+    .filter(name => !name.includes('__uninstaller'))
     .sort((a, b) => {
       const aMtime = fs.statSync(path.join(RELEASE_ROOT, a)).mtimeMs
       const bMtime = fs.statSync(path.join(RELEASE_ROOT, b)).mtimeMs

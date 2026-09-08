@@ -1,16 +1,9 @@
 import { useStore } from '@nanostores/react'
-import { atom } from 'nanostores'
-import { type ChangeEvent, type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { type ChangeEvent, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { type AssistantMode, type AssistantSession, assistantSessionFor, type ConversationMessage } from './assistant-session'
+import { CustomerReplyWorkspace } from './customer-reply-panel'
 import type { EnterpriseClientRuntime } from './runtime'
-
-type AssistantMode = 'chat' | 'extract_action_items' | 'knowledge_question' | 'rewrite' | 'summarize'
-
-interface ConversationMessage {
-  id: string
-  role: 'assistant' | 'user'
-  text: string
-}
 
 interface TenantModel {
   configuration_id: string
@@ -36,12 +29,11 @@ interface AssistantResponse {
 interface AssistantPageProps {
   principalId?: string
   runtime: EnterpriseClientRuntime | null
+  tenantId?: string
 }
 
-const $messages = atom<ConversationMessage[]>([])
-const $messageScope = atom<string | null>(null)
-
 const MODE_COPY: Record<AssistantMode, { label: string; placeholder: string }> = {
+  customer_reply: { label: '客户回复建议', placeholder: '' },
   chat: { label: '企业对话', placeholder: '输入需要协作、分析或解释的问题…' },
   summarize: { label: '文本摘要', placeholder: '粘贴需要摘要的文本，或选择本地文本文件…' },
   rewrite: { label: '文本改写', placeholder: '粘贴需要润色或改写的文本，或选择本地文本文件…' },
@@ -71,30 +63,29 @@ function modelLabel(model: TenantModel): string {
   return `${model.provider} · ${model.model}${model.is_default ? '（企业默认）' : ''}`
 }
 
-export function AssistantPage({ principalId, runtime }: AssistantPageProps) {
+export function AssistantPage({ principalId, runtime, tenantId }: AssistantPageProps) {
+  const session = useMemo(() => assistantSessionFor(runtime, tenantId, principalId), [runtime, tenantId, principalId])
+
+  return <AssistantSessionPage key={session.id} runtime={runtime} session={session} />
+}
+
+function AssistantSessionPage({ runtime, session }: {
+  runtime: EnterpriseClientRuntime | null
+  session: AssistantSession
+}) {
+  const $messages = session.messages
   const messages = useStore($messages)
   const [composer, setComposer] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [fileText, setFileText] = useState<string | null>(null)
   const [fileName, setFileName] = useState<string | null>(null)
   const [loadingModels, setLoadingModels] = useState(true)
-  const [mode, setMode] = useState<AssistantMode>('chat')
+  const mode = useStore(session.mode)
+  const setMode = useCallback((value: AssistantMode) => session.mode.set(value), [session])
   const [models, setModels] = useState<TenantModel[]>([])
   const [selectedConfigurationId, setSelectedConfigurationId] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    const scope = principalId ?? null
-
-    if ($messageScope.get() !== scope) {
-      $messageScope.set(scope)
-      $messages.set([])
-      setComposer('')
-      setFileText(null)
-      setFileName(null)
-    }
-  }, [principalId])
 
   useEffect(() => {
     let active = true
@@ -103,6 +94,7 @@ export function AssistantPage({ principalId, runtime }: AssistantPageProps) {
       setLoadingModels(false)
       setModels([])
       setError('企业服务连接恢复后即可加载本企业 AI 模型。')
+
       return () => {
         active = false
       }
@@ -123,6 +115,7 @@ export function AssistantPage({ principalId, runtime }: AssistantPageProps) {
             ? current
             : ''
         ))
+
         if (!pool.configured || nextModels.length === 0) {
           setError('企业管理员尚未配置可用的 AI 模型。')
         }
@@ -147,6 +140,7 @@ export function AssistantPage({ principalId, runtime }: AssistantPageProps) {
   const clearAttachment = useCallback(() => {
     setFileText(null)
     setFileName(null)
+
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
@@ -155,55 +149,77 @@ export function AssistantPage({ principalId, runtime }: AssistantPageProps) {
   const chooseLocalText = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     event.target.value = ''
+
     if (!file) {
       return
     }
+
     const textLike = file.type.startsWith('text/') || ACCEPTED_LOCAL_TEXT.test(file.name)
+
     if (!textLike) {
       setError('仅可在此处理 TXT、MD、CSV、JSON 或 LOG 文本文件；DOC/DOCX/PDF 请先上传到企业知识库。')
+
       return
     }
+
     if (file.size > MAX_LOCAL_TEXT_BYTES) {
       setError('本地文本文件不能超过 512 KB。较大的资料请先上传到企业知识库。')
+
       return
     }
+
     try {
       const text = (await file.text()).trim()
+
       if (!text) {
         setError('所选文件没有可处理的文本内容。')
+
         return
       }
-      setFileText(text.slice(0, MAX_REQUEST_CHARS))
+
+      if (text.length > MAX_REQUEST_CHARS) {
+        setError('文件文本超过 24000 个字符，请缩短文本或上传企业知识库。')
+
+        return
+      }
+
+      setFileText(text)
       setFileName(file.name)
       setError(null)
+
       if (mode === 'chat' || mode === 'knowledge_question') {
         setMode('summarize')
       }
     } catch {
       setError('无法读取所选本地文件。')
     }
-  }, [mode])
+  }, [mode, setMode])
 
   const submit = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const instruction = composer.trim()
     const selectedText = fileText?.trim() ?? ''
+
     const rawContent = selectedText
       ? `${instruction ? `处理要求：${instruction}\n\n` : ''}【用户明确选择的本地文件：${fileName ?? '文本文件'}】\n${selectedText}`
       : instruction
+
     const content = mode === 'chat' && !selectedText ? transcriptForChat(messages, rawContent) : rawContent
 
     if (!runtime?.post || !rawContent || submitting || loadingModels || models.length === 0) {
       return
     }
+
     if (content.length > MAX_REQUEST_CHARS) {
       setError('本次内容超过 24000 个字符，请缩短文本后再处理。')
+
       return
     }
 
     const visibleUserText = selectedText
       ? `${instruction || '处理所选本地文本'} · ${fileName ?? '本地文本文件'}`
       : instruction
+
     const requestModelId = selectedConfigurationId || undefined
     setComposer('')
     clearAttachment()
@@ -217,6 +233,7 @@ export function AssistantPage({ principalId, runtime }: AssistantPageProps) {
         content,
         mode
       })
+
       $messages.set([
         ...$messages.get(),
         { id: `assistant-${Date.now()}`, role: 'assistant', text: result.text }
@@ -226,7 +243,7 @@ export function AssistantPage({ principalId, runtime }: AssistantPageProps) {
     } finally {
       setSubmitting(false)
     }
-  }, [clearAttachment, composer, fileName, fileText, loadingModels, messages, mode, models.length, runtime, selectedConfigurationId, submitting])
+  }, [$messages, clearAttachment, composer, fileName, fileText, loadingModels, messages, mode, models.length, runtime, selectedConfigurationId, submitting])
 
   const defaultModel = models.find(item => item.is_default)
   const selectedModel = models.find(item => item.configuration_id === selectedConfigurationId)
@@ -260,7 +277,7 @@ export function AssistantPage({ principalId, runtime }: AssistantPageProps) {
                 type="button"
               >
                 <strong>{MODE_COPY[item].label}</strong>
-                <span>{item === 'knowledge_question' ? '仅检索本企业已入库知识' : '由企业选定模型完成'}</span>
+                <span>{item === 'customer_reply' ? '客户上下文＋企业知识，人工发送' : item === 'knowledge_question' ? '仅检索本企业已入库知识' : '由企业选定模型完成'}</span>
               </button>
             ))}
           </div>
@@ -288,12 +305,20 @@ export function AssistantPage({ principalId, runtime }: AssistantPageProps) {
           </p>
 
           <div className="hesc-ai-reminder-note">
+            <strong>企业微信接入</strong>
+            <span>当前先使用坐席辅助处理已有客户私聊。微信客服自动收发作为后续接入方向，需要单独的客服会话入口。</span>
+          </div>
+
+          <div className="hesc-ai-reminder-note">
             <strong>定时提醒</strong>
             <span>提醒已在“我的任务 / 团队任务 / 业务运营”中执行。AI 只协助整理内容，不会未经确认创建提醒。</span>
           </div>
         </aside>
 
-        <article className="hesc-card hesc-agent-transcript">
+        {mode === 'customer_reply' ? (
+          <CustomerReplyWorkspace configurationId={selectedConfigurationId || undefined}
+            ready={!loadingModels && models.length > 0} runtime={runtime} workspace={session.customerReply} />
+        ) : <article className="hesc-card hesc-agent-transcript">
           <div className="hesc-section-heading">
             <div>
               <h2 className="hesc-section-title">{MODE_COPY[mode].label}</h2>
@@ -337,7 +362,7 @@ export function AssistantPage({ principalId, runtime }: AssistantPageProps) {
               <button className="hesc-action hesc-action-secondary" onClick={() => fileInputRef.current?.click()} type="button">
                 选择本地文本文件
               </button>
-              {fileName ? <span>已选择：{fileName}</span> : <span>仅在你选择并提交后读取；不扫描电脑目录。</span>}
+              {fileName ? <span>已选择：{fileName}</span> : <span>选择后在本机读取，提交后交由企业 AI 处理。</span>}
               {fileName ? <button className="hesc-text-action" onClick={clearAttachment} type="button">移除</button> : null}
             </div>
             <div>
@@ -347,7 +372,7 @@ export function AssistantPage({ principalId, runtime }: AssistantPageProps) {
               </button>
             </div>
           </form>
-        </article>
+        </article>}
       </div>
 
       {error ? (

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { EnterpriseClientApp } from './app'
@@ -153,9 +153,11 @@ describe('EnterpriseClientApp authority lifecycle', () => {
     await screen.findAllByText('企业服务已连接')
     const initialAutoConnects = bridge.autoConnect.mock.calls.length
 
-    window.dispatchEvent(new Event('focus'))
+    const initialIdentityReads = bridge.request.mock.calls.filter(([request]) => request.path === '/api/whoami').length
+    fireEvent.focus(window)
 
-    await waitFor(() => expect(bridge.autoConnect.mock.calls.length).toBeGreaterThan(initialAutoConnects))
+    await waitFor(() => expect(bridge.request.mock.calls.filter(([request]) => request.path === '/api/whoami').length).toBeGreaterThan(initialIdentityReads))
+    expect(bridge.autoConnect.mock.calls.length).toBe(initialAutoConnects)
     expect(bridge.disconnect).not.toHaveBeenCalled()
   })
 })

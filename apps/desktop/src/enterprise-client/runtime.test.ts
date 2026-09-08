@@ -144,4 +144,38 @@ describe('Enterprise client runtime adapter', () => {
       status: 0
     })
   })
+
+  it.each(['get', 'post', 'upload'] as const)('does not let a disconnected %s request expire a later login', async method => {
+    const bridge = installBridge()
+    const onAuthenticationRequired = vi.fn()
+    let resolve!: (response: EnterpriseResponse) => void
+    const reply = new Promise<EnterpriseResponse>(done => { resolve = done })
+
+    if (method === 'upload') {
+      bridge.upload.mockReturnValueOnce(reply)
+    } else {
+      bridge.request.mockReturnValueOnce(reply)
+    }
+
+    const oldRuntime = await connectEnterpriseClient({ onAuthenticationRequired })
+
+    const pending = method === 'get' ? oldRuntime.get('/api/whoami')
+      : method === 'post' ? oldRuntime.post!('/api/tenant-ai-assist', { content: '旧客户上下文' })
+        : oldRuntime.upload!('/api/knowledge-upload', { bytes: new ArrayBuffer(1), contentType: 'text/plain', filename: 'notes.txt' })
+
+    await oldRuntime.disconnect()
+    const newRuntime = await connectEnterpriseClient({ onAuthenticationRequired })
+    resolve({ code: 'http', kind: 'error', message: 'expired old session', status: 401 })
+    await expect(pending).rejects.toMatchObject({ kind: 'authentication_required' })
+    expect(onAuthenticationRequired).not.toHaveBeenCalled()
+    await expect(newRuntime.get('/api/health')).resolves.toEqual({ ok: true })
+  })
+
+  it('rejects new requests after disconnect without crossing the bridge', async () => {
+    const bridge = installBridge()
+    const runtime = await connectEnterpriseClient()
+    await runtime.disconnect()
+    await expect(runtime.post!('/api/tenant-ai-assist', { content: '不得继续发出' })).rejects.toBeInstanceOf(Error)
+    expect(bridge.request).not.toHaveBeenCalled()
+  })
 })

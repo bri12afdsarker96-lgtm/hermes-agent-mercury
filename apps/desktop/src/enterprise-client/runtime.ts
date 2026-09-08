@@ -180,8 +180,13 @@ function enterpriseRuntimeFromSession(
   options: EnterpriseClientOptions
 ): EnterpriseClientRuntime {
   const { sessionId } = connected
+  let disconnected = false
 
   async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+    if (disconnected) {
+      throw enterpriseClientErrorForStatus(401)
+    }
+
     try {
       const response = await enterpriseBridge.request({ body, method, path, sessionId })
 
@@ -193,7 +198,7 @@ function enterpriseRuntimeFromSession(
     } catch (reason) {
       const clientError = reason instanceof EnterpriseClientError ? reason : enterpriseNetworkError()
 
-      if (clientError.kind === 'authentication_required') {
+      if (!disconnected && clientError.kind === 'authentication_required') {
         options.onAuthenticationRequired?.(clientError)
       }
 
@@ -203,6 +208,13 @@ function enterpriseRuntimeFromSession(
 
   return {
     async disconnect() {
+      if (disconnected) {
+        return
+      }
+
+      // A queued request or a late 401 from this runtime must not operate on
+      // the shell's next authenticated session.
+      disconnected = true
       await enterpriseBridge.disconnect(sessionId)
     },
     async get<T>(path: string) {
@@ -212,6 +224,10 @@ function enterpriseRuntimeFromSession(
       return request<T>('POST', path, body)
     },
     async upload<T>(path: string, file: EnterpriseUpload) {
+      if (disconnected) {
+        throw enterpriseClientErrorForStatus(401)
+      }
+
       try {
         const response = await enterpriseBridge.upload({ ...file, path, sessionId })
 
@@ -223,7 +239,7 @@ function enterpriseRuntimeFromSession(
       } catch (reason) {
         const clientError = reason instanceof EnterpriseClientError ? reason : enterpriseNetworkError()
 
-        if (clientError.kind === 'authentication_required') {
+        if (!disconnected && clientError.kind === 'authentication_required') {
           options.onAuthenticationRequired?.(clientError)
         }
 
