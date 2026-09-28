@@ -232,7 +232,7 @@ export function ConversationsPage({ runtime }: { runtime: EnterpriseClientRuntim
             <p className="hesc-muted-copy">当前权限范围内没有入站消息事实。</p>
           ) : null}
           {inbound.length > 0 ? (
-            <div className="hesc-table-wrap">
+            <div className="hesc-table-wrap hesc-scroll-region">
               <table className="hesc-table">
                 <thead>
                   <tr>

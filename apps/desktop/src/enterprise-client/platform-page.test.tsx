@@ -24,6 +24,8 @@ describe('PlatformPage', () => {
 
     await screen.findAllByText('早鸟科技')
     expect(get).toHaveBeenCalledWith('/api/tenants')
+    expect(get.mock.calls.flat()).not.toContain('/api/principals')
+    expect(screen.queryByText('平台账号目录')).toBeNull()
     expect(get.mock.calls.flat()).not.toContain('/api/audit-list')
     expect(get.mock.calls.flat()).not.toContain('/api/conversations-inbound')
 

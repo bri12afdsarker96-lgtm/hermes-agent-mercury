@@ -1,5 +1,13 @@
 # Enterprise Console — Dev Log (LANE-B, Mercury-side)
 
+## 2026-09-08 — Restored Windows development dependencies and build verification
+
+- The restored `apps/enterprise-web` workspace was absent from the root lockfile and pinned `@types/react-dom` differently from Desktop. Aligned it to the existing reviewed `19.2.3` type package and regenerated the lockfile to include the workspace, preserving the configured npm release-age policy.
+- Root `npm ci --no-audit --no-fund` succeeded (1,299 packages) on Node 24.19.0 / npm 11.17.0. Desktop resolves Electron 40.10.2 from its workspace and matching React/React DOM 19.2.7 from the root install.
+- Desktop full `typecheck` and `build` passed, including Electron bundles and Windows native dependency staging. Six focused enterprise UI files passed 51 tests; three Electron updater/login/speech files passed 30 tests.
+- `npm run build --workspace apps/enterprise-web` passed. Its base JS, CSS, and Mermaid/highlighting chunks match production SHA-256 values. Applying the existing Hermes_AI layout generator to the newly built base also reproduces production r8 JS exactly. The Web entry check retains its existing `--noCheck` setting; do not describe that script as an independent full Web typecheck.
+- Build artifacts are local verification output. No production deployment, installer publication, dependency vulnerability audit, or authenticated UI acceptance was performed.
+
 > C8 process log for gate `P3-M4A-DESKTOP-ASSISTANT-CONSOLE-01`. Mercury-owned docs
 > only; no Hermes_AI docs are touched by this lane.
 

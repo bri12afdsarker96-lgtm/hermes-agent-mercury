@@ -27,7 +27,7 @@ import * as path from 'node:path'
 
 import { _electron, type ElectronApplication, type Page } from '@playwright/test'
 
-import { startMockServer, type MockServerOptions } from './mock-server'
+import { type MockServerOptions, startMockServer } from './mock-server'
 import { installErrorBannerGuard } from './test'
 
 const DESKTOP_ROOT = path.resolve(import.meta.dirname, '..')
@@ -118,6 +118,7 @@ export function createSandbox(
     JSON.stringify(
       (function () {
         const size = options?.initialWindowSize ?? { width: 1220, height: 800 }
+
         return { x: 0, y: 0, width: size.width, height: size.height, isMaximized: false }
       })(),
       null,
@@ -293,19 +294,21 @@ export function findElectron(): string {
   // In dev mode, we use the `electron` binary directly (not the packaged app).
   // The dev:electron script in package.json does exactly this: `electron .`
   // after building. We replicate that here.
-  const localElectron = path.join(REPO_ROOT, 'node_modules', 'electron', 'dist', 'electron')
+  const binaryName = process.platform === 'win32' ? 'electron.exe' : 'electron'
 
-  if (fs.existsSync(localElectron)) {
-    return localElectron
+  for (const root of [DESKTOP_ROOT, REPO_ROOT]) {
+    const localElectron = path.join(root, 'node_modules', 'electron', 'dist', binaryName)
+
+    if (fs.existsSync(localElectron)) {return localElectron}
   }
 
   // Fall back to PATH
-  const result = spawnSync('which', ['electron'], {
+  const result = spawnSync(process.platform === 'win32' ? 'where.exe' : 'which', ['electron'], {
     encoding: 'utf8',
   })
 
   if (result.status === 0 && result.stdout.trim()) {
-    return result.stdout.trim()
+    return result.stdout.trim().split(/\r?\n/)[0]
   }
 
   throw new Error(
@@ -325,6 +328,7 @@ export async function launchDesktop(
   options: {
     beforeFirstWindow?: (app: ElectronApplication) => Promise<void>
     headless?: boolean
+    fakeMedia?: boolean
     installErrorGuard?: boolean
   } = {},
 ): Promise<{ app: ElectronApplication; page: Page }> {
@@ -341,6 +345,7 @@ export async function launchDesktop(
       '--disable-gpu',
       '--no-sandbox',
       ...(options.headless ? ['--headless'] : []),
+      ...(options.fakeMedia ? ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] : []),
     ],
     env,
     cwd: DESKTOP_ROOT,
@@ -383,20 +388,12 @@ export interface MockBackendOptions {
   extraConfig?: string
   /** Override the mock model's context window for compression scenarios. */
   modelContextLength?: number
-}
-
-/**
- * Set up a full mock-backend E2E environment:
- *   1. Start the mock inference server
- *   2. Create a sandbox with config.yaml pointing at it
- *   3. Launch the desktop app
- *   4. Return handles for test interaction
- */
-export interface MockBackendOptions {
   /** Install test-only main-process seams before the renderer is observed. */
   beforeFirstWindow?: (app: ElectronApplication) => Promise<void>
   /** Run Electron with Chromium's headless compositor. */
   headless?: boolean
+  /** Chromium's synthetic microphone; still exercises real getUserMedia and MediaRecorder. */
+  fakeMedia?: boolean
   mockServer?: MockServerOptions
   /**
    * Override the initial Electron window size written to the sandbox
@@ -419,6 +416,7 @@ export async function setupMockBackend(options: MockBackendOptions = {}): Promis
   const sandbox = createSandbox('mock', {
     initialWindowSize: options.initialWindowSize,
   })
+
   writeMockProviderConfig(
     sandbox.hermesHome,
     mock.url,
@@ -430,9 +428,11 @@ export async function setupMockBackend(options: MockBackendOptions = {}): Promis
 
   // 3. Build env + launch
   const env = buildAppEnv(sandbox)
+
   const { app, page } = await launchDesktop(env, {
     beforeFirstWindow: options.beforeFirstWindow,
     headless: options.headless,
+    fakeMedia: options.fakeMedia,
     installErrorGuard: options.installErrorGuard,
   })
 
@@ -671,6 +671,7 @@ export async function waitForAppReady(fixture: MockBackendFixture | NoProviderFi
       // `position: fixed; inset: 0`. If the hit element or an ancestor
       // is a full-viewport fixed overlay, we're still covered.
       let node: Element | null = el
+
       while (node) {
         const cs = window.getComputedStyle(node)
 

@@ -260,9 +260,11 @@ export function PrincipalProvisioningPanel({
 
     try {
       const post = requirePost(runtime)
+
       const response = await post<ProvisionedPrincipalResponse>('/api/principal-token-reissue', {
         principal_id: principalId
       })
+
       setToken(oneTimeToken(response))
       setNotice('旧初始令牌已失效；请通过受控渠道交付新令牌。')
     } catch (reason) {
@@ -336,7 +338,7 @@ export function PrincipalProvisioningPanel({
       {state === 'loading' ? <p className="hesc-muted-copy">正在读取员工申请…</p> : null}
       {state === 'ready' && requests.length === 0 ? <p className="hesc-muted-copy">当前没有可展示的员工申请。</p> : null}
       {requests.length > 0 ? (
-        <div className="hesc-table-wrap">
+        <div className="hesc-table-wrap hesc-scroll-region">
           <table className="hesc-table">
             <thead>
               <tr>

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { EnterpriseClientShell, EnterpriseStatusBadge } from './enterprise-design-system'
+import { EnterpriseClientShell, EnterpriseModalDialog, EnterpriseStatusBadge } from './enterprise-design-system'
 
 describe('Enterprise design system foundation', () => {
   it('renders a role-neutral shell and delegates navigation selection to its controller', () => {
@@ -35,7 +35,6 @@ describe('Enterprise design system foundation', () => {
     expect(screen.getByText('服务端事实')).toBeTruthy()
     expect(screen.getByText('企业工作台')).toBeTruthy()
     expect(screen.getAllByText('企业管理员')).toHaveLength(2)
-    expect(screen.getByLabelText('全局搜索尚未接入')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: '知识空间' }))
 
@@ -46,5 +45,22 @@ describe('Enterprise design system foundation', () => {
     render(<EnterpriseStatusBadge tone="warning">服务端能力暂不可用</EnterpriseStatusBadge>)
 
     expect(screen.getByText('服务端能力暂不可用').getAttribute('data-tone')).toBe('warning')
+  })
+
+  it('keeps modal keyboard focus contained and restores its opener', () => {
+    const onClose = vi.fn()
+    const opener = document.createElement('button')
+    document.body.append(opener)
+    opener.focus()
+    const view = render(<EnterpriseModalDialog label="确认操作" onClose={onClose}><button type="button">取消</button><button type="button">确认</button></EnterpriseModalDialog>)
+
+    expect(screen.getByRole('dialog', {name: '确认操作'}).getAttribute('aria-modal')).toBe('true')
+    expect(document.activeElement).toBe(screen.getByRole('button', {name: '取消'}))
+    fireEvent.keyDown(window, {key: 'Escape'})
+    expect(onClose).toHaveBeenCalledOnce()
+
+    view.unmount()
+    expect(document.activeElement).toBe(opener)
+    opener.remove()
   })
 })

@@ -37,7 +37,13 @@ function installAuthorityBridge(responses: Record<string, EnterpriseBridgeRespon
       ok: true as const,
       sessionId: 'opaque-session'
     })),
+    loginWithPassword: vi.fn(async () => ({
+      code: 'invalid_credentials',
+      message: 'internal',
+      ok: false as const
+    })),
     disconnect: vi.fn(async () => ({ ok: true })),
+    setTitleBarTheme: vi.fn(),
     request: vi.fn(async (request: { path: string }) => responses[request.path] ?? {
       code: 'http',
       kind: 'error' as const,
@@ -46,7 +52,10 @@ function installAuthorityBridge(responses: Record<string, EnterpriseBridgeRespon
     })
   }
 
-  ;(window as unknown as { hermesDesktop?: unknown }).hermesDesktop = { enterprise: bridge }
+  ;(window as unknown as { hermesDesktop?: unknown }).hermesDesktop = {
+    enterprise: bridge,
+    setTitleBarTheme: bridge.setTitleBarTheme
+  }
 
   return bridge
 }
@@ -57,6 +66,64 @@ afterEach(() => {
 })
 
 describe('EnterpriseClientApp authority lifecycle', () => {
+  it('uses white glyphs for the native Windows window controls', async () => {
+    const bridge = installAuthorityBridge({})
+    bridge.autoConnect.mockResolvedValue({ ok: false, code: 'no_native_session', message: '' } as never)
+
+    render(<EnterpriseClientApp />)
+
+    await screen.findByText('等待登录企业账号')
+    expect(bridge.setTitleBarTheme).toHaveBeenCalledWith({
+      background: '#0c1825',
+      foreground: '#ffffff'
+    })
+  })
+
+  it('keeps rejected credentials on the login form without claiming the service is offline', async () => {
+    const bridge = installAuthorityBridge({})
+    bridge.autoConnect.mockResolvedValue({ ok: false, code: 'no_native_session', message: '' } as never)
+    Object.assign(bridge, { loginWithPassword: vi.fn(async () => ({ ok: false, code: 'invalid_credentials', message: 'internal' })) })
+    render(<EnterpriseClientApp />)
+    await screen.findByText('等待登录企业账号')
+    fireEvent.change(screen.getByLabelText('登录账号'), { target: { value: 'old.account' } })
+    fireEvent.change(screen.getByLabelText('登录密码'), { target: { value: 'incorrect-password' } })
+    fireEvent.click(screen.getByRole('button', { name: '登录企业工作台' }))
+    await screen.findByText('账号或密码不正确，或账号已停用。请使用管理员提供的新账号。')
+    expect(screen.queryByText('企业服务不可用')).toBeNull()
+    expect(screen.queryByText(/无法连接企业服务/)).toBeNull()
+    expect(screen.getByLabelText('登录密码')).toHaveProperty('value', '')
+  })
+
+  it('forwards the selected password-remembering preference to the main-process login bridge', async () => {
+    const bridge = installAuthorityBridge({})
+    bridge.autoConnect.mockResolvedValue({ ok: false, code: 'no_native_session', message: '' } as never)
+    Object.assign(bridge, {
+      loginWithPassword: vi.fn(async () => ({
+        baseUrl: 'https://enterprise.example.com', mustChangePassword: true, ok: true, sessionId: 'password-session'
+      })),
+      rememberedLogin: vi.fn(async () => null)
+    })
+    render(<EnterpriseClientApp />)
+    await screen.findByText('等待登录企业账号')
+    fireEvent.change(screen.getByLabelText('登录账号'), { target: { value: 'member.account' } })
+    fireEvent.change(screen.getByLabelText('登录密码'), { target: { value: 'a-valid-password' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /记住密码/ }))
+    fireEvent.click(screen.getByRole('button', { name: '登录企业工作台' }))
+    await waitFor(() => expect(bridge.loginWithPassword).toHaveBeenCalledWith({
+      loginName: 'member.account', password: 'a-valid-password', rememberPassword: true
+    }))
+  })
+  it('shows a normal login state when main has no session without claiming a network failure', async () => {
+    const bridge = installAuthorityBridge({})
+    bridge.autoConnect.mockResolvedValue({ ok: false, code: 'no_native_session', message: 'no authenticated native session' } as never)
+    render(<EnterpriseClientApp />)
+    expect(await screen.findByText('等待登录企业账号')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '登录企业工作台' })).toBeTruthy()
+    expect(screen.queryByText('企业服务不可用')).toBeNull()
+    expect(screen.queryByText(/无法连接企业服务/)).toBeNull()
+    expect(bridge.request).not.toHaveBeenCalled()
+  })
+
   it('renders only the server-provided tenant identity through the token-free bridge', async () => {
     const bridge = installAuthorityBridge({
       '/api/health': { data: HEALTH, kind: 'ok' },
@@ -70,7 +137,8 @@ describe('EnterpriseClientApp authority lifecycle', () => {
     expect(screen.getAllByText('Lin Qiao')).toHaveLength(2)
     expect(screen.getAllByText('tenant-acme-logistics')).toHaveLength(2)
     expect(screen.getAllByText('员工')).toHaveLength(3)
-    expect(screen.getByRole('button', { name: '我的任务' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '提醒中心' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '工具集' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: '企业会话' })).toBeNull()
     expect(screen.queryByRole('button', { name: '人工接管' })).toBeNull()
     expect(screen.queryByRole('button', { name: '企业知识' })).toBeNull()
@@ -82,6 +150,34 @@ describe('EnterpriseClientApp authority lifecycle', () => {
       sessionId: 'opaque-session'
     })
     expect(JSON.stringify(bridge.request.mock.calls)).not.toMatch(/token|bearer/i)
+  })
+
+  it('mounts the enterprise task workspace only when the server marks that capability live', async () => {
+    const bridge = installAuthorityBridge({
+      '/api/biz-tasks': { data: { available: true, tasks: [] }, kind: 'ok' },
+      '/api/health': { data: HEALTH, kind: 'ok' },
+      '/api/metrics?window=24h': { data: METRICS, kind: 'ok' },
+      '/api/whoami': {
+        data: {
+          ...IDENTITY,
+          product_capabilities: {
+            ...IDENTITY.product_capabilities,
+            team_tasks: { enabled: true, status: 'LIVE' }
+          }
+        },
+        kind: 'ok'
+      }
+    })
+
+    render(<EnterpriseClientApp />)
+
+    expect(await screen.findByText('企业任务执行')).toBeTruthy()
+    expect(await screen.findByText('当前授权范围内没有企业任务。')).toBeTruthy()
+    expect(bridge.request).toHaveBeenCalledWith({
+      method: 'GET',
+      path: '/api/biz-tasks',
+      sessionId: 'opaque-session'
+    })
   })
 
   it('fails closed for server-backed workspaces when the authority contract is absent', async () => {
@@ -104,7 +200,7 @@ describe('EnterpriseClientApp authority lifecycle', () => {
 
     await screen.findAllByText('企业服务已连接')
     expect(screen.getByRole('button', { name: '工作台' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'AI 助理' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '企业 AI 助手' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: '企业会话' })).toBeNull()
     expect(screen.queryByRole('button', { name: '人工接管' })).toBeNull()
     expect(screen.queryByRole('button', { name: '企业知识' })).toBeNull()
@@ -160,4 +256,25 @@ describe('EnterpriseClientApp authority lifecycle', () => {
     expect(bridge.autoConnect.mock.calls.length).toBe(initialAutoConnects)
     expect(bridge.disconnect).not.toHaveBeenCalled()
   })
+  it('keeps the existing authority and session during a transient foreground refresh failure', async () => {
+    const responses: Record<string, EnterpriseBridgeResponse> = {
+      '/api/health': { data: HEALTH, kind: 'ok' },
+      '/api/metrics?window=24h': { data: METRICS, kind: 'ok' },
+      '/api/whoami': { data: IDENTITY, kind: 'ok' }
+    }
+    const bridge = installAuthorityBridge(responses)
+    render(<EnterpriseClientApp />)
+    await screen.findAllByText('企业服务已连接')
+    responses['/api/whoami'] = { code: 'http', kind: 'error', message: 'temporary outage', status: 503 }
+    fireEvent.focus(window)
+    await screen.findByText(/网络暂时波动/)
+    expect(screen.getAllByText('Lin Qiao').length).toBeGreaterThan(0)
+    expect(screen.queryByTestId('enterprise-login-root')).toBeNull()
+    expect(bridge.disconnect).not.toHaveBeenCalled()
+    responses['/api/whoami'] = { data: IDENTITY, kind: 'ok' }
+    fireEvent.focus(window)
+    await waitFor(() => expect(screen.queryByText(/网络暂时波动/)).toBeNull())
+    expect(bridge.autoConnect).toHaveBeenCalledTimes(1)
+  })
+
 })

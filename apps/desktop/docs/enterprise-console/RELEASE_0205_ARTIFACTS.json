@@ -1,0 +1,64 @@
+{
+  "version": "0.20.5",
+  "installer": "Hermes-企业助手-0.20.5-x64.exe",
+  "size": 256986262,
+  "sha256": "8c97347eb6c223b92a04ed24656b6e0415d963c3a0dd20ffd97c693277356de5",
+  "sha512": "XSZDSwMYf2p9fyoCQwjNspLW1xpCO1HqlYr1ZHMO5wzwgUx4kf3nKhPXpAWYAtqZs+gTiqq8a0O2GCrUgSBhsw==",
+  "asarSha256": "1a1895b4f6b527344431c75fd638a38713fa226e2e158a30442c14f6a56b7e27",
+  "nsisPayloadVerified": true,
+  "compared": [
+    {
+      "file": "dist/index.html",
+      "sha256": "113b353a3c455dafbf8a26a1950f8907009c5e83fc6a05ba1aba612f1f09a059"
+    },
+    {
+      "file": "dist/electron-main.mjs",
+      "sha256": "1abbb55dd6f6edcf59699b7fa4eb2c187f8f29a766927846a383120a460dc2a8"
+    },
+    {
+      "file": "dist/electron-preload.js",
+      "sha256": "39f1ec96d7aea2c556980166defa6059cff5a7c472c6d4169f9c39b338a4ea8d"
+    },
+    {
+      "file": "dist/assets/index-DYGRC8x4.js",
+      "sha256": "1e5267b036d3e315b3c6b0f7cf02ad3aec5df58c8436f71bad7f81f609b4c7a2"
+    },
+    {
+      "file": "dist/assets/bundle-mjs-C2DBaZm2.js",
+      "sha256": "4e9b91df298dd080054afbcbe7d3570c67a6c77d99efba8e9daf6c8330a3783f"
+    },
+    {
+      "file": "dist/assets/vendor-react-Bjs0c7ga.js",
+      "sha256": "36c5e79b41a07bf05df98a9b42f2b955d09b1b0b19ea94590e986b7391e7cfa0"
+    },
+    {
+      "file": "dist/assets/vendor-md-QeJfHs6o.js",
+      "sha256": "3b7c1853b31ee6697524abad76d0097c3c22c591eb4ec6d338024f9246d0f2b4"
+    },
+    {
+      "file": "dist/assets/error-boundary-CSWrN2Rx.js",
+      "sha256": "8cffb5bef86ceca28bb5997135390a054a1415059314e5b274471462eb901c75"
+    },
+    {
+      "file": "dist/assets/context-Cah5N0Mf.js",
+      "sha256": "32e22be89dfc94d4a98f3f99527c6b8c02504489793a9c51b9b944fc512870e7"
+    },
+    {
+      "file": "dist/assets/renderer-loop-pause-FtYNKTlY.js",
+      "sha256": "62b382df8178f640b544a7b63b5edb35be58206cfa2d757d907d92b1c269b3c6"
+    },
+    {
+      "file": "dist/assets/chunk-BO2N2NFS-C4SvrVRq.js",
+      "sha256": "6b58ede3dd7eb167c981587528cd7665791284a62bac2d6d51c2c9b1d102b97d"
+    },
+    {
+      "file": "dist/assets/index-D6TwiyXb.css",
+      "sha256": "8419cc0e4de5b940594ec00712371361375a7b404964463cfccbb6d0b1d50221"
+    }
+  ],
+  "publishedAt": "2026-09-11T18:34:01+08:00",
+  "updateUrl": "https://ppbb096.site/desktop-updates/windows/x64/latest.yml",
+  "metadataSha256": "0d85b2cf1de1574b786cb55be0691a525f6514a7b7f049f0c98cd874e4550416",
+  "blockmapSha256": "7a6a027c45d18694b8fb015fe927dd496d0c97b33a354b166cf1fd94863156cf",
+  "authenticodeSigned": false
+}

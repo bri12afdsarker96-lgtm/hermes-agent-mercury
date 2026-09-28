@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "product": "OpenVPN Connect",
+  "version": "3.9.0.5008",
+  "file_name": "openvpn-connect-3.9.0.5008_signed.msi",
+  "source_url": "https://packages.openvpn.net/connect/v3/openvpn-connect-3.9.0.5008_signed.msi",
+  "sha256": "31347812dd37dbbb69bc47de842eb179827266e9dfb45e7f6ce10c5d71a5bad6",
+  "license_url": "https://openvpn.net/legal/"
+}

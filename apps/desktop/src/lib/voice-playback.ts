@@ -358,11 +358,20 @@ async function playSpeechDataUrl(
 ): Promise<boolean> {
   const response = await speakText(speakableText)
 
+  return playPreparedSpeechAudio(response.data_url, options, isCurrent)
+}
+
+async function playPreparedSpeechAudio(
+  dataUrl: string,
+  options: VoicePlaybackOptions,
+  isCurrent: () => boolean
+): Promise<boolean> {
+
   if (!isCurrent()) {
     return false
   }
 
-  const audio = new Audio(response.data_url)
+  const audio = new Audio(dataUrl)
   currentAudio = audio
   setVoicePlaybackState(currentState('speaking', options, audio))
 
@@ -378,7 +387,8 @@ async function playSpeechDataUrl(
       audio.removeEventListener('ended', onEnded)
       audio.removeEventListener('error', onError)
       audio.removeEventListener('timeupdate', armStall)
-      currentStop = null
+
+      if (currentAudio === audio) {currentStop = null}
     }
 
     const armStall = () => {
@@ -417,8 +427,12 @@ async function playSpeechDataUrl(
     // after resuming a shared AudioContext as a fallback for other surfaces
     // (dashboard-embedded) so the first reply isn't silently dropped.
     void audio.play().catch(async () => {
+      if (!isCurrent()) {return}
+
       try {
         await unlockAutoplay()
+
+        if (!isCurrent()) {return}
         await audio.play()
       } catch {
         onError()
@@ -433,6 +447,24 @@ async function playSpeechDataUrl(
   currentAudio = null
 
   return true
+}
+
+/** Play audio supplied by an already-authenticated surface. Synthesis and
+ * credentials remain with that surface; reuse the shared interrupt/stall path. */
+export async function playSpeechAudioDataUrl(dataUrl: string, options: VoicePlaybackOptions): Promise<boolean> {
+  if (!/^data:audio\/(?:mpeg|mp3|wav|ogg|webm);base64,[A-Za-z0-9+/=]+$/.test(dataUrl) || dataUrl.length > 3_000_000) {
+    throw new Error('Invalid speech audio')
+  }
+
+  stopVoicePlayback()
+  const ownSequence = sequence
+  const isCurrent = () => ownSequence === sequence
+
+  try {
+    return await playPreparedSpeechAudio(dataUrl, options, isCurrent)
+  } finally {
+    if (isCurrent()) {stopVoicePlayback()}
+  }
 }
 
 export async function playSpeechText(text: string, options: VoicePlaybackOptions): Promise<boolean> {

@@ -21,7 +21,57 @@ import assert from 'node:assert/strict'
 
 import { describe, test } from 'vitest'
 
+import enterpriseDeployment from '../assets/enterprise-deployment.json'
+
 import { resolveEnterpriseOriginCandidate } from './enterprise-origin-candidate'
+import { normalizeEnterpriseApiOriginOrNull } from './enterprise-transport'
+
+describe('bundled deployment on a fresh customer computer', () => {
+  test('resolves the actual bundled origin without process or registry configuration', () => {
+    const origin = normalizeEnterpriseApiOriginOrNull(resolveEnterpriseOriginCandidate({
+      preferWindowsUserEnv: true,
+      windowsUserEnvReader: () => null,
+      packagedOrigin: enterpriseDeployment.enterprise_api_origin
+    }))
+
+    assert.ok(origin)
+    assert.equal(new URL(origin).protocol, 'https:')
+  })
+
+  test('an invalid administrator override fails closed instead of sending credentials to the bundled server', () => {
+    for (const source of [
+      { processEnv: 'http://insecure.example.com' },
+      { preferWindowsUserEnv: true, windowsUserEnvReader: () => 'https://user:password@example.com' }
+    ]) {
+      assert.equal(normalizeEnterpriseApiOriginOrNull(resolveEnterpriseOriginCandidate({
+        ...source, packagedOrigin: enterpriseDeployment.enterprise_api_origin
+      })), null)
+    }
+  })
+
+  test('explicit valid configuration still overrides the distribution default', () => {
+    assert.equal(resolveEnterpriseOriginCandidate({
+      processEnv: 'https://customer.example.com',
+      packagedOrigin: enterpriseDeployment.enterprise_api_origin
+    }), 'https://customer.example.com')
+  })
+
+  test('a release client keeps its bundled origin even with stale process and Windows user settings', () => {
+    const spy = makeSpyReader('https://stale-user-setting.example.invalid')
+    const packaged = 'https://release-enterprise.example.invalid'
+
+    const out = resolveEnterpriseOriginCandidate({
+      packagedOrigin: packaged,
+      preferPackagedOrigin: true,
+      preferWindowsUserEnv: true,
+      processEnv: 'https://stale-process-setting.example.invalid',
+      windowsUserEnvReader: spy.reader
+    })
+
+    assert.equal(out, packaged)
+    assert.equal(spy.count(), 0)
+  })
+})
 
 const VALID_HTTPS = 'https://enterprise.example.invalid'
 const VALID_LOOPBACK_HTTP = 'http://127.0.0.1:8080'
@@ -346,10 +396,12 @@ describe('resolveEnterpriseOriginCandidate · T10 renderer is never involved', (
     const acceptedKeys: ReadonlyArray<keyof Parameters<typeof resolveEnterpriseOriginCandidate>[0]> = [
       'processEnv',
       'preferWindowsUserEnv',
-      'windowsUserEnvReader'
+      'windowsUserEnvReader',
+      'packagedOrigin',
+      'preferPackagedOrigin'
     ]
 
-    assert.deepEqual(acceptedKeys, ['processEnv', 'preferWindowsUserEnv', 'windowsUserEnvReader'])
+    assert.deepEqual(acceptedKeys, ['processEnv', 'preferWindowsUserEnv', 'windowsUserEnvReader', 'packagedOrigin', 'preferPackagedOrigin'])
   })
 })
 

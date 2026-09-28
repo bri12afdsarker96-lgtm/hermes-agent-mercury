@@ -1,21 +1,42 @@
 import { atom, type WritableAtom } from 'nanostores'
 
+import { flushCustomerDraftsForRequest } from './customer-reply-persistence'
+import { $enterprisePackageInstallFrozen } from './enterprise-install-readiness'
+import { customerReplyPreferencesFor, DEFAULT_REPLY_PREFERENCES, ENTERPRISE_LEARNING_ENABLED } from './enterprise-reply-preferences'
+import { assistantPresentationFrom, type CustomerReplyOption, type KnowledgeTrace } from './assistant-response'
 import type { EnterpriseClientRuntime } from './runtime'
 
 interface CustomerReplyState {
+  customerReplyOptions: CustomerReplyOption[]
   context: string
   instructions: string
+  memoryNote: string
+  memoryConfirmedAt: string | null
+  memoryDraft: string
+  memoryPending: boolean
   draft: string
   error: string | null
   knowledgeGrounded: boolean | null
+  knowledgeTrace?: KnowledgeTrace
   requestId: string | null
   phase: 'queued' | 'generating' | null
+  reasoningSummary?: string
   copiedDraft: string | null
 }
 
 interface CustomerReplyResponse {
+  answer_text?: string
+  customer_reply_options?: Array<{ kind?: string; text?: string }>
   knowledge_grounded: boolean
-  text: string
+  reasoning_summary?: string
+  retrieval_meta?: {
+    best_similarity?: number | null
+    candidate_count?: number
+    matched_count?: number
+    similarity_threshold?: number | null
+    status?: string
+  }
+  text?: string
 }
 
 export type CustomerReplyStore = WritableAtom<CustomerReplyState>
@@ -44,6 +65,38 @@ interface ReplyQueue {
 const queues = new WeakMap<CustomerReplyWorkspaceStore, ReplyQueue>()
 const retiredWorkspaces = new WeakSet<CustomerReplyWorkspaceStore>()
 const MAX_CONCURRENT_REPLIES = 3
+
+export function hasUnconfirmedCustomerMemory(workspace: CustomerReplyWorkspaceStore): boolean {
+  return workspace.get().customers.some(customer => {
+    const reply = customer.reply.get()
+
+    return reply.memoryDraft !== reply.memoryNote
+  })
+}
+
+export function updateCustomerMemoryDraft(store: CustomerReplyStore, value: string): void {
+  if ($enterprisePackageInstallFrozen.get() || value.length > 4000) {return}
+  store.set({ ...store.get(), memoryDraft: value, draft: '', copiedDraft: null, customerReplyOptions: [], knowledgeGrounded: null, knowledgeTrace: undefined, reasoningSummary: undefined, requestId: null, phase: null })
+}
+
+export async function confirmCustomerMemory(workspace: CustomerReplyWorkspaceStore, store: CustomerReplyStore, remove = false): Promise<void> {
+  if ($enterprisePackageInstallFrozen.get() || retiredWorkspaces.has(workspace) || !workspace.get().customers.some(customer => customer.reply === store)) {return}
+  const note = remove ? '' : store.get().memoryDraft
+
+  if (note.length > 4000) {return}
+  store.set({ ...store.get(), memoryNote: note, memoryDraft: note, memoryConfirmedAt: note ? new Date().toISOString() : null,
+    memoryPending: true, draft: '', copiedDraft: null, customerReplyOptions: [], knowledgeGrounded: null, knowledgeTrace: undefined, reasoningSummary: undefined, requestId: null, phase: null })
+
+  try {
+    await flushCustomerDraftsForRequest(workspace)
+  } catch { /* Persistence owns the visible error; an unacknowledged note stays pending. */ }
+}
+
+export function hasPendingCustomerReplies(workspace: CustomerReplyWorkspaceStore): boolean {
+  const queue = queues.get(workspace)
+
+  return Boolean(queue && (queue.active > 0 || queue.waiting.length > 0)) || workspace.get().customers.some(customer => customer.reply.get().requestId !== null)
+}
 
 function runQueuedReply(workspace: CustomerReplyWorkspaceStore, work: () => Promise<void>): Promise<void> {
   let queue = queues.get(workspace)
@@ -85,7 +138,10 @@ export function createCustomerReplyWorkspace(): CustomerReplyWorkspaceStore {
 }
 
 export function addCustomerReply(store: CustomerReplyWorkspaceStore): void {
+  if ($enterprisePackageInstallFrozen.get()) {return}
   const current = store.get()
+
+  if (current.customers.length >= 200) {return}
 
   const customer = {
     id: crypto.randomUUID(),
@@ -97,6 +153,7 @@ export function addCustomerReply(store: CustomerReplyWorkspaceStore): void {
 }
 
 export function closeCustomerReply(store: CustomerReplyWorkspaceStore, id: string): void {
+  if ($enterprisePackageInstallFrozen.get()) {return}
   const current = store.get()
   const target = current.customers.find(customer => customer.id === id)
 
@@ -141,13 +198,20 @@ export function retireCustomerReplyWorkspace(workspace: CustomerReplyWorkspaceSt
 
 function emptyReply(): CustomerReplyState {
   return {
+    customerReplyOptions: [],
     context: '',
     instructions: '',
+    memoryNote: '',
+    memoryConfirmedAt: null,
+    memoryDraft: '',
+    memoryPending: false,
     draft: '',
     error: null,
     knowledgeGrounded: null,
+    knowledgeTrace: undefined,
     requestId: null,
     phase: null,
+    reasoningSummary: undefined,
     copiedDraft: null
   }
 }
@@ -166,14 +230,18 @@ export function updateCustomerReplyInput(
   value: string
 ): void {
   // A suggestion belongs to the exact context that produced it.
+  if ($enterprisePackageInstallFrozen.get()) {return}
   store.set({
     ...store.get(),
     [field]: value,
     draft: '',
     error: null,
+    customerReplyOptions: [],
     knowledgeGrounded: null,
+    knowledgeTrace: undefined,
     requestId: null,
     phase: null,
+    reasoningSummary: undefined,
     copiedDraft: null
   })
 }
@@ -187,7 +255,8 @@ export async function generateCustomerReply(
   const current = store.get()
   const post = runtime.post?.bind(runtime)
 
-  if (!post || retiredWorkspaces.has(workspace) || current.requestId || !current.context.trim()) {
+  if ($enterprisePackageInstallFrozen.get() || !post || retiredWorkspaces.has(workspace) || current.requestId ||
+    (ENTERPRISE_LEARNING_ENABLED && (current.memoryPending || current.memoryDraft !== current.memoryNote)) || !current.context.trim()) {
     return
   }
 
@@ -210,13 +279,17 @@ export async function generateCustomerReply(
   }
 
   const requestId = crypto.randomUUID()
+  const preferences = { ...(ENTERPRISE_LEARNING_ENABLED ? customerReplyPreferencesFor(workspace).get() : DEFAULT_REPLY_PREFERENCES) }
   store.set({
     ...current,
     draft: '',
     error: null,
+    customerReplyOptions: [],
     knowledgeGrounded: null,
+    knowledgeTrace: undefined,
     requestId,
     phase: 'queued',
+    reasoningSummary: undefined,
     copiedDraft: null
   })
   await runQueuedReply(workspace, async () => {
@@ -230,29 +303,42 @@ export async function generateCustomerReply(
       return
     }
 
-    store.set({ ...store.get(), phase: 'generating' })
-
     try {
+      // The service looks up confirmed memory by owner + UUID + acknowledged
+      // revision. Do not send memory text or unconfirmed editor content.
+      const { revision } = await flushCustomerDraftsForRequest(workspace)
+      const customer = workspace.get().customers.find(item => item.reply === store)
+
+      if ($enterprisePackageInstallFrozen.get() || retiredWorkspaces.has(workspace) || store.get().requestId !== requestId || !customer) {return}
+      store.set({ ...store.get(), phase: 'generating' })
+
       const result = await post<CustomerReplyResponse>('/api/tenant-ai-assist', {
         configuration_id: configurationId,
         content,
-        mode: 'knowledge_question'
+        mode: 'knowledge_answer',
+        customer_id: customer.id,
+        workspace_revision: revision,
+        reply_preferences: preferences
       })
 
       if (retiredWorkspaces.has(workspace) || store.get().requestId !== requestId) {
         return
       }
 
-      if (typeof result.text !== 'string' || !result.text.trim() || typeof result.knowledge_grounded !== 'boolean') {
+      const presentation = assistantPresentationFrom(result)
+      if (!presentation.text || typeof result.knowledge_grounded !== 'boolean') {
         throw new Error('未收到完整的回复建议，请重试。')
       }
 
       store.set({
         ...store.get(),
-        draft: result.knowledge_grounded ? result.text : '',
+        customerReplyOptions: presentation.customerReplyOptions,
+        draft: result.knowledge_grounded ? presentation.text : '',
         knowledgeGrounded: result.knowledge_grounded,
+        knowledgeTrace: presentation.knowledgeTrace,
         requestId: null,
-        phase: null
+        phase: null,
+        reasoningSummary: presentation.reasoningSummary
       })
     } catch (reason) {
       if (retiredWorkspaces.has(workspace) || store.get().requestId !== requestId) {

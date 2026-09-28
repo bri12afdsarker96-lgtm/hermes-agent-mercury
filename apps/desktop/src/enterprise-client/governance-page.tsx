@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 
 import { CapabilityPolicyPanel } from './capability-policy-panel'
-import { PrincipalProvisioningPanel } from './principal-provisioning-panel'
 import { enterpriseRoleLabel } from './role-presentation'
 import type { EnterpriseClientRuntime, EnterpriseIdentity } from './runtime'
-import { TenantAiConfigPanel } from './tenant-ai-config-panel'
+import { TenantMembersPanel } from './tenant-members-panel'
+import { SeatRequestPanel } from './seat-request-panel'
+import { OperationsGroupPanel } from './operations-group-panel'
 
 interface AuditEvent {
   action?: string
@@ -104,8 +105,14 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
 
     setError(null)
     setState('loading')
-    void Promise.all([runtime.get<EnterpriseIdentity>('/api/whoami'), runtime.get<AuditResponse>('/api/audit-list')])
-      .then(([nextIdentity, audit]) => {
+    void runtime.get<EnterpriseIdentity>('/api/whoami')
+      .then(async nextIdentity => {
+        const audit = nextIdentity.role === 'super_admin'
+          ? await runtime.get<AuditResponse>('/api/audit-list').catch(() => ({events: []}))
+          : {events: []}
+        return {audit, nextIdentity}
+      })
+      .then(({ nextIdentity, audit }) => {
         if (!active) {
           return
         }
@@ -176,6 +183,7 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
 
   const selectedResourceRef =
     detail?.resource_ref ?? events.find(event => event.event_id === selectedEventId)?.resource_ref
+  const isPlatformAdministrator = identity?.role === 'super_admin'
 
   useEffect(() => {
     let active = true
@@ -221,7 +229,7 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
       <header className="hesc-page-header">
         <div>
           <h1>治理中心</h1>
-          <p>身份范围和审计证据均由 Hermes_AI 授权与投射；客户端不自行判定权限，也不提供审计重放。</p>
+          <p>{isPlatformAdministrator ? '平台侧身份范围、能力策略和审计证据均由 Hermes_AI 授权与投射；客户端不自行判定权限，也不提供审计重放。' : '集中管理员工账号、组别归属和待审批坐席申请；企业模型与密钥请在“AI模型配置”中维护。'}</p>
         </div>
         <span
           className="hesc-status"
@@ -240,56 +248,56 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
         </div>
       ) : null}
 
-      <div className="hesc-governance-grid">
-        <article className="hesc-card">
-          <h2 className="hesc-section-title">当前授权主体</h2>
-          <dl className="hesc-detail-list">
-            <div>
-              <dt>名称</dt>
-              <dd>{identity?.name ?? '—'}</dd>
-            </div>
-            <div>
-              <dt>租户</dt>
-              <dd>{identity?.tenant_id ?? '—'}</dd>
-            </div>
-            <div>
-              <dt>角色</dt>
-              <dd>{identity ? enterpriseRoleLabel(identity.role) : '—'}</dd>
-            </div>
-            <div>
-              <dt>主体标识</dt>
-              <dd>{identity?.principal_id ?? '—'}</dd>
-            </div>
-          </dl>
-        </article>
-        <article className="hesc-card">
-          <h2 className="hesc-section-title">能力状态</h2>
-          {identity ? (
-            <div className="hesc-capability-list">
-              {Object.entries(identity.product_capabilities ?? {}).map(([name, capability]) => (
-                <div key={name}>
-                  <strong>{name}</strong>
-                  <span data-live={capability.enabled && capability.status === 'LIVE' ? 'true' : 'false'}>
-                    {capability.enabled && capability.status === 'LIVE' ? '已启用' : (capability.status ?? '未启用')}
-                  </span>
-                </div>
-              ))}
-              {Object.keys(identity.product_capabilities ?? {}).length === 0 ? (
-                <p className="hesc-muted-copy">服务端未返回产品能力状态。</p>
-              ) : null}
-            </div>
-          ) : (
-            <p className="hesc-muted-copy">正在等待服务端身份范围。</p>
-          )}
-        </article>
-      </div>
-
-      <CapabilityPolicyPanel runtime={runtime} />
-
-      <PrincipalProvisioningPanel identity={identity} runtime={runtime} />
-
-      {identity?.role === 'tenant_admin' ? <TenantAiConfigPanel runtime={runtime} /> : null}
-
+      {runtime && identity?.role === 'tenant_admin' ? <TenantMembersPanel runtime={runtime} /> : null}
+      {runtime && identity?.role === 'tenant_admin' ? <OperationsGroupPanel runtime={runtime} /> : null}
+      {runtime && identity?.role === 'tenant_admin' ? <SeatRequestPanel review runtime={runtime} /> : null}
+      {isPlatformAdministrator ? <>
+        <div className="hesc-governance-grid">
+          <article className="hesc-card">
+            <h2 className="hesc-section-title">当前授权主体</h2>
+            <dl className="hesc-detail-list">
+              <div>
+                <dt>名称</dt>
+                <dd>{identity?.name ?? '—'}</dd>
+              </div>
+              <div>
+                <dt>租户</dt>
+                <dd>{identity?.tenant_id ?? '—'}</dd>
+              </div>
+              <div>
+                <dt>角色</dt>
+                <dd>{identity ? enterpriseRoleLabel(identity.role) : '—'}</dd>
+              </div>
+              <div>
+                <dt>主体标识</dt>
+                <dd>{identity?.principal_id ?? '—'}</dd>
+              </div>
+            </dl>
+          </article>
+          <article className="hesc-card">
+            <h2 className="hesc-section-title">能力状态</h2>
+            {identity ? (
+              <div className="hesc-capability-list">
+                {Object.entries(identity.product_capabilities ?? {}).map(([name, capability]) => (
+                  <div key={name}>
+                    <strong>{name}</strong>
+                    <span data-live={capability.enabled && capability.status === 'LIVE' ? 'true' : 'false'}>
+                      {capability.enabled && capability.status === 'LIVE' ? '已启用' : (capability.status ?? '未启用')}
+                    </span>
+                  </div>
+                ))}
+                {Object.keys(identity.product_capabilities ?? {}).length === 0 ? (
+                  <p className="hesc-muted-copy">服务端未返回产品能力状态。</p>
+                ) : null}
+              </div>
+            ) : (
+              <p className="hesc-muted-copy">正在等待服务端身份范围。</p>
+            )}
+          </article>
+        </div>
+        <CapabilityPolicyPanel runtime={runtime} />
+      </> : null}
+      {isPlatformAdministrator ? <>
       <article className="hesc-card hesc-audit-card">
         <div className="hesc-section-heading">
           <div>
@@ -302,7 +310,7 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
           <p className="hesc-muted-copy">当前授权范围内没有可展示的审计事件。</p>
         ) : null}
         {events.length > 0 ? (
-          <div className="hesc-table-wrap">
+          <div className="hesc-table-wrap hesc-scroll-region">
             <table className="hesc-table">
               <thead>
                 <tr>
@@ -409,6 +417,7 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
           ) : null}
         </article>
       </div>
+      </> : null}
     </section>
   )
 }

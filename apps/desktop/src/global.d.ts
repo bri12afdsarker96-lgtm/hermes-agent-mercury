@@ -1,6 +1,8 @@
 import type { GatewayWsUrlResult } from '@hermes/shared'
 import type { TranslucencyState } from '@hermes/shared/translucency'
 
+import type { EnterprisePackageUpdateState } from '../electron/enterprise-package-updater-types'
+
 import type { WakeIndicatorState } from './lib/wake-indicator'
 import type {
   PetOverlayBounds,
@@ -183,8 +185,44 @@ declare global {
        * `{ path, method, body }`. Optional: absent outside the desktop shell.
        */
       enterprise?: {
+        /** Local package updates are available independently of login and role. */
+        packageUpdate?: {
+          status(): Promise<EnterprisePackageUpdateState>
+          command(payload: {
+            action: 'check' | 'install-now' | 'download-for-next-launch' | 'cancel-scheduled'
+          }): Promise<EnterprisePackageUpdateState>
+          onStatus(callback: (state: EnterprisePackageUpdateState) => void): () => void
+          onPrepare(callback: (payload: { transactionId: string }) => void): () => void
+          onRelease(callback: (payload: { transactionId: string }) => void): () => void
+          ready(payload: { transactionId: string; ready: boolean; reasons: string[]; revision: number }): void
+          changed(payload: { revision: number }): void
+        }
+        speech?: {
+          status: (payload: { sessionId: string }) => Promise<{ available: boolean }>
+          speak: (payload: { requestId: string; sessionId: string; text: string }) => Promise<{ ok: boolean }>
+          stop: (payload: { requestId: string; sessionId: string }) => Promise<{ ok: boolean }>
+        }
         beginLogin: () => Promise<{ ok: true } | { code: string; message: string; ok: false }>
-        loginWithPassword: (payload: { loginName: string; password: string }) => Promise<
+        preReleaseAccess?: {
+          status: () => Promise<{
+            canInstall?: boolean
+            enabled: boolean
+            message: string
+            stage: string
+          }>
+          command: (payload: { action: 'import-profile' | 'install' | 'open-client' }) => Promise<{
+            canInstall?: boolean
+            enabled: boolean
+            message: string
+            stage: string
+          }>
+        }
+        rememberedLogin?: (clear?: boolean) => Promise<{ loginName: string; password: string } | null>
+        loginWithPassword: (payload: {
+          loginName: string
+          password: string
+          rememberPassword?: boolean
+        }) => Promise<
           | { baseUrl: string; mustChangePassword: boolean; ok: true; sessionId: string }
           | { code: string; message: string; ok: false }
         >
@@ -205,6 +243,16 @@ declare global {
           path: string
           sessionId: string
         }) => Promise<{ data: unknown; kind: 'ok' } | { code: string; kind: 'error'; message: string; status: number }>
+        multipart: (req: {
+          fields: Record<string, string>
+          files: Array<{ bytes: ArrayBuffer; contentType: string; field: 'call_file' | 'main_file'; filename: string }>
+          path: string
+          sessionId: string
+        }) => Promise<{ data: unknown; kind: 'ok' } | { code: string; kind: 'error'; message: string; status: number }>
+        download: (req: {
+          path: string
+          sessionId: string
+        }) => Promise<{ canceled?: boolean; path?: string; saved: boolean }>
       }
       notify: (payload: HermesNotification) => Promise<boolean>
       requestMicrophoneAccess: () => Promise<boolean>
@@ -287,7 +335,18 @@ declare global {
       /** Enum-only enterprise test telemetry; no user input or credential crosses this bridge. */
       reportEnterpriseActivity?: (activity: {
         event: 'connection_failed' | 'connection_ready' | 'workspace_opened'
-        workspace?: 'assistant' | 'conversations' | 'governance' | 'handoffs' | 'knowledge' | 'platform' | 'reminders' | 'workbench'
+        workspace?:
+          | 'assistant'
+          | 'knowledge_qa'
+          | 'customer_replies'
+          | 'conversations'
+          | 'governance'
+          | 'handoffs'
+          | 'knowledge'
+          | 'platform'
+          | 'reminders'
+          | 'tools'
+          | 'workbench'
       }) => void
       readDir: (path: string) => Promise<HermesReadDirResult>
       gitRoot?: (path: string) => Promise<string | null>

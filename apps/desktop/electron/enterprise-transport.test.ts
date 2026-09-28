@@ -3,9 +3,13 @@ import { describe, expect, it } from 'vitest'
 import {
   buildAutoConnectResult,
   classifyConnectError,
+  enterpriseRequestTimeoutMs,
+  ENTERPRISE_ASSIST_REQUEST_TIMEOUT_MS,
   ENTERPRISE_MAX_UPLOAD_BYTES,
+  ENTERPRISE_PASSWORD_MIN_LENGTH,
   EnterpriseSessionStore,
   isAllowedEnterpriseMethod,
+  isValidEnterprisePassword,
   isValidEnterprisePath,
   normalizeEnterpriseApiOriginOrNull,
   normalizeEnterpriseBaseUrl,
@@ -128,6 +132,17 @@ describe('EnterpriseSessionStore — per-renderer fencing', () => {
 
     expect(() => store.connect(1, BASE, '')).toThrow()
     expect(() => store.connect(1, 'http://remote.example.com', 'tok')).toThrow()
+  })
+})
+
+describe('enterprise password policy', () => {
+  it('accepts the same six-character through 256-character range as Hermes_AI', () => {
+    expect(ENTERPRISE_PASSWORD_MIN_LENGTH).toBe(6)
+    expect(isValidEnterprisePassword('12345')).toBe(false)
+    expect(isValidEnterprisePassword('123456')).toBe(true)
+    expect(isValidEnterprisePassword('x'.repeat(256))).toBe(true)
+    expect(isValidEnterprisePassword('x'.repeat(257))).toBe(false)
+    expect(isValidEnterprisePassword(null)).toBe(false)
   })
 })
 
@@ -266,6 +281,16 @@ describe('B16-OL · one-login pure core (autoConnect / containment / origin)', (
     expect(sid2).toBe(sid1)
     expect(store.size()).toBe(1)
     expect(store.resolve(1, sid1)?.token).toBe('tok-b')
+    expect(store.resolve(1, sid1)?.authSource).toBe('native')
+  })
+
+  it('rotates a password bearer without changing its authentication source', () => {
+    const store = new EnterpriseSessionStore()
+    const sid = store.connect(1, BASE, 'password-token')
+
+    expect(store.replaceToken(1, sid, 'rotated-password-token')).toBe(true)
+    expect(store.replaceToken(2, sid, 'other-sender-token')).toBe(false)
+    expect(store.resolve(1, sid)).toMatchObject({ authSource: 'password', token: 'rotated-password-token' })
   })
 
   it('autoConnect rotates the fenced session when the trusted enterprise origin changes', () => {
@@ -309,6 +334,17 @@ describe('B16-OL · one-login pure core (autoConnect / containment / origin)', (
     expect(store.autoConnect(1, BASE, 'tok-b')).toBe(sidNew)
   })
 
+  it('keeps first-login remember intent fenced, ephemeral, and single-use', () => {
+    const store = new EnterpriseSessionStore()
+    const sid = store.connect(1, BASE, 'tok-a')
+
+    expect(store.rememberPasswordAfterChange(2, sid, 'member')).toBe(false)
+    expect(store.rememberPasswordAfterChange(1, sid, 'member')).toBe(true)
+    expect(store.takePasswordRememberIntent(1, 'wrong')).toBeNull()
+    expect(store.takePasswordRememberIntent(1, sid)).toBe('member')
+    expect(store.takePasswordRememberIntent(1, sid)).toBeNull()
+  })
+
   // OL-Q1 · bearer containment
   it('buildAutoConnectResult carries only {ok,sessionId,baseUrl} — never the bearer', () => {
     const store = new EnterpriseSessionStore()
@@ -332,5 +368,12 @@ describe('B16-OL · one-login pure core (autoConnect / containment / origin)', (
     expect(normalizeEnterpriseApiOriginOrNull('http://enterprise.example.com')).toBeNull()
     expect(normalizeEnterpriseApiOriginOrNull('https://user:pass@enterprise.example.com')).toBeNull()
     expect(normalizeEnterpriseApiOriginOrNull('not-a-url')).toBeNull()
+  })
+})
+
+describe('enterprise request timeouts', () => {
+  it('allows the server-side AI generation window while retaining the normal transport default elsewhere', () => {
+    expect(enterpriseRequestTimeoutMs('/api/tenant-ai-assist', 15_000)).toBe(ENTERPRISE_ASSIST_REQUEST_TIMEOUT_MS)
+    expect(enterpriseRequestTimeoutMs('/api/whoami', 15_000)).toBe(15_000)
   })
 })

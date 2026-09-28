@@ -24,7 +24,10 @@ import crypto from 'node:crypto'
 import { normalizeRemoteBaseUrl } from './connection-config'
 
 export interface EnterpriseSession {
+  /** Keeps native bearer renewal away from explicit password sessions. */
+  authSource: 'native' | 'password'
   baseUrl: string
+  passwordLoginName?: string
   sessionId: string
   token: string
 }
@@ -143,6 +146,20 @@ export function isAllowedEnterpriseMethod(method: unknown): boolean {
  * network fetch. Aligned to the Phase-1 server contract (50 MiB).
  */
 export const ENTERPRISE_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+/** Keep the main-process password gate aligned with Hermes_AI's verifier. */
+export const ENTERPRISE_PASSWORD_MIN_LENGTH = 6
+/** Hermes_AI permits an AI generation to take up to 60 seconds. */
+export const ENTERPRISE_ASSIST_REQUEST_TIMEOUT_MS = 75_000
+
+/** Validate only the password's structural bounds before it reaches the server. */
+export function isValidEnterprisePassword(password: unknown): password is string {
+  return typeof password === 'string' && password.length >= ENTERPRISE_PASSWORD_MIN_LENGTH && password.length <= 256
+}
+
+/** Preserve the server's AI generation window instead of applying the short transport default. */
+export function enterpriseRequestTimeoutMs(path: string, defaultTimeoutMs: number): number {
+  return path === '/api/tenant-ai-assist' ? ENTERPRISE_ASSIST_REQUEST_TIMEOUT_MS : defaultTimeoutMs
+}
 
 /** Byte length of an upload payload, or null if the shape is not a real buffer
  *  (fail closed — a malformed shape must never reach `Buffer.from`). */
@@ -230,7 +247,7 @@ export class EnterpriseSessionStore {
 
   /** Mint a fenced session for `senderId`, replacing any prior one. Returns the
    *  opaque sessionId (not a secret) the renderer echoes on later calls. */
-  connect(senderId: number, baseUrl: unknown, token: unknown): string {
+  connect(senderId: number, baseUrl: unknown, token: unknown, authSource: EnterpriseSession['authSource'] = 'password'): string {
     const normalized = normalizeEnterpriseBaseUrl(baseUrl)
     const bearer = String(token ?? '')
 
@@ -239,7 +256,7 @@ export class EnterpriseSessionStore {
     }
 
     const sessionId = crypto.randomUUID()
-    this.#bySender.set(senderId, { baseUrl: normalized, sessionId, token: bearer })
+    this.#bySender.set(senderId, { authSource, baseUrl: normalized, sessionId, token: bearer })
 
     return sessionId
   }
@@ -265,12 +282,31 @@ export class EnterpriseSessionStore {
     const existing = this.#bySender.get(senderId)
 
     if (existing && existing.baseUrl === normalized) {
+      existing.authSource = 'native'
       existing.token = bearer
 
       return existing.sessionId
     }
 
-    return this.connect(senderId, normalized, bearer)
+    return this.connect(senderId, normalized, bearer, 'native')
+  }
+
+  /**
+   * Rotate a bearer already bound to this exact renderer session. Password
+   * changes use this instead of `autoConnect`, so they cannot accidentally
+   * reclassify a password session as a native OAuth session.
+   */
+  replaceToken(senderId: number, sessionId: unknown, token: unknown): boolean {
+    const session = this.resolve(senderId, sessionId)
+    const bearer = String(token ?? '')
+
+    if (!session || !bearer) {
+      return false
+    }
+
+    session.token = bearer
+
+    return true
   }
 
   /** B16-OL · The current opaque sessionId for a sender, or null (none / destroyed).
@@ -278,6 +314,37 @@ export class EnterpriseSessionStore {
    *  second one; carries no secret. */
   currentSessionId(senderId: number): string | null {
     return this.#bySender.get(senderId)?.sessionId ?? null
+  }
+
+  /**
+   * Holds only a login name until a first-login password rotation succeeds.
+   * The replacement password remains in the IPC request until main encrypts it
+   * with the OS credential store; it is never retained by this session store.
+   */
+  rememberPasswordAfterChange(senderId: number, sessionId: unknown, loginName: unknown): boolean {
+    const session = this.resolve(senderId, sessionId)
+
+    if (!session || typeof loginName !== 'string' || loginName.length === 0 || loginName.length > 64) {
+      return false
+    }
+
+    session.passwordLoginName = loginName
+
+    return true
+  }
+
+  /** Consume the first-login persistence intent exactly once after success. */
+  takePasswordRememberIntent(senderId: number, sessionId: unknown): string | null {
+    const session = this.resolve(senderId, sessionId)
+
+    if (!session || !session.passwordLoginName) {
+      return null
+    }
+
+    const { passwordLoginName } = session
+    delete session.passwordLoginName
+
+    return passwordLoginName
   }
 
   /** Resolve the session iff BOTH sender and sessionId match (else null). */

@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "enterprise_api_origin": "https://ppbb096.site",
+  "pre_release_access": {
+    "enabled": true,
+    "openvpn_profile_name": "Hermes 内部预发布"
+  }
+}

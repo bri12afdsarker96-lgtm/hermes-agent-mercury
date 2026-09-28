@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { beginEnterpriseLogin, connectEnterpriseClient } from './runtime'
+import { beginEnterpriseLogin, beginEnterprisePasswordLogin, connectEnterpriseClient } from './runtime'
 
 type EnterpriseResponse =
   { data: unknown; kind: 'ok' } | { code: string; kind: 'error'; message: string; status: number }
@@ -28,6 +28,56 @@ afterEach(() => {
 })
 
 describe('Enterprise client runtime adapter', () => {
+  it('retries transient reads once but never replays writes', async () => {
+    const bridge = installBridge()
+    const failure = { code: 'http', kind: 'error' as const, message: 'unavailable', status: 503 }
+    bridge.request.mockResolvedValueOnce(failure)
+    const runtime = await connectEnterpriseClient()
+    await expect(runtime.get('/api/whoami')).resolves.toEqual({ ok: true })
+    expect(bridge.request).toHaveBeenCalledTimes(2)
+    bridge.request.mockClear().mockResolvedValueOnce(failure)
+    await expect(runtime.post!('/api/assistant-reminder-action', { action: 'create' })).rejects.toMatchObject({ status: 503 })
+    expect(bridge.request).toHaveBeenCalledOnce()
+  })
+  it('uses bounded backoff for repeated transient reads', async () => {
+    vi.useFakeTimers()
+
+    try {
+      const bridge = installBridge()
+      const failure = { code: 'http', kind: 'error' as const, message: 'unavailable', status: 503 }
+      bridge.request.mockResolvedValueOnce(failure).mockResolvedValueOnce(failure)
+      const runtime = await connectEnterpriseClient()
+      const request = runtime.get('/api/whoami')
+
+      await vi.advanceTimersByTimeAsync(1_500)
+      await expect(request).resolves.toEqual({ ok: true })
+      expect(bridge.request).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+  it.each([
+    ['invalid_credentials', 'invalid_credentials', 403],
+    ['service_unavailable', 'authority_unavailable', 503],
+    ['rate_limited', 'rate_limited', 429],
+    ['network', 'network', 0]
+  ])('preserves password login failure category %s without exposing server text', async (code, kind, status) => {
+    const bridge = installBridge()
+    Object.assign(bridge, { loginWithPassword: vi.fn(async () => ({ ok: false, code, message: 'sensitive server detail' })) })
+    await expect(beginEnterprisePasswordLogin('test.account', 'a-valid-password')).rejects.toMatchObject({ kind, status })
+    await expect(beginEnterprisePasswordLogin('test.account', 'a-valid-password')).rejects.not.toHaveProperty('message', 'sensitive server detail')
+  })
+  it('distinguishes main-owned no-session from configuration and transport failures', async () => {
+    const bridge = installBridge()
+    bridge.autoConnect.mockResolvedValueOnce({ ok: false, code: 'no_native_session', message: 'internal' } as never)
+    await expect(connectEnterpriseClient()).rejects.toMatchObject({ name: 'EnterpriseLoginRequired', message: '请登录企业账号' })
+    expect(bridge.request).not.toHaveBeenCalled()
+    bridge.autoConnect.mockResolvedValueOnce({ ok: false, code: 'no_enterprise_origin', message: 'internal' } as never)
+    await expect(connectEnterpriseClient()).rejects.toMatchObject({ name: 'EnterpriseClientError', kind: 'network' })
+    bridge.autoConnect.mockRejectedValueOnce(new Error('bridge offline'))
+    await expect(connectEnterpriseClient()).rejects.toMatchObject({ name: 'EnterpriseClientError', kind: 'network' })
+  })
+
   it('starts login only through the token-free main bridge', async () => {
     const bridge = installBridge()
 
@@ -134,7 +184,7 @@ describe('Enterprise client runtime adapter', () => {
 
   it('classifies a bridge transport failure without exposing its implementation detail', async () => {
     const bridge = installBridge()
-    bridge.request.mockRejectedValueOnce(new Error('https://internal.example.invalid: connection refused'))
+    bridge.request.mockRejectedValue(new Error('https://internal.example.invalid: connection refused'))
     const runtime = await connectEnterpriseClient()
 
     await expect(runtime.get('/api/health')).rejects.toMatchObject({

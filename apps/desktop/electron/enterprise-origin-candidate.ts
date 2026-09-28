@@ -7,10 +7,9 @@
 //   The Agent gateway and the Hermes_AI Enterprise `/api/*` plane are DISTINCT
 //   origins (proven by the OL-council topology decision). The renderer must
 //   never own the enterprise origin, so main is the only authority. Main
-//   currently reads HERMES_DESKTOP_ENTERPRISE_ORIGIN from process.env only,
-//   but a GUI app launched from Windows Explorer inherits a stale env
-//   snapshot: a value set via `setx` AFTER login is invisible to process.env
-//   even though a fresh shell — and the Hermes CLI — sees it immediately.
+//   supports an administrator-provided HERMES_DESKTOP_ENTERPRISE_ORIGIN, but
+//   a GUI app launched from Windows Explorer can inherit a stale value. A
+//   release build may therefore lock itself to its bundled deployment origin.
 //
 //   This module closes the gap by giving main one deterministic, pure
 //   function for picking the candidate value:
@@ -65,6 +64,16 @@ export interface EnterpriseOriginCandidateSource {
    * skip that work entirely when the explicit env is already present.
    */
   windowsUserEnvReader?: () => string | null
+
+  /** Non-secret deployment origin bundled by the distributor; main-owned only. */
+  packagedOrigin?: unknown
+
+  /**
+   * Release clients use the bundled origin as their fixed enterprise boundary.
+   * This is intentionally opt-in so development and command-line callers can
+   * still exercise their explicit configuration paths.
+   */
+  preferPackagedOrigin?: boolean
 }
 
 /**
@@ -93,6 +102,12 @@ export interface EnterpriseOriginCandidateSource {
 export function resolveEnterpriseOriginCandidate(
   source: EnterpriseOriginCandidateSource
 ): string | null {
+  const packaged = normalizeCandidateString(source?.packagedOrigin)
+
+  if (source?.preferPackagedOrigin && packaged !== null) {
+    return packaged
+  }
+
   const explicit = normalizeCandidateString(source?.processEnv)
 
   if (source?.preferWindowsUserEnv) {
@@ -102,7 +117,7 @@ export function resolveEnterpriseOriginCandidate(
     // malformed rather than silently redirecting to an inherited process URL.
     const durable = normalizeCandidateString(source?.windowsUserEnvReader?.())
 
-    return durable ?? explicit
+    return durable ?? explicit ?? packaged
   }
 
   if (explicit !== null) {
@@ -120,7 +135,7 @@ export function resolveEnterpriseOriginCandidate(
   // (no Windows fallback available) cleanly resolve to `null`.
   const fallback = normalizeCandidateString(source?.windowsUserEnvReader?.())
 
-  return fallback
+  return fallback ?? packaged
 }
 
 function normalizeCandidateString(value: unknown): string | null {

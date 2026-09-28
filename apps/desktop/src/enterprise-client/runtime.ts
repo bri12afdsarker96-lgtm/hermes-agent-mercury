@@ -1,13 +1,14 @@
 /**
- * Product-owned bridge to Hermes_AI. The renderer handles neither a bearer nor
- * a server address: Electron main resolves both and returns only a fenced,
- * opaque session id.
+ * Product-owned bridge to Hermes_AI. Electron main controls the server address
+ * and credentials. Renderer requests use a fenced, opaque session id; the
+ * public origin scopes presentation preferences, never request routing.
  */
 
 import {
   EnterpriseClientError,
   enterpriseClientErrorForStatus,
-  enterpriseNetworkError
+  enterpriseNetworkError,
+  enterprisePasswordLoginError
 } from './runtime-errors'
 
 export { EnterpriseClientError } from './runtime-errors'
@@ -33,6 +34,7 @@ export interface EnterpriseDesktopSurfaces {
 }
 
 export interface EnterpriseIdentity {
+  tenant_name?: string
   desktop_surfaces?: EnterpriseDesktopSurfaces
   effective_permissions?: string[]
   name?: string
@@ -61,14 +63,41 @@ export interface EnterpriseUpload {
   filename: string
 }
 
+export interface EnterpriseMultipartFile extends EnterpriseUpload {
+  field: 'call_file' | 'main_file'
+}
+
+export interface EnterpriseMultipartUpload {
+  fields: Record<string, string>
+  files: EnterpriseMultipartFile[]
+}
+
 export interface EnterpriseClientRuntime {
+  /** Non-secret scope for this device's per-seat presentation preferences. */
+  serverOrigin?: string
+  speech?: {
+    status(): Promise<{ available: boolean }>
+    speak(requestId: string, text: string): Promise<{ ok: boolean }>
+    stop(requestId: string): Promise<{ ok: boolean }>
+  }
   disconnect(): Promise<void>
   get<T>(path: string): Promise<T>
   post?<T>(path: string, body: unknown): Promise<T>
   upload?<T>(path: string, file: EnterpriseUpload): Promise<T>
+  multipart?<T>(path: string, upload: EnterpriseMultipartUpload): Promise<T>
+  download?(path: string): Promise<{ canceled?: boolean; path?: string; saved: boolean }>
 }
 
 export type EnterpriseLoginResult = { ok: true } | { code: string; message: string; ok: false }
+
+/** A cold start without a session is an ordinary login prompt, not a failed
+ * network request. Only main's explicit no-session result creates this state. */
+export class EnterpriseLoginRequired extends Error {
+  constructor() {
+    super('请登录企业账号')
+    this.name = 'EnterpriseLoginRequired'
+  }
+}
 
 interface EnterpriseConnectedSession {
   baseUrl: string
@@ -100,7 +129,8 @@ export async function beginEnterpriseLogin(): Promise<EnterpriseLoginResult> {
  */
 export async function beginEnterprisePasswordLogin(
   loginName: string,
-  password: string
+  password: string,
+  rememberPassword = false
 ): Promise<EnterpriseConnectedSession> {
   const bridge = window.hermesDesktop?.enterprise
 
@@ -111,13 +141,13 @@ export async function beginEnterprisePasswordLogin(
   let connected: Awaited<ReturnType<typeof bridge.loginWithPassword>>
 
   try {
-    connected = await bridge.loginWithPassword({ loginName, password })
+    connected = await bridge.loginWithPassword({ loginName, password, rememberPassword })
   } catch {
     throw enterpriseNetworkError()
   }
 
   if (!connected.ok) {
-    throw enterpriseNetworkError()
+    throw enterprisePasswordLoginError(connected.code)
   }
 
   return connected
@@ -149,6 +179,7 @@ export async function connectEnterpriseClient(options: EnterpriseClientOptions =
   }
 
   if (!connected.ok) {
+    if (connected.code === 'no_native_session') {throw new EnterpriseLoginRequired()}
     throw enterpriseNetworkError()
   }
 
@@ -158,7 +189,7 @@ export async function connectEnterpriseClient(options: EnterpriseClientOptions =
 export async function connectEnterpriseClientWithPassword(
   loginName: string,
   password: string,
-  options: EnterpriseClientOptions = {}
+  options: EnterpriseClientOptions & { rememberPassword?: boolean } = {}
 ): Promise<{ mustChangePassword: boolean; runtime: EnterpriseClientRuntime }> {
   const bridge = window.hermesDesktop?.enterprise
 
@@ -166,7 +197,7 @@ export async function connectEnterpriseClientWithPassword(
     throw enterpriseNetworkError()
   }
 
-  const connected = await beginEnterprisePasswordLogin(loginName, password)
+  const connected = await beginEnterprisePasswordLogin(loginName, password, options.rememberPassword)
 
   return {
     mustChangePassword: connected.mustChangePassword === true,
@@ -181,6 +212,28 @@ function enterpriseRuntimeFromSession(
 ): EnterpriseClientRuntime {
   const { sessionId } = connected
   let disconnected = false
+
+  async function retryRead<T>(path: string): Promise<T> {
+    // GET requests are the only enterprise calls this adapter may replay. All
+    // mutations keep their one-shot semantics so a timeout can never duplicate
+    // a customer-facing or administrative action.
+    const delays = [500, 1_000, 2_000]
+
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await request<T>('GET', path)
+      } catch (reason) {
+        const retryable = reason instanceof EnterpriseClientError &&
+          (reason.kind === 'network' || [502, 503, 504].includes(reason.status))
+
+        if (!retryable || attempt >= delays.length) {
+          throw reason
+        }
+
+        await new Promise(resolve => setTimeout(resolve, delays[attempt]))
+      }
+    }
+  }
 
   async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
     if (disconnected) {
@@ -207,6 +260,24 @@ function enterpriseRuntimeFromSession(
   }
 
   return {
+    serverOrigin: new URL(connected.baseUrl).origin,
+    speech: enterpriseBridge.speech ? {
+      async status() {
+        if (disconnected) {return { available: false }}
+
+        return enterpriseBridge.speech!.status({ sessionId })
+      },
+      async speak(requestId, text) {
+        if (disconnected) {return { ok: false }}
+
+        return enterpriseBridge.speech!.speak({ requestId, sessionId, text })
+      },
+      async stop(requestId) {
+        if (disconnected) {return { ok: false }}
+
+        return enterpriseBridge.speech!.stop({ requestId, sessionId })
+      }
+    } : undefined,
     async disconnect() {
       if (disconnected) {
         return
@@ -218,7 +289,7 @@ function enterpriseRuntimeFromSession(
       await enterpriseBridge.disconnect(sessionId)
     },
     async get<T>(path: string) {
-      return request<T>('GET', path)
+      return retryRead<T>(path)
     },
     async post<T>(path: string, body: unknown) {
       return request<T>('POST', path, body)
@@ -245,6 +316,22 @@ function enterpriseRuntimeFromSession(
 
         throw clientError
       }
+    },
+    async multipart<T>(path: string, upload: EnterpriseMultipartUpload) {
+      if (disconnected) {throw enterpriseClientErrorForStatus(401)}
+      try {
+        const response = await enterpriseBridge.multipart({...upload, path, sessionId})
+        if (response.kind !== 'ok') {throw enterpriseClientErrorForStatus(response.status)}
+        return response.data as T
+      } catch (reason) {
+        const clientError = reason instanceof EnterpriseClientError ? reason : enterpriseNetworkError()
+        if (!disconnected && clientError.kind === 'authentication_required') {options.onAuthenticationRequired?.(clientError)}
+        throw clientError
+      }
+    },
+    async download(path: string) {
+      if (disconnected) {throw enterpriseClientErrorForStatus(401)}
+      return enterpriseBridge.download({path, sessionId})
     }
   }
 }

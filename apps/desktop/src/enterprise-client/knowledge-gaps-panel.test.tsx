@@ -1,11 +1,11 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { KnowledgeGapsPanel } from './knowledge-gaps-panel'
 import type { EnterpriseClientRuntime } from './runtime'
 
 describe('KnowledgeGapsPanel', () => {
-  it('reads authorized gaps and authors a selected gap only after explicit submission', async () => {
+  it('keeps existing gaps readable while the learning submission is frozen', async () => {
     const get = vi.fn(async () => ({
       collections: ['enterprise-policy'],
       gaps: [
@@ -17,7 +17,7 @@ describe('KnowledgeGapsPanel', () => {
       ]
     }))
 
-    const post = vi.fn(async () => ({ gap: { gap_id: 'gap-1', status: 'authored' } }))
+    const post = vi.fn(async () => ({ candidate_id: 'candidate-1', status: 'needs_review', retrievable: false }))
 
     const runtime: EnterpriseClientRuntime = {
       disconnect: vi.fn(async () => undefined),
@@ -28,15 +28,9 @@ describe('KnowledgeGapsPanel', () => {
     render(<KnowledgeGapsPanel runtime={runtime} />)
 
     expect(await screen.findByText('如何开具发票？')).toBeTruthy()
-    fireEvent.change(screen.getByLabelText('补充知识'), { target: { value: '在订单页申请电子发票。' } })
-    fireEvent.change(screen.getByLabelText('目标知识集合'), { target: { value: 'enterprise-policy' } })
-    fireEvent.click(screen.getByRole('button', { name: '提交补充知识' }))
-
-    await screen.findByRole('button', { name: '提交补充知识' })
-    expect(post).toHaveBeenCalledWith('/api/kb-gap-author', {
-      collection: 'enterprise-policy',
-      gap_id: 'gap-1',
-      text: '在订单页申请电子发票。'
-    })
+    expect(screen.queryByLabelText('补充知识')).toBeNull()
+    expect(screen.queryByRole('button', { name: '提交补充知识审核' })).toBeNull()
+    expect(screen.getByText(/请通过知识库上传补充资料/)).toBeTruthy()
+    expect(post).not.toHaveBeenCalled()
   })
 })

@@ -31,6 +31,9 @@ import {
 import type { WebContents } from 'electron'
 import nodePty from 'node-pty'
 
+import enterpriseDeployment from '../assets/enterprise-deployment.json'
+import openVpnConnectManifest from '../assets/openvpn-connect-manifest.json'
+
 import { classifyActiveRuntime } from './active-runtime-state'
 import { stopBackendChild as stopBackendChildImpl, stopBackendTreesForUpdate } from './backend-child'
 import { dashboardFallbackArgs, sourceDeclaresServe } from './backend-command'
@@ -130,17 +133,34 @@ import {
 import { describeDevCdpDecision, resolveDevCdpPort } from './dev-cdp'
 import { installEmbedReferer } from './embed-referer'
 import { resolveEnterpriseOriginCandidate } from './enterprise-origin-candidate'
+import { createEnterprisePackageUpdater, type EnterprisePackageUpdaterController } from './enterprise-package-updater'
+import {
+  backgroundLaunchArguments,
+  connectOnLaunchArguments,
+  findOpenVpnConnectExecutable,
+  hasHermesPreReleaseProfile,
+  HERMES_PRE_RELEASE_PROFILE_NAME,
+  importProfileArguments,
+  minimizeOnLaunchArguments,
+  needsOpenVpnConsent,
+  validateOvpnProfileFile
+} from './enterprise-pre-release-access'
+import { rememberedLogin, rememberPasswordRotation } from './enterprise-remembered-login'
+import { EnterpriseSpeech } from './enterprise-speech'
 import {
   buildAutoConnectResult,
   classifyConnectError,
   ENTERPRISE_MAX_UPLOAD_BYTES,
+  enterpriseRequestTimeoutMs,
   EnterpriseSessionStore,
   isAllowedEnterpriseMethod,
+  isValidEnterprisePassword,
   normalizeEnterpriseApiOriginOrNull,
   resolveEnterpriseUrl,
   sanitizeMultipartContentType,
   uploadByteLength
 } from './enterprise-transport'
+import { createEnterpriseUpdateReadiness } from './enterprise-update-readiness'
 import { createEventDeduper } from './event-dedupe'
 import {
   buildTerminalScript,
@@ -1202,7 +1222,7 @@ app.setName(APP_NAME)
 // need this, so gate it on Windows. (Fixes: desktop approval/turn notifications
 // never firing on Windows.)
 if (IS_WINDOWS) {
-  app.setAppUserModelId('com.nousresearch.hermes')
+  app.setAppUserModelId('com.qiqiaoban.hermes-enterprise-assistant')
 }
 
 // Seed the native About panel with the live Hermes version. This is refreshed
@@ -4779,14 +4799,55 @@ function multipartBody(upload) {
   return { body, contentType: `multipart/form-data; boundary=${boundary}` }
 }
 
+// Multi-file variant used by the enterprise order-difference workflow.  It is
+// intentionally narrow: field names are validated again here so a compromised
+// renderer cannot smuggle extra multipart headers or server-side parameters.
+function multipartBodyWithFields(multipart) {
+  const boundary = `----hermes-${crypto.randomBytes(12).toString('hex')}`
+  const chunks: Buffer[] = []
+  const appendText = (name, value) => {
+    const safeName = String(name || '')
+    if (!/^[A-Za-z0-9_-]{1,48}$/.test(safeName)) {
+      throw new Error('Invalid multipart field name')
+    }
+    const text = String(value ?? '')
+    chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${safeName}"\r\n\r\n${text}\r\n`))
+  }
+  const appendFile = file => {
+    const safeName = String(file?.field || '')
+    if (!/^[A-Za-z0-9_-]{1,48}$/.test(safeName)) {
+      throw new Error('Invalid multipart file field')
+    }
+    const filename = String(file?.filename || 'file').replace(/["\r\n]/g, '_')
+    chunks.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="${safeName}"; filename="${filename}"\r\n` +
+          `Content-Type: ${sanitizeMultipartContentType(file?.contentType)}\r\n\r\n`
+      )
+    )
+    chunks.push(Buffer.from(file?.bytes))
+    chunks.push(Buffer.from('\r\n'))
+  }
+  for (const [name, value] of Object.entries(multipart?.fields || {})) {
+    appendText(name, value)
+  }
+  for (const file of multipart?.files || []) {
+    appendFile(file)
+  }
+  chunks.push(Buffer.from(`--${boundary}--\r\n`))
+  return { body: Buffer.concat(chunks), contentType: `multipart/form-data; boundary=${boundary}` }
+}
+
 function fetchJson(url, token, options: any = {}) {
   return new Promise((resolve, reject) => {
-    const { body, contentType } = options.upload
-      ? multipartBody(options.upload)
-      : {
-          body: options.body === undefined ? undefined : Buffer.from(JSON.stringify(options.body)),
-          contentType: 'application/json'
-        }
+    const { body, contentType } = options.multipart
+      ? multipartBodyWithFields(options.multipart)
+      : options.upload
+        ? multipartBody(options.upload)
+        : {
+            body: options.body === undefined ? undefined : Buffer.from(JSON.stringify(options.body)),
+            contentType: 'application/json'
+          }
 
     const parsed = new URL(url)
     const client = parsed.protocol === 'https:' ? https : http
@@ -4905,6 +4966,7 @@ function downloadViaTokenToFile(url, token, ctx, options: any = {}) {
       {
         method: 'GET',
         headers: {
+          ...(options.headers || {}),
           'X-Hermes-Session-Token': token
         }
       },
@@ -7777,9 +7839,7 @@ async function discoverCloudAgents(org?: string) {
       // A 401 means the portal session lapsed (and silent renewal could not
       // recover it) — surface it as a re-login, not a generic failure.
       if (error && error.statusCode === 401) {
-        const err = new Error(
-          'Hermes 企业服务会话已失效。请打开“设置 → 网关”后重新登录。'
-        ) as any
+        const err = new Error('Hermes 企业服务会话已失效。请打开“设置 → 网关”后重新登录。') as any
 
         err.needsCloudLogin = true
         err.cause = error
@@ -8715,8 +8775,7 @@ async function buildRemoteConnection(
       oauthGuardMayHardFail(await gatewayAuthProviders(baseUrl, remoteHeaders))
     ) {
       const err = new Error(
-        '远程企业服务需要身份验证，但当前尚未登录。' +
-          '请打开“设置 → 网关”并点击“登录”，或切回本地服务。'
+        '远程企业服务需要身份验证，但当前尚未登录。' + '请打开“设置 → 网关”并点击“登录”，或切回本地服务。'
       ) as any
 
       err.needsOauthLogin = true
@@ -11680,6 +11739,14 @@ function createWindow() {
   })
 
   const createdMainWindow = mainWindow
+  const updateSenderId = createdMainWindow.webContents.id
+  createdMainWindow.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
+    if (isMainFrame) {
+      enterpriseUpdateReadiness.invalidate(updateSenderId)
+    }
+  })
+  createdMainWindow.webContents.once('destroyed', () => enterpriseUpdateReadiness.invalidate(updateSenderId))
+  createdMainWindow.webContents.on('render-process-gone', () => enterpriseUpdateReadiness.invalidate(updateSenderId))
 
   // Chat-surface registration: see applyWindowTranslucency.
   translucencyBackedWindows.add(mainWindow)
@@ -13491,7 +13558,54 @@ ipcMain.handle('hermes:api', async (_event, request) => {
 // `fetchJson` engine (no browser Origin — the server's strict-Origin / no-CORS
 // posture stays intact). Consumed by the independent client's runtime adapter.
 const enterpriseSessions = new EnterpriseSessionStore()
+const enterpriseSpeech = new EnterpriseSpeech()
+const enterpriseSpeechSenders = new WeakSet<WebContents>()
+app.on('before-quit', () => enterpriseSpeech.stopAll())
 const enterpriseWiredSenders = new Set<number>()
+const enterpriseNativeRefreshes = new Map<string, Promise<void>>()
+
+/**
+ * Keep a native enterprise session aligned with the native OAuth store before
+ * a server operation. Explicit password sessions intentionally bypass this:
+ * they have no gateway refresh token, and replacing them was the original
+ * foreground-disconnect regression. If another action superseded the fenced
+ * session while a refresh was in flight, fail it closed instead of letting the
+ * older request borrow a credential.
+ */
+async function refreshedEnterpriseSession(senderId: number, sessionId: unknown) {
+  const session = enterpriseSessions.resolve(senderId, sessionId)
+
+  if (!session || session.authSource !== 'native') {
+    return session
+  }
+
+  const refreshKey = `${senderId}:${session.sessionId}`
+  let refresh = enterpriseNativeRefreshes.get(refreshKey)
+
+  if (!refresh) {
+    refresh = (async () => {
+      try {
+        const remote = await resolveRemoteBackend(primaryProfileKey())
+        const bearer = remote?.baseUrl ? await ensureNativeAccessToken(remote.baseUrl) : null
+
+        if (bearer) {
+          enterpriseSessions.replaceToken(senderId, sessionId, bearer)
+        }
+      } catch {
+        // A transient native refresh failure leaves the current bearer in place;
+        // the normal request path reports the real server outcome without
+        // replaying a user write.
+      }
+    })().finally(() => {
+      enterpriseNativeRefreshes.delete(refreshKey)
+    })
+    enterpriseNativeRefreshes.set(refreshKey, refresh)
+  }
+
+  await refresh
+
+  return enterpriseSessions.resolve(senderId, sessionId)
+}
 
 /** Only the primary desktop shell may establish or use an enterprise session.
  * Overlay, quick-entry, and helper windows share the preload but are not
@@ -13500,15 +13614,304 @@ function isEnterpriseClientSender(sender: WebContents): boolean {
   return !sender.isDestroyed() && mainWindow?.webContents.id === sender.id
 }
 
+// Package updates are a local machine capability. They never use tenant APIs,
+// enterprise credentials, or the source/runtime/backend update pipeline.
+let enterprisePackageUpdater: EnterprisePackageUpdaterController | null = null
+
+const enterpriseUpdateReadiness = createEnterpriseUpdateReadiness({
+  getWindow: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null),
+  blockers: () => {
+    const reasons: string[] = []
+
+    if (mergeActiveWork(activeWorkByWebContents.values()).count > 0) {
+      reasons.push('仍有 AI 任务正在运行，请等待完成')
+    }
+
+    if (
+      BrowserWindow.getAllWindows().some(
+        window =>
+          window !== mainWindow &&
+          !window.isDestroyed() &&
+          window !== petOverlayWindow &&
+          window !== hudWindow &&
+          window !== quickEntryWindow
+      )
+    ) {
+      reasons.push('请先关闭其他 Hermes 工作窗口，再立即更新')
+    }
+
+    return reasons
+  }
+})
+
+function isEnterpriseUpdateSender(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): boolean {
+  return isEnterpriseClientSender(event.sender) && event.senderFrame === event.sender.mainFrame
+}
+
+ipcMain.handle('hermes:enterprise:package-update-status', event => {
+  if (!isEnterpriseUpdateSender(event) || !enterprisePackageUpdater) {
+    throw new Error('package-update-unavailable')
+  }
+
+  return enterprisePackageUpdater.getState()
+})
+
+ipcMain.handle('hermes:enterprise:package-update-command', async (event, payload) => {
+  if (
+    !isEnterpriseUpdateSender(event) ||
+    !enterprisePackageUpdater ||
+    !payload ||
+    typeof payload !== 'object' ||
+    Object.keys(payload).length !== 1 ||
+    typeof payload.action !== 'string'
+  ) {
+    throw new Error('invalid-package-update-command')
+  }
+
+  switch (payload.action) {
+    case 'check':
+      return enterprisePackageUpdater.check()
+
+    case 'install-now':
+      return enterprisePackageUpdater.installNow()
+
+    case 'download-for-next-launch':
+      return enterprisePackageUpdater.scheduleNextLaunch()
+
+    case 'cancel-scheduled':
+      return enterprisePackageUpdater.cancelSchedule()
+
+    default:
+      throw new Error('invalid-package-update-command')
+  }
+})
+ipcMain.on('hermes:enterprise:package-update-ready', (event, payload) => {
+  if (isEnterpriseUpdateSender(event)) {
+    enterpriseUpdateReadiness.reply(event.sender.id, payload)
+  }
+})
+ipcMain.on('hermes:enterprise:package-update-changed', (event, payload) => {
+  if (isEnterpriseUpdateSender(event)) {
+    enterpriseUpdateReadiness.changed(event.sender.id, payload)
+  }
+})
+
 // WAVE-7 §10-C/§10-D: drop every wired enterprise session (and its main-held
 // bearer snapshot). Invoked when the native token dies so no stale enterprise
 // bearer outlives the native session that minted it; the next re-probe rebuilds.
 function destroyAllEnterpriseSessions(): void {
+  enterpriseSpeech.stopAll()
+
   for (const senderId of enterpriseWiredSenders) {
     enterpriseSessions.destroySender(senderId)
   }
 
   enterpriseWiredSenders.clear()
+}
+
+/** The signed desktop release is fixed to its bundled enterprise HTTPS origin.
+ * A stale local environment variable must never redirect business traffic away
+ * from the deployment address shown to the user. */
+function deployedEnterpriseOrigin(): string | null {
+  return normalizeEnterpriseApiOriginOrNull(
+    resolveEnterpriseOriginCandidate({
+      packagedOrigin: enterpriseDeployment.enterprise_api_origin,
+      preferPackagedOrigin: true
+    })
+  )
+}
+
+// ── Internal pre-release network access ────────────────────────────────────
+// The renderer gets no executable path, profile path, command line, or network
+// destination. Its small bridge below can ask only for a fixed status, launch,
+// MSI installation, or a native `.ovpn` picker/import. The imported profile
+// belongs to OpenVPN Connect; Hermes retains neither its contents nor a copy.
+const preReleaseAccessEnabled = enterpriseDeployment.pre_release_access?.enabled === true
+const preReleaseProfileName =
+  typeof enterpriseDeployment.pre_release_access?.openvpn_profile_name === 'string'
+    ? enterpriseDeployment.pre_release_access.openvpn_profile_name
+    : HERMES_PRE_RELEASE_PROFILE_NAME
+
+function preReleaseResult(stage: string, message: string, extra: Record<string, unknown> = {}) {
+  return { enabled: preReleaseAccessEnabled, message, stage, ...extra }
+}
+
+function bundledOpenVpnMsiPath(): string {
+  const directory = app.isPackaged
+    ? path.join(process.resourcesPath, 'openvpn-connect')
+    : path.join(app.getAppPath(), 'build', 'openvpn-connect')
+  return path.join(directory, openVpnConnectManifest.file_name)
+}
+
+async function hasVerifiedBundledOpenVpnMsi(): Promise<boolean> {
+  const file = bundledOpenVpnMsiPath()
+  try {
+    const expected = String(openVpnConnectManifest.sha256).toLowerCase()
+    if (!/^[a-f0-9]{64}$/.test(expected) || !fs.statSync(file).isFile()) {
+      return false
+    }
+    const digest = await new Promise<string>((resolve, reject) => {
+      const hash = crypto.createHash('sha256')
+      const stream = fs.createReadStream(file)
+      stream.on('error', reject)
+      stream.on('data', chunk => hash.update(chunk))
+      stream.on('end', () => resolve(hash.digest('hex')))
+    })
+    return digest === expected
+  } catch {
+    return false
+  }
+}
+
+function openVpnConnectExecutable(): string | null {
+  return process.platform === 'win32' ? findOpenVpnConnectExecutable() : null
+}
+
+function runOpenVpnCommand(
+  executable: string,
+  args: string[],
+  timeout = 30_000
+): Promise<{ ok: boolean; output: string }> {
+  return new Promise(resolve => {
+    execFile(
+      executable,
+      args,
+      hiddenWindowsChildOptions({ encoding: 'utf8', maxBuffer: 1024 * 1024, timeout }),
+      (error, stdout, stderr) => {
+        const output = `${String(stdout || '')}\n${String(stderr || '')}`.trim()
+        resolve({ ok: !error, output })
+      }
+    )
+  })
+}
+
+function launchOpenVpnConnect(executable: string, background = false): boolean {
+  try {
+    const child = spawn(executable, background ? backgroundLaunchArguments() : [], {
+      cwd: path.dirname(executable),
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: background
+    })
+    child.unref()
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function internalPreReleaseAccessStatus() {
+  if (!preReleaseAccessEnabled) {
+    return preReleaseResult('unavailable', '当前安装包未启用内部预发布接入。')
+  }
+  if (process.platform !== 'win32') {
+    return preReleaseResult('unsupported', '内部预发布接入当前仅支持 Windows 客户端。')
+  }
+
+  const executable = openVpnConnectExecutable()
+  if (!executable) {
+    return preReleaseResult('client_missing', '需要先安装 OpenVPN Connect，才能导入个人预发布配置。', {
+      canInstall: await hasVerifiedBundledOpenVpnMsi()
+    })
+  }
+
+  const profiles = await runOpenVpnCommand(executable, ['--list-profiles'])
+  if (needsOpenVpnConsent(profiles.output)) {
+    return preReleaseResult('consent_required', '请先在 OpenVPN Connect 中确认其隐私说明；确认后回到这里导入配置。')
+  }
+  if (!profiles.ok) {
+    return preReleaseResult('client_unavailable', '无法读取 OpenVPN Connect 状态，请重新打开该组件后重试。')
+  }
+  if (!hasHermesPreReleaseProfile(profiles.output, preReleaseProfileName)) {
+    return preReleaseResult('profile_missing', '请导入企业管理员为你签发的个人 .ovpn 配置。')
+  }
+
+  // OpenVPN Connect retains the profile and will connect in the background at
+  // later Hermes launches. The VPN client's own status remains authoritative.
+  launchOpenVpnConnect(executable, true)
+  return preReleaseResult('ready', '预发布网络配置已导入，正在后台准备安全连接。')
+}
+
+async function installBundledOpenVpnConnect() {
+  if (!preReleaseAccessEnabled || process.platform !== 'win32') {
+    return internalPreReleaseAccessStatus()
+  }
+  if (openVpnConnectExecutable()) {
+    return internalPreReleaseAccessStatus()
+  }
+  if (!(await hasVerifiedBundledOpenVpnMsi())) {
+    rememberLog('[pre-release-access] bundled OpenVPN MSI is absent or failed checksum verification')
+    return preReleaseResult('installer_unavailable', '预发布网络组件不完整，请重新下载安装包后重试。')
+  }
+
+  const result = await new Promise<{ code: number | null }>(resolve => {
+    // Do not pass quiet/passive arguments: the vendor installer must present
+    // its own licence/consent flow and Windows must prompt for elevation.
+    execFile(
+      'msiexec.exe',
+      ['/i', bundledOpenVpnMsiPath()],
+      hiddenWindowsChildOptions({ timeout: 15 * 60 * 1000 }),
+      error => {
+        resolve({ code: typeof error?.code === 'number' ? error.code : error ? -1 : 0 })
+      }
+    )
+  })
+
+  if (![0, 3010].includes(result.code ?? -1)) {
+    rememberLog(`[pre-release-access] OpenVPN MSI exited with ${String(result.code)}`)
+    return preReleaseResult('install_failed', 'OpenVPN Connect 未完成安装。请按安装窗口提示完成，或重新执行安装。')
+  }
+  if (result.code === 3010) {
+    return preReleaseResult('restart_required', 'OpenVPN Connect 已安装完成，需要重启 Windows 后再导入配置。')
+  }
+  return internalPreReleaseAccessStatus()
+}
+
+async function importPersonalPreReleaseProfile(parent: BrowserWindow | null) {
+  const current = await internalPreReleaseAccessStatus()
+  if (current.stage === 'client_missing' || current.stage === 'unsupported' || current.stage === 'unavailable') {
+    return current
+  }
+
+  const executable = openVpnConnectExecutable()
+  if (!executable) {
+    return internalPreReleaseAccessStatus()
+  }
+  const selection = await dialog.showOpenDialog(parent ?? undefined, {
+    filters: [{ extensions: ['ovpn'], name: 'OpenVPN 配置' }],
+    properties: ['openFile'],
+    title: '选择企业管理员签发的个人 .ovpn 配置'
+  })
+  if (selection.canceled || selection.filePaths.length !== 1) {
+    return internalPreReleaseAccessStatus()
+  }
+
+  const profilePath = selection.filePaths[0]!
+  const validation = validateOvpnProfileFile(profilePath)
+  if (!validation.ok) {
+    rememberLog(`[pre-release-access] rejected profile import: ${validation.reason}`)
+    return preReleaseResult('profile_rejected', '该 .ovpn 配置不符合安全导入要求，请向企业管理员重新获取个人配置。')
+  }
+
+  const imported = await runOpenVpnCommand(executable, importProfileArguments(profilePath, preReleaseProfileName))
+  if (needsOpenVpnConsent(imported.output)) {
+    launchOpenVpnConnect(executable)
+    return preReleaseResult('consent_required', '请先在 OpenVPN Connect 中确认其隐私说明；确认后回到这里再次导入配置。')
+  }
+  if (!imported.ok) {
+    rememberLog('[pre-release-access] OpenVPN profile import failed')
+    return preReleaseResult('profile_import_failed', '配置没有导入成功。请确认这是分配给你本人的 .ovpn 文件后重试。')
+  }
+
+  const connectOnLaunch = await runOpenVpnCommand(executable, connectOnLaunchArguments())
+  const minimizeOnLaunch = await runOpenVpnCommand(executable, minimizeOnLaunchArguments())
+  if (!connectOnLaunch.ok || !minimizeOnLaunch.ok) {
+    rememberLog('[pre-release-access] could not configure automatic OpenVPN background launch')
+    return preReleaseResult('profile_imported', '配置已导入。请在 OpenVPN Connect 中开启“启动时连接”后再登录。')
+  }
+
+  launchOpenVpnConnect(executable, true)
+  return internalPreReleaseAccessStatus()
 }
 
 // First-enterprise-login remains a native, main-owned operation. The renderer
@@ -13517,24 +13920,20 @@ function destroyAllEnterpriseSessions(): void {
 // OAuth remote route and a trusted enterprise origin prevents a successful
 // gateway login from being presented as a usable enterprise session when the
 // second authority plane has not been configured.
-ipcMain.handle('hermes:enterprise:begin-login', async (event) => {
+ipcMain.handle('hermes:enterprise:begin-login', async event => {
   rememberLog('[enterprise-login] native sign-in requested')
 
   if (!isEnterpriseClientSender(event.sender)) {
     rememberLog('[enterprise-login] rejected: sender is not the primary desktop window')
+
     return { code: 'forbidden_sender', message: 'enterprise login unavailable', ok: false }
   }
 
-  const enterpriseOrigin = normalizeEnterpriseApiOriginOrNull(
-    resolveEnterpriseOriginCandidate({
-      processEnv: process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN,
-      preferWindowsUserEnv: true,
-      windowsUserEnvReader: () => readWindowsUserEnvVar('HERMES_DESKTOP_ENTERPRISE_ORIGIN')
-    })
-  )
+  const enterpriseOrigin = deployedEnterpriseOrigin()
 
   if (!enterpriseOrigin) {
     rememberLog('[enterprise-login] rejected: trusted enterprise origin is not configured')
+
     return { code: 'no_enterprise_origin', message: 'enterprise API origin is not configured', ok: false }
   }
 
@@ -13557,11 +13956,13 @@ ipcMain.handle('hermes:enterprise:begin-login', async (event) => {
     })
   } catch {
     rememberLog('[enterprise-login] rejected: configured gateway route could not be resolved')
+
     return { code: 'gateway_unavailable', message: 'enterprise gateway is not configured', ok: false }
   }
 
   if (!gatewayRoute || gatewayRoute.kind === 'ssh' || gatewayRoute.authMode !== 'oauth') {
     rememberLog('[enterprise-login] rejected: no OAuth gateway is configured')
+
     return { code: 'no_oauth_gateway', message: 'enterprise OAuth gateway is not configured', ok: false }
   }
 
@@ -13570,11 +13971,13 @@ ipcMain.handle('hermes:enterprise:begin-login', async (event) => {
     const result = await signInToRemoteGateway(gatewayRoute.url)
 
     rememberLog(`[enterprise-login] native flow completed: connected=${result.connected}`)
+
     return result.connected
       ? { ok: true }
       : { code: 'login_not_completed', message: 'enterprise login was not completed', ok: false }
   } catch {
     rememberLog('[enterprise-login] native flow failed before completion')
+
     return { code: 'gateway_unavailable', message: 'enterprise gateway is unavailable', ok: false }
   }
 })
@@ -13582,9 +13985,58 @@ ipcMain.handle('hermes:enterprise:begin-login', async (event) => {
 // Account/password sign-in is a first-class enterprise path.  It is kept in
 // main for the same reason as native OAuth: the renderer cannot choose an API
 // origin, retain a bearer, or turn itself into an arbitrary network proxy.
+function enterpriseLoginVault() {
+  return rememberedLogin(path.join(app.getPath('userData'), 'enterprise-login.enc'), safeStorage)
+}
+
+ipcMain.handle('hermes:enterprise:pre-release-access-status', async event => {
+  if (!isEnterpriseClientSender(event.sender)) {
+    return preReleaseResult('unavailable', '内部预发布接入不可用。')
+  }
+  return internalPreReleaseAccessStatus()
+})
+ipcMain.handle('hermes:enterprise:pre-release-access-command', async (event, payload) => {
+  if (
+    !isEnterpriseClientSender(event.sender) ||
+    !payload ||
+    typeof payload !== 'object' ||
+    Object.keys(payload).length !== 1 ||
+    typeof payload.action !== 'string'
+  ) {
+    return preReleaseResult('unavailable', '内部预发布接入不可用。')
+  }
+
+  switch (payload.action) {
+    case 'install':
+      return installBundledOpenVpnConnect()
+    case 'import-profile':
+      return importPersonalPreReleaseProfile(BrowserWindow.fromWebContents(event.sender))
+    case 'open-client': {
+      const executable = openVpnConnectExecutable()
+      if (executable) {
+        launchOpenVpnConnect(executable)
+      }
+      return internalPreReleaseAccessStatus()
+    }
+    default:
+      return preReleaseResult('unavailable', '内部预发布接入不可用。')
+  }
+})
+ipcMain.handle('hermes:enterprise:remembered-login', (event, clear = false) => {
+  if (!isEnterpriseClientSender(event.sender)) {
+    return null
+  }
+  if (clear === true) {
+    enterpriseLoginVault().clear()
+    return null
+  }
+  const origin = deployedEnterpriseOrigin()
+  return origin ? enterpriseLoginVault().read(origin) : null
+})
 ipcMain.handle('hermes:enterprise:login-password', async (event, payload) => {
   if (!isEnterpriseClientSender(event.sender)) {
     rememberLog('[enterprise-login] password sign-in rejected: sender is not the primary desktop window')
+
     return { code: 'forbidden_sender', message: 'enterprise login unavailable', ok: false }
   }
 
@@ -13592,21 +14044,17 @@ ipcMain.handle('hermes:enterprise:login-password', async (event, payload) => {
   const password = typeof payload?.password === 'string' ? payload.password : ''
 
   // Keep these bounds aligned with Hermes_AI. Neither value is ever logged.
-  if (!loginName || loginName.length > 64 || password.length < 12 || password.length > 256) {
+  if (!loginName || loginName.length > 64 || !isValidEnterprisePassword(password)) {
     rememberLog('[enterprise-login] password sign-in rejected: malformed credentials')
+
     return { code: 'invalid_credentials', message: '账号或密码格式不正确', ok: false }
   }
 
-  const enterpriseOrigin = normalizeEnterpriseApiOriginOrNull(
-    resolveEnterpriseOriginCandidate({
-      processEnv: process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN,
-      preferWindowsUserEnv: true,
-      windowsUserEnvReader: () => readWindowsUserEnvVar('HERMES_DESKTOP_ENTERPRISE_ORIGIN')
-    })
-  )
+  const enterpriseOrigin = deployedEnterpriseOrigin()
 
   if (!enterpriseOrigin) {
     rememberLog('[enterprise-login] password sign-in rejected: trusted enterprise origin is not configured')
+
     return { code: 'no_enterprise_origin', message: 'enterprise API origin is not configured', ok: false }
   }
 
@@ -13622,8 +14070,16 @@ ipcMain.handle('hermes:enterprise:login-password', async (event, payload) => {
     const message = err instanceof Error ? err.message : ''
     const match = /^(\d{3}):/.exec(message)
     rememberLog(`[enterprise-login] password sign-in rejected: ${match ? `HTTP ${match[1]}` : 'network'}`)
+
     return {
-      code: match ? 'invalid_credentials' : 'network',
+      code:
+        match?.[1] === '429'
+          ? 'rate_limited'
+          : match && Number(match[1]) >= 500
+            ? 'service_unavailable'
+            : match
+              ? 'invalid_credentials'
+              : 'network',
       message: match ? '账号或密码不正确，或账号已停用' : '无法连接企业服务',
       ok: false
     }
@@ -13633,6 +14089,7 @@ ipcMain.handle('hermes:enterprise:login-password', async (event, payload) => {
 
   if (!bearer) {
     rememberLog('[enterprise-login] password sign-in rejected: server returned no session')
+
     return { code: 'invalid_credentials', message: '账号登录未完成', ok: false }
   }
 
@@ -13641,9 +14098,11 @@ ipcMain.handle('hermes:enterprise:login-password', async (event, payload) => {
   try {
     // A password credential is an explicit sign-in, so supersede any prior
     // sender session instead of silently refreshing a different identity.
+    enterpriseSpeech.stop(String(event.sender.id))
     sessionId = enterpriseSessions.connect(event.sender.id, enterpriseOrigin, bearer)
   } catch (err) {
     rememberLog('[enterprise-login] password sign-in rejected: session creation failed')
+
     return { ok: false, ...classifyConnectError(err) }
   }
 
@@ -13659,10 +14118,24 @@ ipcMain.handle('hermes:enterprise:login-password', async (event, payload) => {
 
   if (!session) {
     rememberLog('[enterprise-login] password sign-in rejected: session unavailable')
+
     return { code: 'network', message: 'session unavailable', ok: false }
   }
 
   rememberLog('[enterprise-login] password sign-in accepted')
+  try {
+    if (payload?.rememberPassword === true && response.must_change_password !== true) {
+      enterpriseLoginVault().save(enterpriseOrigin, loginName, password)
+    } else {
+      enterpriseLoginVault().clear()
+      if (payload?.rememberPassword === true && response.must_change_password === true) {
+        enterpriseSessions.rememberPasswordAfterChange(event.sender.id, sessionId, loginName)
+      }
+    }
+  } catch {
+    rememberLog('[enterprise-login] OS credential storage unavailable')
+  }
+
   return { ...buildAutoConnectResult(session), mustChangePassword: response.must_change_password === true }
 })
 
@@ -13670,38 +14143,25 @@ ipcMain.handle('hermes:enterprise:login-password', async (event, payload) => {
 // existing native OAuth bearer — no URL/token pasted in the renderer, no bearer
 // crossing to the renderer. Topology is fixed (OL-council): the Agent gateway and
 // the Hermes_AI Enterprise `/api/*` plane are DISTINCT origins, so:
-//   * the enterprise origin comes from TRUSTED main-owned config
-//     (HERMES_DESKTOP_ENTERPRISE_ORIGIN), never the renderer, never assumed equal
+//   * the enterprise origin comes from the TRUSTED bundled release config,
+//     never the renderer, never assumed equal
 //     to the gateway;
 //   * the native bearer is minted against the GATEWAY origin and deliberately
 //     federated to the enterprise origin, where the Hermes_AI server verifies it
 //     (upstream-native-bearer federated whoami, PR #130). Sending it anywhere but
 //     the configured trusted origin is forbidden.
 // Idempotent per sender; returns only {ok, sessionId, baseUrl} (bearer stripped).
-ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
+ipcMain.handle('hermes:enterprise:auto-connect', async event => {
   if (!isEnterpriseClientSender(event.sender)) {
     return { code: 'forbidden_sender', message: 'enterprise session unavailable', ok: false }
   }
 
   const senderId = event.sender.id
 
-  // B16-OL · Trusted main-owned enterprise origin resolution.
-  //
-  //   1. For the packaged Windows app, the live HKCU\Environment value is
-  //      the durable configuration authority. Explorer-launched processes
-  //      retain a stale environment block after `setx`, so it must not
-  //      override the current user setting.
-  //   2. When no durable value exists, use the inherited process value.
-  //      Every chosen value still passes through the existing normalizer;
-  //      malformed configuration fails closed and no renderer input is used.
-  const enterpriseOrigin = normalizeEnterpriseApiOriginOrNull(
-    resolveEnterpriseOriginCandidate({
-      processEnv: process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN,
-      preferWindowsUserEnv: true,
-      windowsUserEnvReader: () =>
-        readWindowsUserEnvVar('HERMES_DESKTOP_ENTERPRISE_ORIGIN')
-    })
-  )
+  // The release deployment origin is the sole business endpoint. It is
+  // normalized and fails closed, but stale per-user environment values cannot
+  // silently take this authenticated session to a former deployment.
+  const enterpriseOrigin = deployedEnterpriseOrigin()
 
   if (!enterpriseOrigin) {
     // No trusted enterprise origin configured -> one-login unavailable (UNKNOWN);
@@ -13725,6 +14185,7 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
 
   if (!bearer) {
     rememberLog('[enterprise-auth] auto-connect rejected: no native session')
+
     // No authenticated native session -> cannot authenticate (UNKNOWN/unavailable),
     // never a fake AUTHENTICATED.
     return { code: 'no_native_session', message: 'no authenticated native session', ok: false }
@@ -13736,6 +14197,7 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
     sessionId = enterpriseSessions.autoConnect(senderId, enterpriseOrigin, bearer)
   } catch (err) {
     rememberLog('[enterprise-auth] auto-connect rejected: session creation failed')
+
     return { ok: false, ...classifyConnectError(err) }
   }
 
@@ -13751,18 +14213,49 @@ ipcMain.handle('hermes:enterprise:auto-connect', async (event) => {
 
   if (!session) {
     rememberLog('[enterprise-auth] auto-connect rejected: session unavailable')
+
     return { code: 'network', message: 'session unavailable', ok: false }
   }
 
   rememberLog('[enterprise-auth] enterprise session ready')
+
   return buildAutoConnectResult(session)
 })
+
+for (const operation of ['status', 'speak', 'stop'] as const) {
+  ipcMain.handle(`hermes:enterprise:speech-${operation}`, async (event, payload) => {
+    if (!isEnterpriseClientSender(event.sender) || !enterpriseSessions.resolve(event.sender.id, payload?.sessionId)) {
+      return { available: false, ok: false }
+    }
+
+    if (operation === 'status') {
+      return enterpriseSpeech.status()
+    }
+
+    if (operation === 'stop') {
+      return typeof payload?.requestId === 'string'
+        ? enterpriseSpeech.stop(String(event.sender.id), payload.requestId)
+        : { ok: false }
+    }
+
+    if (!enterpriseSpeechSenders.has(event.sender)) {
+      enterpriseSpeechSenders.add(event.sender)
+      const owner = String(event.sender.id)
+      event.sender.once('destroyed', () => enterpriseSpeech.stop(owner))
+    }
+
+    return enterpriseSpeech.speak(String(event.sender.id), payload?.requestId, payload?.text)
+  })
+}
 
 ipcMain.handle('hermes:enterprise:disconnect', (event, payload) => {
   if (!isEnterpriseClientSender(event.sender)) {
     return { ok: false }
   }
 
+  if (enterpriseSessions.resolve(event.sender.id, payload?.sessionId)) {
+    enterpriseSpeech.stop(String(event.sender.id))
+  }
   const removed = enterpriseSessions.disconnect(event.sender.id, payload?.sessionId)
 
   return { ok: removed }
@@ -13798,13 +14291,25 @@ ipcMain.handle('hermes:enterprise:request', async (event, req) => {
     // Enterprise writes originate in Electron main, not a browser renderer.
     // This is derived only from the normalized, main-held session origin; a
     // renderer must never be able to choose an Origin for this request.
-    const enterpriseOrigin = new URL(session.baseUrl).origin
+    const activeSession = await refreshedEnterpriseSession(event.sender.id, req?.sessionId)
+
+    if (!activeSession) {
+      return { code: 'network', kind: 'error', message: 'not connected', status: 0 }
+    }
+
+    const enterpriseOrigin = new URL(activeSession.baseUrl).origin
     const operation = `${String(method).toUpperCase()} ${new URL(url).pathname}`
+
+    const requestPath = new URL(url).pathname
     const data = await fetchJson(url, '', {
-      bearer: session.token,
+      bearer: activeSession.token,
       body: req?.body,
       headers: { Origin: enterpriseOrigin },
-      method: String(method).toUpperCase()
+      method: String(method).toUpperCase(),
+      timeoutMs:
+        requestPath === '/api/tenant-voice-transcribe'
+          ? 190_000
+          : enterpriseRequestTimeoutMs(requestPath, DEFAULT_FETCH_TIMEOUT_MS)
     })
 
     // Hermes_AI intentionally rotates the browser bearer when a temporary
@@ -13816,16 +14321,33 @@ ipcMain.handle('hermes:enterprise:request', async (event, req) => {
 
       if (!rotatedBearer) {
         rememberLog('[enterprise] POST /api/password-change rejected: no rotated session')
+
         return { code: 'http', kind: 'error', message: 'password rotation did not return a session', status: 500 }
       }
 
-      enterpriseSessions.autoConnect(event.sender.id, session.baseUrl, rotatedBearer)
+      const loginNameForRememberedPassword = enterpriseSessions.takePasswordRememberIntent(
+        event.sender.id,
+        req?.sessionId
+      )
+      if (!enterpriseSessions.replaceToken(event.sender.id, req?.sessionId, rotatedBearer)) {
+        // A departed session may not update credentials belonging to a newer login.
+        return { code: 'http', kind: 'error', message: 'session changed', status: 401 }
+      }
+      try {
+        rememberPasswordRotation(enterpriseLoginVault(), session.baseUrl,
+          loginNameForRememberedPassword && isValidEnterprisePassword(req?.body?.new_password)
+            ? { loginName: loginNameForRememberedPassword, password: req.body.new_password } : null)
+      } catch {
+        rememberLog('[enterprise-login] OS credential storage unavailable')
+      }
       const { token: _token, ...safeData } = passwordChange
       rememberLog(`[enterprise] ${operation} succeeded`)
+
       return { data: safeData, kind: 'ok' }
     }
 
     rememberLog(`[enterprise] ${operation} succeeded`)
+
     return { data, kind: 'ok' }
   } catch (err) {
     // fetchJson rejects Error('<status>: <text>') for HTTP >= 400, else a
@@ -13836,10 +14358,12 @@ ipcMain.handle('hermes:enterprise:request', async (event, req) => {
 
     if (match) {
       rememberLog(`[enterprise] ${String(method).toUpperCase()} ${new URL(url).pathname} rejected: HTTP ${match[1]}`)
+
       return { code: 'http', kind: 'error', message: `request failed (${match[1]})`, status: Number(match[1]) }
     }
 
     rememberLog(`[enterprise] ${String(method).toUpperCase()} ${new URL(url).pathname} failed: network`)
+
     return { code: 'network', kind: 'error', message: 'cannot reach the Hermes server', status: 0 }
   }
 })
@@ -13880,9 +14404,16 @@ ipcMain.handle('hermes:enterprise:upload', async (event, req) => {
   }
 
   try {
-    const enterpriseOrigin = new URL(session.baseUrl).origin
+    const activeSession = await refreshedEnterpriseSession(event.sender.id, req?.sessionId)
+
+    if (!activeSession) {
+      return { code: 'network', kind: 'error', message: 'not connected', status: 0 }
+    }
+
+    const enterpriseOrigin = new URL(activeSession.baseUrl).origin
+
     const data = await fetchJson(url, '', {
-      bearer: session.token,
+      bearer: activeSession.token,
       headers: { Origin: enterpriseOrigin },
       method: 'POST',
       upload: {
@@ -13893,6 +14424,7 @@ ipcMain.handle('hermes:enterprise:upload', async (event, req) => {
     })
 
     rememberLog(`[enterprise] POST ${new URL(url).pathname} upload succeeded`)
+
     return { data, kind: 'ok' }
   } catch (err) {
     const message = err instanceof Error ? err.message : ''
@@ -13900,12 +14432,112 @@ ipcMain.handle('hermes:enterprise:upload', async (event, req) => {
 
     if (match) {
       rememberLog(`[enterprise] POST ${new URL(url).pathname} upload rejected: HTTP ${match[1]}`)
+
       return { code: 'http', kind: 'error', message: `request failed (${match[1]})`, status: Number(match[1]) }
     }
 
     rememberLog(`[enterprise] POST ${new URL(url).pathname} upload failed: network`)
+
     return { code: 'network', kind: 'error', message: 'cannot reach the Hermes server', status: 0 }
   }
+})
+
+// The order-difference feature needs two kinds of inputs in one authenticated
+// request (many call-record files plus a main order table).  Keep the bridge
+// path and fields fixed; the renderer never obtains the session bearer.
+ipcMain.handle('hermes:enterprise:multipart', async (event, req) => {
+  if (!isEnterpriseClientSender(event.sender)) {
+    return { code: 'forbidden_sender', kind: 'error', message: 'not connected', status: 0 }
+  }
+  const session = enterpriseSessions.resolve(event.sender.id, req?.sessionId)
+  if (!session || req?.path !== '/api/order-filter') {
+    return { code: 'error', kind: 'error', message: 'invalid multipart request', status: 0 }
+  }
+  const fields = req?.fields
+  const allowedFields = new Set(['call_order_column', 'main_order_column', 'preview_limit'])
+  if (
+    !fields ||
+    typeof fields !== 'object' ||
+    Array.isArray(fields) ||
+    Object.entries(fields).some(
+      ([key, value]) => !allowedFields.has(key) || typeof value !== 'string' || value.length > 128
+    )
+  ) {
+    return { code: 'error', kind: 'error', message: 'invalid multipart fields', status: 0 }
+  }
+  const files = Array.isArray(req?.files) ? req.files : []
+  if (files.length < 2 || files.length > 21) {
+    return { code: 'error', kind: 'error', message: 'select one main table and 1–20 call-record tables', status: 0 }
+  }
+  let totalBytes = 0
+  let mainFiles = 0
+  for (const file of files) {
+    if (!file || !['call_file', 'main_file'].includes(file.field)) {
+      return { code: 'error', kind: 'error', message: 'invalid multipart file', status: 0 }
+    }
+    if (file.field === 'main_file') {
+      mainFiles += 1
+    }
+    const size = uploadByteLength(file.bytes)
+    if (size === null || size > ENTERPRISE_MAX_UPLOAD_BYTES) {
+      return { code: 'too_large', kind: 'error', message: 'each file must be at most 50 MiB', status: 0 }
+    }
+    totalBytes += size
+  }
+  if (mainFiles !== 1 || totalBytes > 100 * 1024 * 1024) {
+    return { code: 'too_large', kind: 'error', message: 'upload exceeds the 100 MiB request limit', status: 0 }
+  }
+  let url: string
+  try {
+    url = resolveEnterpriseUrl(session.baseUrl, req.path)
+  } catch {
+    return { code: 'error', kind: 'error', message: 'invalid path', status: 0 }
+  }
+  try {
+    const activeSession = await refreshedEnterpriseSession(event.sender.id, req?.sessionId)
+
+    if (!activeSession) {
+      return { code: 'network', kind: 'error', message: 'not connected', status: 0 }
+    }
+
+    const enterpriseOrigin = new URL(activeSession.baseUrl).origin
+    const data = await fetchJson(url, '', {
+      bearer: activeSession.token,
+      headers: { Origin: enterpriseOrigin },
+      method: 'POST',
+      multipart: { fields, files }
+    })
+    rememberLog(`[enterprise] POST ${new URL(url).pathname} multipart succeeded`)
+    return { data, kind: 'ok' }
+  } catch (err) {
+    const match = /^(\d{3}):/.exec(err instanceof Error ? err.message : '')
+    return match
+      ? { code: 'http', kind: 'error', message: `request failed (${match[1]})`, status: Number(match[1]) }
+      : { code: 'network', kind: 'error', message: 'cannot reach the Hermes server', status: 0 }
+  }
+})
+
+ipcMain.handle('hermes:enterprise:download', async (event, req) => {
+  if (!isEnterpriseClientSender(event.sender)) {
+    throw new Error('enterprise download unavailable')
+  }
+  const session = enterpriseSessions.resolve(event.sender.id, req?.sessionId)
+  const requestPath = String(req?.path || '')
+  if (!session || !requestPath.startsWith('/api/order-filter-download?')) {
+    throw new Error('enterprise download unavailable')
+  }
+  const activeSession = await refreshedEnterpriseSession(event.sender.id, req?.sessionId)
+  if (!activeSession) {
+    throw new Error('enterprise download unavailable')
+  }
+  const url = resolveEnterpriseUrl(session.baseUrl, requestPath)
+  const enterpriseOrigin = new URL(activeSession.baseUrl).origin
+  return downloadViaTokenToFile(
+    url,
+    activeSession.token,
+    { fallbackName: '未外呼订单列表.csv' },
+    { headers: { Origin: enterpriseOrigin } }
+  )
 })
 
 // One deduper per cross-window cue — the choke point every window shares. Main
@@ -14558,9 +15190,18 @@ ipcMain.on('hermes:logs:renderer-error', (_event, report) => {
 })
 
 const ENTERPRISE_ACTIVITY_EVENTS = new Set(['connection_failed', 'connection_ready', 'workspace_opened'])
+
 const ENTERPRISE_ACTIVITY_WORKSPACES = new Set([
-  'assistant', 'conversations', 'governance', 'handoffs',
-  'knowledge', 'platform', 'reminders', 'workbench'
+  'assistant',
+  'knowledge_qa',
+  'customer_replies',
+  'conversations',
+  'governance',
+  'handoffs',
+  'knowledge',
+  'platform',
+  'reminders',
+  'workbench'
 ])
 
 // A renderer can only request an allowlisted event plus a known workspace ID.
@@ -15576,7 +16217,7 @@ app.on('open-url', (event, url) => {
   handleDeepLink(url)
 })
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Warm the login-shell PATH resolution immediately so it usually completes
   // before the backend start path awaits the same single-flight promise.
   void ensureLoginShellPath()
@@ -15632,7 +16273,39 @@ app.whenReady().then(() => {
     screen.on('display-removed', reposition)
   }
 
+  enterprisePackageUpdater = createEnterprisePackageUpdater({
+    isPackaged: app.isPackaged,
+    currentVersion: app.getVersion(),
+    resourcesPath: process.resourcesPath,
+    userDataPath: app.getPath('userData'),
+    prepare: transactionId => enterpriseUpdateReadiness.prepare(transactionId),
+    onHandoff: () => {
+      isQuittingForHandoff = true
+      enterpriseSpeech.stopAll()
+      app.quit()
+    }
+  })
+  enterprisePackageUpdater.subscribe(state => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('hermes:enterprise:package-update-status', state)
+    }
+  })
+  // The controller bounds startup recovery and fences late network results.
+  // Ordinary work starts only once that attempt has finished or been abandoned.
+  await enterprisePackageUpdater.recoverOnStartup()
+
+  if (isQuittingForHandoff) {
+    return
+  }
   createWindow()
+  const packageUpdateTimer = setTimeout(() => {
+    void enterprisePackageUpdater?.check()
+  }, 30_000)
+  packageUpdateTimer.unref()
+  app.once('will-quit', () => {
+    clearTimeout(packageUpdateTimer)
+    enterprisePackageUpdater?.dispose()
+  })
 
   // Win/Linux cold start: the launching hermes:// URL is in our own argv.
   const _coldStartLink = _extractDeepLink(process.argv)

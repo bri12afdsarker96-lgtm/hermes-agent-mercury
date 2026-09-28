@@ -2,55 +2,68 @@
  * Hermes Enterprise Desktop Design System — production token subset.
  *
  * Source: D:\GitHub\Hermes Enterprise Desktop Design System\tokens\*.css
- * Values are vendored here so the packaged desktop has no runtime dependency
- * on the design-source directory. Keep components on semantic aliases below;
- * base ramps exist only to preserve the source token relationships.
+ * Layout and type scales follow the handoff. The enterprise space palette
+ * implements the user's science-fiction direction without a second theme
+ * framework. Values ship locally; components use the semantic aliases below.
  */
-:where(.hesc-root, .hesc-login) {
-  --blue-50: #f4f8ff;
-  --blue-100: #edf5fe;
-  --blue-200: #c7ddfd;
-  --blue-500: #1668f5;
-  --blue-600: #0e58dc;
-  --blue-700: #0c4cbe;
-  --teal-50: #e8f8f5;
-  --teal-500: #29b6a8;
-  --teal-600: #1d9a8e;
-  --orange-50: #fff4ea;
-  --orange-100: #ffe6d1;
-  --orange-600: #e06806;
-  --purple-50: #f6efff;
-  --purple-500: #8b5cf6;
-  --green-50: #ebfef5;
-  --green-100: #d2f9e5;
-  --green-600: #0e9a58;
-  --red-50: #fef1f0;
-  --red-100: #fddcd9;
-  --red-600: #d92d20;
-  --neutral-0: #ffffff;
-  --neutral-25: #fbfcfe;
-  --neutral-50: #f7f9fc;
-  --neutral-75: #f3f5fa;
-  --neutral-100: #edf1f7;
-  --neutral-200: #e6ebf2;
-  --neutral-300: #d5dce7;
-  --neutral-400: #aab3c2;
-  --neutral-500: #8b95a7;
-  --neutral-600: #5f6a7e;
-  --neutral-900: #16223c;
+:where(.hesc-root, .hesc-login, .hesc-update-dialog) {
+  color-scheme: dark;
+  --blue-50: #0b202c;
+  --blue-100: #10303c;
+  --blue-200: #245869;
+  --blue-500: #64dce9;
+  --blue-600: #95ebf3;
+  --blue-700: #b9f4f8;
+  --teal-50: #0d2828;
+  --teal-500: #5cceb8;
+  --teal-600: #82dec8;
+  --orange-50: #302619;
+  --orange-100: #61472a;
+  --orange-600: #f2c184;
+  --purple-50: #25233e;
+  --purple-500: #b6a1f3;
+  --green-50: #112c28;
+  --green-100: #285448;
+  --green-600: #89ddbb;
+  --red-50: #321e28;
+  --red-100: #63313c;
+  --red-600: #ffabb4;
+  --neutral-0: #101c2b;
+  --neutral-25: #0a1320;
+  --neutral-50: #142233;
+  --neutral-75: #0c1725;
+  --neutral-100: #1a2c3e;
+  --neutral-200: #263d50;
+  --neutral-300: #3c586e;
+  --neutral-400: #698499;
+  --neutral-500: #91a8ba;
+  --neutral-600: #b4c5d4;
+  --neutral-900: #e9f2f8;
+  --space-ink: #071522;
+  --space-glow: color-mix(in srgb, var(--blue-500) 12%, transparent);
+  --space-grid: color-mix(in srgb, var(--blue-200) 28%, transparent);
+  --space-scrim: rgb(3 9 17 / 76%);
 
   --theme-primary: var(--blue-500);
   --theme-primary-hover: var(--blue-600);
   --theme-primary-active: var(--blue-700);
   --theme-primary-soft: var(--blue-100);
   --theme-primary-soft-border: var(--blue-200);
-  --ui-focus-ring: color-mix(in oklch, var(--blue-500) 35%, transparent);
+  --theme-danger: var(--red-600);
+  --ui-focus-ring: var(--blue-500);
   --ui-bg-canvas: var(--neutral-25);
   --ui-bg-chrome: var(--neutral-75);
   --ui-bg-sidebar: var(--neutral-0);
   --ui-bg-surface: var(--neutral-0);
+  --ui-bg-elevated: var(--ui-bg-surface);
+  --ui-surface-raised: var(--ui-bg-elevated);
   --ui-bg-secondary: var(--neutral-50);
   --ui-bg-tertiary: var(--neutral-100);
+  --ui-bg-base: var(--ui-bg-surface);
+  --ui-bg-quaternary: var(--neutral-100);
+  --ui-widget-surface-background: var(--ui-bg-secondary);
+  --ui-chat-bubble-background: var(--ui-bg-surface);
+  --chrome-action-hover: var(--neutral-200);
   --ui-row-hover: var(--neutral-50);
   --ui-nav-active: var(--blue-100);
   --ui-stroke-primary: var(--neutral-300);
@@ -59,7 +72,8 @@
   --ui-text-primary: var(--neutral-900);
   --ui-text-secondary: var(--neutral-600);
   --ui-text-tertiary: var(--neutral-500);
-  --ui-text-inverse: var(--neutral-0);
+  --ui-text-inverse: var(--space-ink);
+  --ui-accent: var(--theme-primary);
   --status-success-fg: var(--green-600);
   --status-success-bg: var(--green-50);
   --status-success-border: var(--green-100);
@@ -69,6 +83,9 @@
   --status-danger-fg: var(--red-600);
   --status-danger-bg: var(--red-50);
   --status-danger-border: var(--red-100);
+  --status-danger-action: #bb3349;
+  --status-danger-action-hover: #d63e56;
+  --status-danger-action-text: #ffffff;
   --status-progress-fg: var(--teal-600);
   --status-progress-bg: var(--teal-50);
   --module-assistant: var(--blue-500);
@@ -78,7 +95,7 @@
   --titlebar-height: 44px;
   --header-height: 56px;
   --statusbar-height: 40px;
-  --sidebar-width: 250px;
+  --sidebar-width: 228px;
   --sidebar-width-sm: 216px;
   --content-max-width: 1600px;
   --page-inset-x: 28px;
@@ -89,24 +106,63 @@
   --radius-md: 8px;
   --radius-lg: 10px;
   --radius-full: 999px;
-  --text-page-title: 26px;
-  --text-page-title-lh: 34px;
-  --text-section: 15px;
-  --text-section-lh: 22px;
+  --shadow-popover: 0 14px 32px rgb(0 0 0 / 28%);
+  --text-page-title: 28px;
+  --text-page-title-lh: 38px;
+  --text-section: 17px;
+  --text-section-lh: 26px;
   --text-kpi: 34px;
   --text-kpi-lh: 40px;
-  --text-body-lg: 14px;
-  --text-body: 13px;
-  --text-body-lh: 20px;
-  --text-label: 12px;
-  --text-label-lh: 18px;
-  --text-micro: 11px;
-  --text-micro-lh: 16px;
+  --text-body-lg: 16px;
+  --text-body: 15px;
+  --text-body-lh: 24px;
+  --text-label: 14px;
+  --text-label-lh: 22px;
+  --text-micro: 13px;
+  --text-micro-lh: 20px;
+  /* Shared controls scale only inside the enterprise product root. */
+  --text-xs: var(--text-label);
+  --text-xs--line-height: var(--text-label-lh);
+  --text-sm: var(--text-body);
+  --text-sm--line-height: var(--text-body-lh);
   --weight-medium: 500;
   --weight-semibold: 600;
   --weight-bold: 700;
   --tracking-tight: -0.01em;
   --font-sans: 'HarmonyOS Sans SC', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: var(--font-sans);
-  --shadow-card: 0 1px 2px rgb(22 34 60 / 4%), 0 1px 12px rgb(22 34 60 / 3%);
+  --shadow-card: 0 6px 24px rgb(0 0 0 / 10%);
+  --shadow-nous: 0 16px 48px rgb(0 0 0 / 40%);
+  --stroke-nous: var(--ui-stroke-secondary);
+  --shadow-float: var(--shadow-nous);
+
+  /* Shared Desktop primitives inherit the enterprise palette in this root. */
+  --background: var(--ui-bg-canvas);
+  --foreground: var(--ui-text-primary);
+  --primary: var(--theme-primary);
+  --primary-foreground: var(--ui-text-inverse);
+  --muted: var(--ui-text-secondary);
+  --muted-foreground: var(--ui-text-secondary);
+  --text: var(--ui-text-primary);
+  --stroke-strong: var(--ui-stroke-primary);
+  --ring: var(--ui-focus-ring);
+  --destructive: var(--status-danger-action);
+  --dt-background: var(--ui-bg-canvas);
+  --dt-foreground: var(--ui-text-primary);
+  --dt-card: var(--ui-bg-surface);
+  --dt-card-foreground: var(--ui-text-primary);
+  --dt-muted: var(--ui-bg-secondary);
+  --dt-muted-foreground: var(--ui-text-secondary);
+  --dt-primary: var(--theme-primary);
+  --dt-primary-foreground: var(--ui-text-inverse);
+  --dt-secondary: var(--ui-bg-tertiary);
+  --dt-secondary-foreground: var(--ui-text-primary);
+  --dt-accent: var(--theme-primary-soft);
+  --dt-accent-foreground: var(--theme-primary);
+  --dt-border: var(--ui-stroke-secondary);
+  --dt-input: var(--ui-stroke-primary);
+  --dt-ring: var(--ui-focus-ring);
+  --dt-destructive: var(--status-danger-action);
+  --dt-destructive-foreground: var(--status-danger-action-text);
+  --dt-font-sans: var(--font-sans);
 }

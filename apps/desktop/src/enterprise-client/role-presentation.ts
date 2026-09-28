@@ -8,13 +8,19 @@
  */
 
 export type EnterpriseWorkspaceId =
+  | 'ai_config'
   | 'assistant'
+  | 'knowledge_qa'
+  | 'customer_replies'
   | 'conversations'
   | 'governance'
   | 'handoffs'
   | 'knowledge'
   | 'platform'
   | 'reminders'
+  | 'receivables'
+  | 'overdue'
+  | 'tools'
   | 'workbench'
 
 export interface EnterpriseRoleSnapshot {
@@ -46,17 +52,11 @@ const OPERATOR_WORKSPACES: readonly EnterpriseWorkspaceDefinition[] = [
     description: '处理本人可执行的任务与提醒',
     glyph: '02',
     id: 'reminders',
-    label: '我的任务',
+    label: '提醒中心',
     requiredPermissions: ['biztask.read', 'reminder.read']
   },
-  {
-    description: '在获授权范围内使用企业知识',
-    glyph: '03',
-    id: 'knowledge',
-    label: '企业知识',
-    requiredPermissions: ['kb.author', 'kb.search']
-  },
-  { description: '使用企业 AI 协作能力', glyph: '04', id: 'assistant', label: 'AI 助理' }
+  { description: '使用企业 AI 协作能力', glyph: '04', id: 'assistant', label: 'AI 助理' },
+  { description: '在当前设备本地处理业务文件', glyph: '05', id: 'tools', label: '工具集' }
 ]
 
 const SUPERVISOR_WORKSPACES: readonly EnterpriseWorkspaceDefinition[] = [
@@ -65,15 +65,8 @@ const SUPERVISOR_WORKSPACES: readonly EnterpriseWorkspaceDefinition[] = [
     description: '处理团队任务与提醒',
     glyph: '02',
     id: 'reminders',
-    label: '团队任务',
+    label: '提醒中心',
     requiredPermissions: ['biztask.read', 'reminder.read']
-  },
-  {
-    description: '处理经授权的人工协同事项',
-    glyph: '03',
-    id: 'handoffs',
-    label: '人工接管',
-    requiredPermissions: ['inbox.list']
   },
   {
     description: '查看企业会话的投递事实',
@@ -82,14 +75,8 @@ const SUPERVISOR_WORKSPACES: readonly EnterpriseWorkspaceDefinition[] = [
     label: '企业会话',
     requiredPermissions: ['conversation.read']
   },
-  {
-    description: '在获授权范围内审核企业知识',
-    glyph: '05',
-    id: 'knowledge',
-    label: '知识审核',
-    requiredPermissions: ['kb.author']
-  },
-  { description: '使用企业 AI 协作能力', glyph: '06', id: 'assistant', label: 'AI 助理' }
+  { description: '使用企业 AI 协作能力', glyph: '06', id: 'assistant', label: 'AI 助理' },
+  { description: '在当前设备本地处理业务文件', glyph: '07', id: 'tools', label: '工具集' }
 ]
 
 const ADMIN_WORKSPACES: readonly EnterpriseWorkspaceDefinition[] = [
@@ -102,17 +89,10 @@ const ADMIN_WORKSPACES: readonly EnterpriseWorkspaceDefinition[] = [
     requiredPermissions: ['conversation.read']
   },
   {
-    description: '处理经授权的人工协同事项',
-    glyph: '03',
-    id: 'handoffs',
-    label: '人工接管',
-    requiredPermissions: ['inbox.list']
-  },
-  {
     description: '查看任务、提醒与业务跟进的真实状态',
     glyph: '04',
     id: 'reminders',
-    label: '业务运营',
+    label: '提醒中心',
     requiredPermissions: ['biztask.read', 'reminder.read']
   },
   {
@@ -120,16 +100,24 @@ const ADMIN_WORKSPACES: readonly EnterpriseWorkspaceDefinition[] = [
     glyph: '05',
     id: 'knowledge',
     label: '企业知识',
-    requiredPermissions: ['kb.author']
+    requiredPermissions: ['kb.candidate.view']
+  },
+  {
+    description: '配置企业 AI 模型、密钥与人设',
+    glyph: '06',
+    id: 'ai_config',
+    label: 'AI模型配置',
+    requiredPermissions: ['tenant.profile.read']
   },
   {
     description: '查看员工权限、能力与治理事实',
-    glyph: '06',
+    glyph: '07',
     id: 'governance',
     label: '员工与权限',
     requiredPermissions: ['principal.crud', 'tenant.profile.read', 'audit.read']
   },
-  { description: '使用企业 AI 协作能力', glyph: '07', id: 'assistant', label: 'AI 助理' }
+  { description: '使用企业 AI 协作能力', glyph: '08', id: 'assistant', label: 'AI 助理' },
+  { description: '在当前设备本地处理业务文件', glyph: '08', id: 'tools', label: '工具集' }
 ]
 
 /** Platform authority is deliberately separate from a tenant administrator.
@@ -162,7 +150,7 @@ function hasAnyPermission(
     return false
   }
 
-  return effectivePermissions.includes('*') || requiredPermissions.some(permission => effectivePermissions.includes(permission))
+  return effectivePermissions.includes('*') || requiredPermissions.some(permission => effectivePermissions.some(granted => granted === permission || (granted.endsWith('.*') && permission.startsWith(granted.slice(0, -1)))))
 }
 
 function candidateWorkspaces(role: string | undefined): readonly EnterpriseWorkspaceDefinition[] {
@@ -248,5 +236,14 @@ export function enterpriseWorkflowPresentation(role: string | undefined): Enterp
 export function enterpriseWorkspaces(snapshot: EnterpriseRoleSnapshot | undefined): EnterpriseWorkspaceDefinition[] {
   const candidates = candidateWorkspaces(snapshot?.role)
 
-  return candidates.filter(workspace => hasAnyPermission(snapshot?.effective_permissions, workspace.requiredPermissions))
+  const entries = [...candidates]
+  if (['operator', 'supervisor', 'tenant_admin'].includes(snapshot?.role ?? '')) {
+    entries.splice(1, 0,
+      { id: 'assistant', label: '企业 AI 助手', glyph: 'AI', description: '直接提问，结合企业知识解答问题' },
+      )
+    entries.push({ id: 'receivables', label: '应收款跟进', glyph: '款', description: '创建和处理本人应收款', requiredPermissions: ['reminder.read'] })
+    entries.push({ id: 'overdue', label: '逾期未处理', glyph: '期', description: '查看权限范围内的逾期待办', requiredPermissions: ['reminder.read'] })
+  }
+  return entries.filter((workspace, index) => entries.findIndex(item => item.id === workspace.id) === index)
+    .filter(workspace => hasAnyPermission(snapshot?.effective_permissions, workspace.requiredPermissions))
 }

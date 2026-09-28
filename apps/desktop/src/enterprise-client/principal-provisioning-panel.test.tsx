@@ -90,7 +90,9 @@ describe('PrincipalProvisioningPanel', () => {
     const get = vi.fn(async () => ({
       requests: [{ request_id: 'request-1', requested_name: '待调整员工', requested_role: 'operator', status: 'pending' }]
     }))
+
     const post = vi.fn(async () => ({ request_id: 'request-1', status: 'withdrawn' }))
+
     const runtime: EnterpriseClientRuntime = {
       disconnect: vi.fn(async () => undefined),
       get: get as unknown as EnterpriseClientRuntime['get'],
@@ -111,7 +113,9 @@ describe('PrincipalProvisioningPanel', () => {
     const get = vi.fn(async () => ({
       requests: [{ request_id: 'request-1', requested_name: '已入职员工', created_principal_id: 'employee-1', status: 'approved' }]
     }))
+
     const post = vi.fn(async () => ({ principal_id: 'employee-1', token: 'replacement-token-once' }))
+
     const runtime: EnterpriseClientRuntime = {
       disconnect: vi.fn(async () => undefined),
       get: get as unknown as EnterpriseClientRuntime['get'],

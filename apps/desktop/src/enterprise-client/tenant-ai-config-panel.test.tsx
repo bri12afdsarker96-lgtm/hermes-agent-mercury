@@ -13,6 +13,7 @@ describe('TenantAiConfigPanel', () => {
       models: [{ configuration_id: 'model_a', is_default: true, model: 'deepseek-chat', provider: 'deepseek' }],
       providers: [{ default_model: 'deepseek-chat', key: 'deepseek', label: 'DeepSeek' }]
     }
+
     const saved = {
       ...initial,
       models: [
@@ -20,8 +21,10 @@ describe('TenantAiConfigPanel', () => {
         { configuration_id: 'model_b', is_default: false, model: 'deepseek-reasoner', provider: 'deepseek' }
       ]
     }
+
     const get = vi.fn(async () => initial)
     const post = vi.fn(async () => saved)
+
     const runtime: EnterpriseClientRuntime = {
       disconnect: vi.fn(async () => undefined),
       get: get as unknown as EnterpriseClientRuntime['get'],

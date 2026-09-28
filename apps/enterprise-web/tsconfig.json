@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "allowImportingTsExtensions": false,
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "paths": {
+      "@/*": ["../desktop/src/*"],
+      "@hermes/shared": ["../shared/src/index.ts"],
+      "@hermes/shared/*": ["../shared/src/*"]
+    },
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2022",
+    "types": ["vite/client"]
+  },
+  "include": [
+    "src",
+    "vite.config.ts",
+    "../desktop/src/global.d.ts",
+    "../desktop/src/global.d.ts",
+    "../desktop/src/enterprise-client/**/*.ts",
+    "../desktop/src/enterprise-client/**/*.tsx",
+    "../desktop/src/components/chat/compact-markdown.tsx",
+    "../desktop/src/lib/icons.ts",
+    "../desktop/src/lib/utils.ts",
+    "../desktop/src/lib/query-client.ts"
+  ]
+}

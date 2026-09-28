@@ -1,0 +1,27 @@
+/*
+ * The EnterpriseClientApp imports its own design tokens and component CSS.
+ * Pull in the utility layer it uses, but not the desktop shell stylesheet:
+ * that stylesheet bundles four 8 MiB TTF files intended for Electron.  On
+ * the web surface the same token falls back to the browser's native CJK UI
+ * font, keeping the formal layout while making the initial login usable on a
+ * normal network connection.
+ */
+@import 'tailwindcss';
+@plugin '@tailwindcss/typography';
+@import 'tw-shimmer';
+@import 'katex/dist/katex.min.css';
+@import '@vscode/codicons/dist/codicon.css';
+
+@source '../../desktop/src/enterprise-client';
+@source '../../desktop/src/components/chat';
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+:root {
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+}

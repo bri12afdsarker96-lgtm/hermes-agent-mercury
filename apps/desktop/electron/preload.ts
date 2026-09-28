@@ -172,6 +172,35 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   // Enterprise Console (P3-M4A): native one-login is token-free in the
   // renderer; main returns only an opaque sessionId and fences every request.
   enterprise: {
+    packageUpdate: {
+      status: () => ipcRenderer.invoke('hermes:enterprise:package-update-status'),
+      command: payload => ipcRenderer.invoke('hermes:enterprise:package-update-command', payload),
+      onStatus: callback => {
+        const listener = (_event, state) => callback(state)
+        ipcRenderer.on('hermes:enterprise:package-update-status', listener)
+
+        return () => ipcRenderer.removeListener('hermes:enterprise:package-update-status', listener)
+      },
+      onPrepare: callback => {
+        const listener = (_event, payload) => callback(payload)
+        ipcRenderer.on('hermes:enterprise:package-update-prepare', listener)
+
+        return () => ipcRenderer.removeListener('hermes:enterprise:package-update-prepare', listener)
+      },
+      onRelease: callback => {
+        const listener = (_event, payload) => callback(payload)
+        ipcRenderer.on('hermes:enterprise:package-update-release', listener)
+
+        return () => ipcRenderer.removeListener('hermes:enterprise:package-update-release', listener)
+      },
+      ready: payload => ipcRenderer.send('hermes:enterprise:package-update-ready', payload),
+      changed: payload => ipcRenderer.send('hermes:enterprise:package-update-changed', payload)
+    },
+    speech: {
+      status: payload => ipcRenderer.invoke('hermes:enterprise:speech-status', payload),
+      speak: payload => ipcRenderer.invoke('hermes:enterprise:speech-speak', payload),
+      stop: payload => ipcRenderer.invoke('hermes:enterprise:speech-stop', payload)
+    },
     // Starts the configured gateway's native PKCE flow. No renderer-supplied
     // address or credential crosses this boundary.
     beginLogin: () => ipcRenderer.invoke('hermes:enterprise:begin-login'),
@@ -179,13 +208,23 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     // resolves the enterprise origin, exchanges them for an opaque session,
     // and never returns either the password or bearer to the renderer.
     loginWithPassword: payload => ipcRenderer.invoke('hermes:enterprise:login-password', payload),
+    // Internal pre-release VPN onboarding is deliberately a narrow capability:
+    // no arbitrary executable, profile path, command-line or endpoint crosses
+    // the renderer boundary.
+    preReleaseAccess: {
+      status: () => ipcRenderer.invoke('hermes:enterprise:pre-release-access-status'),
+      command: payload => ipcRenderer.invoke('hermes:enterprise:pre-release-access-command', payload)
+    },
+    rememberedLogin: clear => ipcRenderer.invoke('hermes:enterprise:remembered-login', clear),
     // B16-OL · one-login: main resolves the trusted enterprise origin + native
     // bearer itself; the renderer passes NO url/token and gets back only
     // { ok, sessionId, baseUrl } (or { ok:false, code, message }).
     autoConnect: () => ipcRenderer.invoke('hermes:enterprise:auto-connect'),
     disconnect: sessionId => ipcRenderer.invoke('hermes:enterprise:disconnect', { sessionId }),
     request: req => ipcRenderer.invoke('hermes:enterprise:request', req),
-    upload: req => ipcRenderer.invoke('hermes:enterprise:upload', req)
+    upload: req => ipcRenderer.invoke('hermes:enterprise:upload', req),
+    multipart: req => ipcRenderer.invoke('hermes:enterprise:multipart', req),
+    download: req => ipcRenderer.invoke('hermes:enterprise:download', req)
   },
   notify: payload => ipcRenderer.invoke('hermes:notify', payload),
   requestMicrophoneAccess: () => ipcRenderer.invoke('hermes:requestMicrophoneAccess'),

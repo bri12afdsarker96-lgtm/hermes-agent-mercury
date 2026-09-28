@@ -8,6 +8,13 @@ import {
 } from './role-presentation'
 
 describe('enterprise role presentation', () => {
+  it('exposes receivables only for tenant roles with reminder read permission', () => {
+    for (const role of ['operator', 'supervisor', 'tenant_admin']) {
+      expect(enterpriseWorkspaces({role, effective_permissions:['reminder.read']}).map(item => item.id)).toContain('receivables')
+      expect(enterpriseWorkspaces({role, effective_permissions:[]}).map(item => item.id)).not.toContain('receivables')
+    }
+    expect(enterpriseWorkspaces({role:'super_admin',effective_permissions:['*']}).map(item => item.id)).not.toContain('receivables')
+  })
   it('uses Chinese display labels for every server role', () => {
     expect(enterpriseRoleLabel('operator')).toBe('员工')
     expect(enterpriseRoleLabel('supervisor')).toBe('主管')
@@ -21,7 +28,7 @@ describe('enterprise role presentation', () => {
         effective_permissions: ['biztask.read', 'kb.search'],
         role: 'operator'
       }).map(workspace => workspace.label)
-    ).toEqual(['工作台', '我的任务', '企业知识', 'AI 助理'])
+    ).toEqual(['工作台', '企业 AI 助手', '提醒中心', '工具集'])
   })
 
   it('does not expose administrator destinations merely because the client sees a role string', () => {
@@ -30,7 +37,7 @@ describe('enterprise role presentation', () => {
         effective_permissions: ['conversation.read'],
         role: 'tenant_admin'
       }).map(workspace => workspace.label)
-    ).toEqual(['运营总览', '会话中心', 'AI 助理'])
+    ).toEqual(['运营总览', '企业 AI 助手', '会话中心', '工具集'])
   })
 
   it('keeps the global platform administrator out of tenant-scoped navigation', () => {
@@ -60,4 +67,17 @@ describe('enterprise role presentation', () => {
     expect(enterpriseWorkflowPresentation('tenant_admin').title).toBe('业务运营')
     expect(enterpriseWorkflowPresentation('unrecognised').title).toBe('业务工作')
   })
+  it('hides the deferred customer reception entry for every tenant role', () => {
+    for (const role of ['operator', 'supervisor', 'tenant_admin']) {
+      expect(enterpriseWorkspaces({ role, effective_permissions: ['*'] }).map(item => item.id)).not.toContain('customer_replies')
+      expect(enterpriseWorkspaces({ role, effective_permissions: ['*'] }).map(item => item.id)).not.toContain('handoffs')
+    }
+  })
+
+  it('shows the browser-local tools entrance to every tenant work role without granting a server capability', () => {
+    for (const role of ['operator', 'supervisor', 'tenant_admin']) {
+      expect(enterpriseWorkspaces({role, effective_permissions: []}).map(item => item.id)).toContain('tools')
+    }
+  })
+
 })
