@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { EnterpriseClientApp } from './app'
+import { WebPresentationContext } from './web-presentation'
 
 type EnterpriseBridgeResponse =
   | { data: unknown; kind: 'ok' }
@@ -66,6 +67,30 @@ afterEach(() => {
 })
 
 describe('EnterpriseClientApp authority lifecycle', () => {
+  it.each([false, true])('retains overview modules but hides them only on web: %s', async web => {
+    const time={now:'2026-10-03T09:00:00+08:00',timezone_label:'北京时间',reminder_rule:'测试规则',runner:{running:true}}
+    installAuthorityBridge({
+      '/api/health':{kind:'ok',data:HEALTH},
+      '/api/metrics?window=24h':{kind:'ok',data:METRICS},
+      '/api/whoami':{kind:'ok',data:{...IDENTITY,role:'tenant_admin'}},
+      '/api/operations-overview':{kind:'ok',data:{groups:[],knowledge:{published:0,pending_review:0},scope:{operator_count:2,scoped_operator_count:1},staff:[{principal_id:'seat-active',name:'活跃测试坐席',login_name:'active.seat',group_name:'测试组',today_questions:3,today_answers:2,week_answers:5,total_answers:8,today_customer_replies:1}],summary:{},reminders:[],server_time:time}},
+      '/api/operations-reminders':{kind:'ok',data:{reminders:[],server_time:time}}
+    })
+    render(<WebPresentationContext.Provider value={web}><EnterpriseClientApp /></WebPresentationContext.Provider>)
+    await screen.findByText('服务端时间与提醒规则')
+    const panel=screen.getByTestId('operations-overview')
+    expect(panel.hasAttribute('hidden')).toBe(false)
+    expect(screen.getByRole('heading',{name:web ? '坐席活跃情况' : '坐席活跃度'})).toBeTruthy()
+    expect(screen.getByRole('row',{name:/活跃测试坐席/}).textContent).toContain('active.seat')
+    expect(screen.queryByRole('region',{name:'任务预览'})).toBeNull()
+    expect(screen.queryByRole('region',{name:'逾期事项预览'}) === null).toBe(web)
+    for(const text of ['运营数据看板','服务端时间与提醒规则','下属定时任务提醒（只读）','员工组别']) {
+      expect(panel.textContent).toContain(text)
+      expect(screen.queryByRole('heading',{name:text}) === null).toBe(web)
+    }
+    expect(document.querySelector('.hesc-workbench-shortcuts')?.hasAttribute('hidden')).toBe(web)
+    expect(screen.getByTestId('enterprise-client-workbench').hasAttribute('hidden')).toBe(false)
+  })
   it('uses white glyphs for the native Windows window controls', async () => {
     const bridge = installAuthorityBridge({})
     bridge.autoConnect.mockResolvedValue({ ok: false, code: 'no_native_session', message: '' } as never)

@@ -4,7 +4,11 @@
 .hesc-package-update-trigger { -webkit-app-region: no-drag; }
 .hesc-login-titlebar .hesc-package-update-trigger { margin-left: auto; }
 .hesc-reminder-backdrop { position: fixed; inset: 34px 0 0; z-index: 80; background: #020913bb; display: grid; place-items: center; padding: 24px; }
-.hesc-reminder-dialog { width: min(680px, 100%); max-height: 90%; overflow: auto; display: grid; gap: 14px; box-shadow: 0 0 60px #40d8f322; }
+.hesc-reminder-dialog { width: min(1040px, 100%); max-height: 90%; overflow: auto; display: grid; gap: 14px; box-shadow: 0 0 60px #40d8f322; }
+.hesc-reminder-dialog:not([data-inline]) .hesc-reminder-layout { grid-template-columns: minmax(0, 1fr); }
+.hesc-reminder-dialog:not([data-inline]) .hesc-reminder-manual { position: static; }
+.hesc-reminder-inbox, .hesc-receivable-ledger { min-width: 0; }
+.hesc-receivable-ledger .hesc-table { min-width: 700px; }
 .hesc-reminder-dialog[data-inline="true"] {
   width: 100%;
   max-width: none;

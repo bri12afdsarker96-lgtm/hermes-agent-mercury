@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import type { EnterpriseClientRuntime } from './runtime'
+import { useWebPresentation } from './web-presentation'
 
 interface TenantAiPersona {
   description: string
@@ -18,6 +19,7 @@ function errorText(reason: unknown): string {
 }
 
 export function TenantAiPersonaPanel({ runtime }: { runtime: EnterpriseClientRuntime | null }) {
+  const web = useWebPresentation()
   const [description, setDescription] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -120,7 +122,7 @@ export function TenantAiPersonaPanel({ runtime }: { runtime: EnterpriseClientRun
       <div className="hesc-section-heading">
         <div>
           <h2 className="hesc-section-title">企业 AI 人设</h2>
-          <p className="hesc-muted-copy">人设只影响角色、语气、回答重点和结构。模型、租户、权限、外部操作与知识依据始终由服务端规则控制。</p>
+          <p className="hesc-muted-copy">{web.enabled ? '设置回复的角色、语气与重点。' : '人设只影响角色、语气、回答重点和结构。模型、租户、权限、外部操作与知识依据始终由服务端规则控制。'}</p>
         </div>
         <span className="hesc-status" data-tone={personas.some(persona => persona.is_default) ? 'success' : 'warning'}>{personas.some(persona => persona.is_default) ? '已设置默认人设' : '请设置默认人设'}</span>
       </div>
@@ -138,7 +140,7 @@ export function TenantAiPersonaPanel({ runtime }: { runtime: EnterpriseClientRun
       {notice ? <p className="hesc-success-copy" role="status">{notice}</p> : null}
       {error ? <div className="hesc-error" role="status"><div><strong>企业 AI 人设未完成</strong><span>{error}</span></div></div> : null}
 
-      <p className="hesc-muted-copy">仅企业管理员维护人设并指定默认值。系统不提供或隐藏任何内置人设；未设置默认人设时，企业 AI 助手不会代替管理员做选择。</p>
+      <p className="hesc-muted-copy">{web.enabled ? '仅企业管理员可编辑，请指定默认人设。' : '仅企业管理员维护人设并指定默认值。系统不提供或隐藏任何内置人设；未设置默认人设时，企业 AI 助手不会代替管理员做选择。'}</p>
       <div className="hesc-scroll-region hesc-tenant-model-list">
         <table className="hesc-table">
           <thead><tr><th scope="col">名称</th><th scope="col">说明</th><th scope="col">操作</th></tr></thead>

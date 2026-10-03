@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { useWebPresentation } from './web-presentation'
+import { WebSections, useWebLayoutCopy } from './web-sections'
 
 import { CapabilityPolicyPanel } from './capability-policy-panel'
 import { enterpriseRoleLabel } from './role-presentation'
@@ -74,7 +76,8 @@ function referenceValue(value: unknown): string {
   }
 }
 
-export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime | null }) {
+export function GovernancePage({ runtime, reviewRequest = 0 }: { runtime: EnterpriseClientRuntime | null; reviewRequest?:number }) {
+  const web = useWebPresentation()
   const [correlation, setCorrelation] = useState<AuditEvent[]>([])
   const [correlationState, setCorrelationState] = useState<LoadState>('unavailable')
   const [detail, setDetail] = useState<AuditEvent | null>(null)
@@ -228,8 +231,8 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
     <section className="hesc-page" data-testid="enterprise-client-governance">
       <header className="hesc-page-header">
         <div>
-          <h1>治理中心</h1>
-          <p>{isPlatformAdministrator ? '平台侧身份范围、能力策略和审计证据均由 Hermes_AI 授权与投射；客户端不自行判定权限，也不提供审计重放。' : '集中管理员工账号、组别归属和待审批坐席申请；企业模型与密钥请在“AI模型配置”中维护。'}</p>
+          <h1>{web.enabled && !isPlatformAdministrator ? web.words.members : '治理中心'}</h1>
+          <p>{web.enabled ? (isPlatformAdministrator ? '查看权限、能力与操作记录。' : '管理员工、组别与坐席申请。') : isPlatformAdministrator ? '平台侧身份范围、能力策略和审计证据均由 Hermes_AI 授权与投射；客户端不自行判定权限，也不提供审计重放。' : '集中管理员工账号、组别归属和待审批坐席申请；企业模型与密钥请在“AI模型配置”中维护。'}</p>
         </div>
         <span
           className="hesc-status"
@@ -248,9 +251,7 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
         </div>
       ) : null}
 
-      {runtime && identity?.role === 'tenant_admin' ? <TenantMembersPanel runtime={runtime} /> : null}
-      {runtime && identity?.role === 'tenant_admin' ? <OperationsGroupPanel runtime={runtime} /> : null}
-      {runtime && identity?.role === 'tenant_admin' ? <SeatRequestPanel review runtime={runtime} /> : null}
+      {runtime && identity?.role === 'tenant_admin' ? <StaffSections runtime={runtime} reviewRequest={reviewRequest} /> : null}
       {isPlatformAdministrator ? <>
         <div className="hesc-governance-grid">
           <article className="hesc-card">
@@ -420,4 +421,16 @@ export function GovernancePage({ runtime }: { runtime: EnterpriseClientRuntime |
       </> : null}
     </section>
   )
+}
+
+function StaffSections({ runtime, reviewRequest }: {runtime: EnterpriseClientRuntime; reviewRequest:number}) {
+  const web = useWebPresentation()
+  const labels = useWebLayoutCopy()
+  const [pendingCount, setPendingCount] = useState<number | null>(null)
+  if (!web.enabled) return <><TenantMembersPanel runtime={runtime} /><OperationsGroupPanel runtime={runtime} /><SeatRequestPanel review runtime={runtime} /></>
+  return <WebSections label={labels.settings} request={{id:'approvals',nonce:reviewRequest}} items={[
+    {id:'staff',label:labels.staff,content:<TenantMembersPanel runtime={runtime} />},
+    {id:'groups',label:labels.groups,content:<OperationsGroupPanel runtime={runtime} />},
+    {id:'approvals',label:`${labels.approvals} (${pendingCount ?? '—'})`,content:<SeatRequestPanel review runtime={runtime} onPendingCount={setPendingCount} />}
+  ]} />
 }

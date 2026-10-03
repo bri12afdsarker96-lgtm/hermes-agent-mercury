@@ -9,6 +9,7 @@ import {
 import { CustomerReplyWorkspace } from './customer-reply-panel'
 import { stopCustomerDraftSync } from './customer-reply-persistence'
 import type { EnterpriseClientRuntime } from './runtime'
+import { VOICE_INPUT_FROZEN } from './voice-controls'
 
 const mic = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), cancel: vi.fn() }))
 vi.mock('@/app/chat/composer/hooks/use-mic-recorder', () => ({
@@ -58,7 +59,8 @@ afterEach(() => {
   workspaces.length = 0
 })
 
-describe('customer voice context', () => {
+// Retain re-enable coverage without expecting a deliberately hidden entry.
+describe.skipIf(VOICE_INPUT_FROZEN)('customer voice context', () => {
   it('discards a late transcript on customer switch and prevents generation while recording', async () => {
     let resolve!: (result: { text: string }) => void
 

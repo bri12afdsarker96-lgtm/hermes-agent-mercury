@@ -1,0 +1,92 @@
+@import './web-layout.css';
+/* Shared enterprise 0.20.8 control contract for browser and native shells. */
+:is(.hesc-root, .hesc-login, .hesc-update-dialog) {
+  --web-control-border: var(--neutral-400);
+}
+:is(.hesc-root, .hesc-login, .hesc-update-dialog)
+  :is(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='hidden']), select, textarea) {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--web-control-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: var(--ui-bg-surface);
+  color: var(--ui-text-primary);
+  font: inherit;
+  line-height: 1.5;
+}
+:is(.hesc-root, .hesc-login, .hesc-update-dialog) textarea {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+}
+:is(.hesc-root, .hesc-login, .hesc-update-dialog) :is(input, textarea)::placeholder {
+  color: var(--ui-text-secondary);
+  opacity: 1;
+}
+:is(.hesc-root, .hesc-login, .hesc-update-dialog) :is(input, select, textarea, button):focus-visible {
+  outline: 2px solid var(--ui-focus-ring);
+  outline-offset: 2px;
+}
+:is(.hesc-root, .hesc-login, .hesc-update-dialog) :is(input, select, textarea):disabled {
+  opacity: .65;
+  cursor: not-allowed;
+}
+:is(.hesc-root, .hesc-update-dialog) :is(input, textarea)[readonly] {
+  background: var(--ui-bg-secondary);
+  border-style: dashed;
+}
+.hesc-root .hesc-followup-filters { align-items: end; }
+.web-search-field { display: grid; gap: 6px; min-width: min(280px, 100%); max-width: 100%; }
+.hesc-root :is(.web-visible-search, .web-receivable-search) {
+  opacity: 1;
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--web-control-border);
+  border-radius: 6px;
+  padding: 0 10px;
+  background: var(--ui-bg-surface);
+}
+.hesc-root :is(.web-visible-search, .web-receivable-search):focus-within {
+  outline: 2px solid var(--ui-focus-ring);
+  outline-offset: 2px;
+}
+.hesc-root :is(.web-visible-search, .web-receivable-search) input {
+  width: 100%;
+  flex: 1;
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+}
+.hesc-root .hesc-operations-group-create label,
+.hesc-root .hesc-operations-group-actions label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.hesc-root .hesc-operations-group-actions { align-items: end; gap: 12px; }
+.hesc-root .hesc-operations-group-actions .hesc-action-danger { margin-left: 12px; }
+.hesc-root .hesc-operations-group-actions input { width: 100%; }
+.web-field-error { color: var(--status-danger-fg); display: block; }
+.web-required { color: var(--ui-text-secondary); margin-left: 6px; font-size: var(--hesc-font-meta, 13px); }
+.web-editing-notice { color: var(--ui-accent); padding-block: 8px; }
+.hesc-root .hesc-kpis > button.hesc-card { text-align: left; cursor: pointer; }
+.hesc-root :is(.hesc-kpis > button.hesc-card, .hesc-receivable-metrics button, .web-daily-amounts button):hover:not(:disabled) {
+  border-color: var(--ui-accent);
+  background: var(--ui-bg-secondary);
+}
+.hesc-root :is(.hesc-card-value, .hesc-receivable-metrics strong) small { font-size: var(--hesc-font-meta, 13px); font-weight: 400; }
+.hesc-root .hesc-overdue-preview .hesc-action { align-self: start; }
+.hesc-root :is(.hesc-inline-actions, .hesc-delivery-fields) > label { min-width: 0; }
+@media (max-width: 900px) {
+  .hesc-root .hesc-operations-group-row,
+  .hesc-root .hesc-operations-group-create { grid-template-columns: minmax(0, 1fr); }
+  .hesc-root .hesc-operations-group-actions { flex-wrap: wrap; }
+  .hesc-root .hesc-followup-filters { flex-wrap: wrap; }
+  .hesc-root .hesc-followup-filters > * { max-width: 100%; }
+  .hesc-root .hesc-delivery-fields { grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); }
+}

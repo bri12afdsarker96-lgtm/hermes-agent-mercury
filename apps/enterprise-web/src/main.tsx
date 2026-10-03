@@ -1,15 +1,19 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
-import { EnterpriseClientApp } from '../../desktop/src/enterprise-client/app'
+import { EnterpriseWorkspaceApp } from '../../desktop/src/enterprise-client/workspace-app'
 
-import { installEnterpriseWebBridge } from './browser-enterprise-bridge'
+import { installEnterpriseWebBridge, logoutEnterpriseWebSession } from './browser-enterprise-bridge'
+import { BrowserNotificationSettings } from './browser-notification-settings'
 import './styles.css'
 
 installEnterpriseWebBridge()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <EnterpriseClientApp />
+    <EnterpriseWorkspaceApp
+      additionalAccountActions={<BrowserNotificationSettings />}
+      onBeforeLogout={logoutEnterpriseWebSession}
+    />
   </StrictMode>
 )

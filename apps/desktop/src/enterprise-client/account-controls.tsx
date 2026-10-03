@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useId, useRef, useState } from 'react'
+import { useWebPresentation } from './web-presentation'
 import { useStore } from '@nanostores/react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,6 +17,8 @@ export function AccountControls({
   onLogout(): Promise<void>
 }) {
   const copy = useDeliveryCopy()
+  const web = useWebPresentation()
+  const fieldId = useId()
   const frozen = useStore($enterprisePackageInstallFrozen)
   const [open, setOpen] = useState(false)
   const [current, setCurrent] = useState('')
@@ -118,11 +121,15 @@ export function AccountControls({
               {copy.currentPassword}
               <Input
                 autoComplete="current-password"
+                aria-label={web.enabled ? copy.currentPassword : undefined}
                 type="password"
                 value={current}
+                aria-invalid={web.enabled && !busy && !current || undefined}
+                aria-describedby={web.enabled ? `${fieldId}-current` : undefined}
                 disabled={busy || frozen}
                 onChange={event => setCurrent(event.target.value)}
               />
+              {web.enabled ? <small id={`${fieldId}-current`} className={!current && !busy ? 'web-field-error' : undefined}>{web.words.current}</small> : null}
             </label>
             <label>
               {copy.newPassword}
@@ -130,9 +137,13 @@ export function AccountControls({
                 autoComplete="new-password"
                 type="password"
                 value={password}
+                aria-label={web.enabled ? copy.newPassword : undefined}
+                aria-invalid={web.enabled && !busy && (password.length < 6 || current === password) || undefined}
+                aria-describedby={web.enabled ? `${fieldId}-password` : undefined}
                 disabled={busy || frozen}
                 onChange={event => setPassword(event.target.value)}
               />
+              {web.enabled ? <small id={`${fieldId}-password`} className={!busy && (password.length < 6 || current === password) ? 'web-field-error' : undefined}>{web.words.password}</small> : null}
             </label>
             <label>
               {copy.confirmPassword}
@@ -140,9 +151,13 @@ export function AccountControls({
                 autoComplete="new-password"
                 type="password"
                 value={confirm}
+                aria-label={web.enabled ? copy.confirmPassword : undefined}
+                aria-invalid={web.enabled && !busy && (!confirm || password !== confirm) || undefined}
+                aria-describedby={web.enabled ? `${fieldId}-confirm` : undefined}
                 disabled={busy || frozen}
                 onChange={event => setConfirm(event.target.value)}
               />
+              {web.enabled ? <small id={`${fieldId}-confirm`} className={!busy && (!confirm || password !== confirm) ? 'web-field-error' : undefined}>{web.words.confirm}</small> : null}
             </label>
             <Button
               type="submit"

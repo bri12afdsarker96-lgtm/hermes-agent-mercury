@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import type { EnterpriseClientRuntime } from './runtime'
+import { useWebPresentation } from './web-presentation'
 
 interface BotReminderStatus {
   bot_webhook_configured?: boolean
@@ -34,6 +35,7 @@ function errorText(reason: unknown): string {
 /** Tenant-admin-only configuration for the outbound reminder bot.
  * The renderer never reads back or retains the webhook after the save call. */
 export function WeComReminderPanel({ runtime }: { runtime: EnterpriseClientRuntime | null }) {
+  const web = useWebPresentation()
   const [status, setStatus] = useState<BotReminderStatus | null>(null)
   const [appStatus, setAppStatus] = useState<WeComAppStatus | null>(null)
   const [webhookUrl, setWebhookUrl] = useState('')
@@ -111,7 +113,7 @@ export function WeComReminderPanel({ runtime }: { runtime: EnterpriseClientRunti
     <div className="hesc-section-heading">
       <div>
         <h2 className="hesc-section-title">企业微信到期提醒</h2>
-        <p className="hesc-muted-copy">服务器到期时会保留网页和客户端提醒；群机器人可同步群通知。配置自建应用并由成员完成本人绑定后，系统会依据创建该提醒的成员向其企业微信单独发送，不会把 Webhook 或密钥回显到客户端。</p>
+        <p className="hesc-muted-copy">{web.enabled ? '配置群通知或个人通知。个人通知需成员先绑定企业微信。' : '服务器到期时会保留网页和客户端提醒；群机器人可同步群通知。配置自建应用并由成员完成本人绑定后，系统会依据创建该提醒的成员向其企业微信单独发送，不会把 Webhook 或密钥回显到客户端。'}</p>
       </div>
       <span className="hesc-status" data-tone={status?.bot_webhook_configured ? 'success' : status?.encryption_ready === false ? 'error' : 'warning'}>
         {status?.bot_webhook_configured ? '已配置' : '未配置'}

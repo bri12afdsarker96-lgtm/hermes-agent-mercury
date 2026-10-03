@@ -1,0 +1,61 @@
+/* Shared enterprise information layout; both product roots use this sheet. */
+.hesc-root [hidden], .hesc-update-dialog [hidden] { display: none !important; }
+.web-section-tabs { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.web-section-tabs [aria-pressed='false'] { background:var(--ui-bg-surface); color:var(--ui-text-primary); border:1px solid var(--ui-stroke-primary); }
+.web-section-tabs :is([aria-pressed='true'],[aria-selected='true']) { outline:2px solid var(--ui-accent); outline-offset:2px; }
+.web-sections,.web-section-panel,.web-disclosure[open] { display:grid; gap:20px; min-width:0; }
+.web-disclosure > summary,.web-diagnostics > summary { cursor:pointer; padding-block:12px; font-weight:600; }
+.hesc-root .web-work-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.hesc-root .web-overview-grid { grid-template-columns:minmax(0,1fr); }
+.web-operations-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; padding-block:16px; }
+.web-operations-summary section { min-width:0; display:grid; gap:12px; align-content:start; }
+.web-operations-summary strong { font-variant-numeric:tabular-nums; }
+.hesc-root .hesc-workbench-shortcuts { order:0; }
+.hesc-root .hesc-workbench-shortcuts h2 { display:none; }
+.hesc-root .hesc-reminder-dialog[data-inline='true'] { max-height:none; overflow:visible; padding:0; border:0; background:transparent; }
+.hesc-root .hesc-reminder-dialog[data-inline='true'] .hesc-reminder-layout { display:block; }
+.hesc-root .hesc-reminder-dialog[data-inline='true'] .hesc-reminder-primary { display:contents; }
+.hesc-root .hesc-reminder-dialog[data-inline='true'] .hesc-reminder-manual { position:static; max-width:640px; }
+.hesc-root .web-reminder-compose { display:grid; gap:14px; max-width:800px; }
+.hesc-root .hesc-reminder-manual .hesc-inline-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; align-items:end; }
+.hesc-root .hesc-reminder-manual .hesc-inline-actions input { width:100%; }
+.hesc-root .hesc-reminder-dialog label:has(>input[type='checkbox']) { display:flex; align-items:center; gap:8px; }
+.hesc-root .hesc-reminder-toast { width:min(480px,calc(100vw - 32px)); max-width:calc(100vw - 32px); right:16px; box-sizing:border-box; align-items:start; }
+.hesc-root .hesc-reminder-toast > div { min-width:0; display:grid; gap:8px; overflow-wrap:anywhere; }
+.hesc-root .hesc-reminder-toast strong { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.hesc-root .hesc-reminder-toast button { flex-shrink:0; }
+.hesc-root .hesc-titlebar { padding-right:18px; }
+/* Keep the connected indicator in the status bar; abnormal page banners remain. */
+.hesc-root .hesc-title-connection { display:none; }
+.hesc-root .hesc-knowledge-collections { max-height:none; overflow:visible; }
+.hesc-root .hesc-knowledge-layout { grid-template-columns:minmax(300px,.8fr) minmax(0,1.2fr); }
+.hesc-root .hesc-knowledge-collections .hesc-inline-actions { gap:8px; flex-wrap:wrap; }
+.hesc-root .web-section-panel .hesc-ai-config-grid { align-items:start; }
+.hesc-root .hesc-agent-transcript > .hesc-section-heading { margin-bottom:8px; }
+.hesc-root .hesc-agent-transcript > .hesc-section-heading p { display:none; }
+.hesc-root .hesc-ai-file-row { padding:0; border:0; background:transparent; min-height:40px; gap:12px; }
+.hesc-root .hesc-ai-file-row > span { font-size:13px; }
+@media (max-width:1100px) {
+  .hesc-root { grid-template-columns:64px minmax(0,1fr); }
+  .hesc-root .hesc-sidebar-brand { justify-content:center; padding:0; }
+  .hesc-root .hesc-sidebar-brand > span,.hesc-root .hesc-sidebar-orbit,.hesc-root .hesc-nav-label { display:none; }
+  .hesc-root .hesc-nav button { justify-content:center; padding-inline:8px; }
+  .hesc-root .hesc-ai-workbench .hesc-agent-transcript { min-height:0; }
+  .hesc-root .hesc-ai-workbench { min-height:0; height:calc(100dvh - 180px); grid-template-rows:auto minmax(0,1fr); overflow:hidden; }
+  .hesc-root .hesc-ai-conversation-sidebar { max-height:120px; overflow:auto; }
+  .hesc-root .hesc-ai-chat-column { min-height:0; }
+  .hesc-root .hesc-ai-workbench .hesc-agent-messages { min-height:60px; overflow:auto; }
+  .hesc-root .hesc-ai-workbench .hesc-agent-composer textarea { min-height:72px; max-height:120px; }
+}
+@media (max-width:800px) {
+  .hesc-root .hesc-knowledge-layout,.web-operations-summary { grid-template-columns:minmax(0,1fr); }
+  .hesc-root .hesc-ai-chat-toolbar { gap:8px; }
+  .hesc-root .hesc-reminder-toast { flex-direction:column; }
+  .hesc-root .hesc-reminder-toast button { align-self:end; }
+}
+@media (max-height:600px) {
+  .hesc-root .hesc-ai-workbench { height:auto; overflow:visible; }
+  .hesc-root .hesc-ai-workbench .hesc-agent-transcript { overflow:visible; }
+  .hesc-root .hesc-ai-workbench .hesc-agent-messages { min-height:80px; max-height:35dvh; }
+  .hesc-root .hesc-ai-conversation-sidebar { max-height:96px; }
+}

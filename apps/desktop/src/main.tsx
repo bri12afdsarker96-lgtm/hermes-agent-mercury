@@ -20,7 +20,7 @@ import { createRoot } from 'react-dom/client'
 import { RootErrorBoundary } from './components/error-boundary'
 import { HapticsProvider } from './components/haptics-provider'
 import { RootTooltipProvider } from './components/ui/tooltip'
-import { EnterpriseClientApp } from './enterprise-client/app'
+import { EnterpriseWorkspaceApp } from './enterprise-client/workspace-app'
 import { I18nProvider } from './i18n'
 import { installClipboardShim } from './lib/clipboard'
 import { queryClient } from './lib/query-client'
@@ -70,7 +70,7 @@ if (winParam === 'overlay') {
                 <RootTooltipProvider>
                   {/* Independent product root: all visible chrome/navigation/UI belongs
                     to this client. Hermes remains runtime/service capability only. */}
-                  <EnterpriseClientApp />
+                  <EnterpriseWorkspaceApp />
                 </RootTooltipProvider>
               </HapticsProvider>
             </ThemeProvider>

@@ -1,4 +1,5 @@
 import { useStore } from '@nanostores/react'
+import { useWebPresentation } from './web-presentation'
 import { type ChangeEvent, type FormEvent, type UIEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { AssistantReplyCard } from './assistant-reply-card'
@@ -136,6 +137,7 @@ function AssistantSessionPage({
   runtime: EnterpriseClientRuntime | null
   session: AssistantSession
 }) {
+  const web = useWebPresentation()
   const mode = useStore(session.mode)
   const chatThreads = useStore(session.chatThreads)
   const activeChatThreadId = useStore(session.activeChatThreadId)
@@ -722,7 +724,7 @@ function AssistantSessionPage({
 
             <div aria-live="polite" className="hesc-agent-messages" onScroll={updateTranscriptScrollIntent} ref={messagesRef}>
               {messages.length === 0 ? (
-                <p className="hesc-muted-copy">直接输入问题即可开始，也可以让 AI 摘要、改写或整理待办。对话仅保留在当前已登录客户端会话中。</p>
+                <p className="hesc-muted-copy">{web.enabled ? web.words.session : '直接输入问题即可开始，也可以让 AI 摘要、改写或整理待办。对话仅保留在当前已登录客户端会话中。'}</p>
               ) : null}
               {messages.map(message => (
                 <div className="hesc-agent-message" data-role={message.role} key={message.id}>
@@ -777,7 +779,7 @@ function AssistantSessionPage({
                 ) : null}
               </div>
               <div>
-                <span>DOC、DOCX、PDF 请先上传企业知识库；模型密钥不会写入客户端或日志。</span>
+                <span>{web.enabled ? 'DOC、DOCX、PDF 请先上传企业知识库。' : 'DOC、DOCX、PDF 请先上传企业知识库；模型密钥不会写入客户端或日志。'}</span>
                 <button
                   className="hesc-action"
                   disabled={

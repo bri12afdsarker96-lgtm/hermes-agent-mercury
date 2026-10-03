@@ -74,6 +74,14 @@ function connection() {
 }
 
 describe('enterprise knowledge voice flow', () => {
+  it('keeps frozen voice controls absent without probing speech services', async () => {
+    const backend = connection()
+    render(<AssistantPage principalId="voice-frozen" runtime={backend.runtime} tenantId="tenant-a" />)
+    await screen.findByText('企业默认 · 企业模型 · 知识助手')
+    expect(screen.queryByRole('button', { name: '语音输入' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '朗读回答' })).toBeNull()
+    expect(backend.get.mock.calls.some(([path]) => path.includes('voice-') || path.includes('speech-'))).toBe(false)
+  })
   afterEach(async () => { await act(async () => {
     releaseEnterprisePackageInstall()
     runtimes.splice(0).forEach(releaseAssistantSession)
@@ -89,7 +97,9 @@ describe('enterprise knowledge voice flow', () => {
     playback.play.mockResolvedValue(true)
   })
 
-  it('keeps recognition editable, submits the same knowledge route, and reads the answer with selected enterprise voice', async () => {
+  // Legacy UI is intentionally unmounted. Low-level voice hooks remain tested
+  // in voice-controls.test.tsx and use-enterprise-speech.test.tsx.
+  it.skip('keeps recognition editable, submits the same knowledge route, and reads the answer with selected enterprise voice', async () => {
     const backend = connection()
     render(<AssistantPage principalId="voice-account" runtime={backend.runtime} tenantId="tenant-a" />)
     await screen.findByText('企业默认 · 企业模型 · 知识助手')
@@ -134,7 +144,7 @@ describe('enterprise knowledge voice flow', () => {
     ).toBe(true)
   })
 
-  it('stops answer playback before recording and disables read-aloud while the microphone is busy', async () => {
+  it.skip('stops answer playback before recording and disables read-aloud while the microphone is busy', async () => {
     const backend = connection()
     let endPlayback!: (value: boolean) => void
     playback.play.mockImplementation(
@@ -165,7 +175,7 @@ describe('enterprise knowledge voice flow', () => {
     )
   })
 
-  it('turns the clicked answer control into a real one-click stop control', async () => {
+  it.skip('turns the clicked answer control into a real one-click stop control', async () => {
     const backend = connection()
     let endPlayback!: (value: boolean) => void
     playback.play.mockImplementation(

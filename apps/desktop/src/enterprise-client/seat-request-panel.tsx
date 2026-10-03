@@ -25,7 +25,7 @@ function errorText(reason: unknown): string {
 }
 
 /** Same server-backed component for supervisor applications and admin review. */
-export function SeatRequestPanel({ review = false, runtime }: { review?: boolean; runtime: EnterpriseClientRuntime | null }) {
+export function SeatRequestPanel({ review = false, runtime, onPendingCount }: { review?: boolean; runtime: EnterpriseClientRuntime | null; onPendingCount?: (count: number) => void }) {
   const [requests, setRequests] = useState<SeatRequest[]>([])
   const [name, setName] = useState('')
   const [loginName, setLoginName] = useState('')
@@ -37,7 +37,8 @@ export function SeatRequestPanel({ review = false, runtime }: { review?: boolean
     if (!runtime) {setRequests([]); return}
     const data = await runtime.get<SeatRequestResponse>('/api/seat-requests')
     setRequests(data.requests ?? [])
-  }, [runtime])
+    onPendingCount?.((data.requests ?? []).filter(row => row.status === 'pending' || row.status === 'approving').length)
+  }, [runtime, onPendingCount])
 
   useEffect(() => {
     let active = true

@@ -9,14 +9,55 @@
  * written to localStorage, sessionStorage, URL fragments, logs, or React state.
  */
 
+import { notifyInBrowser } from './browser-notifications'
+
 type BrowserSession = Record<never, never>
 
-type BridgeResult =
-  | { data: unknown; kind: 'ok' }
-  | { code: string; kind: 'error'; message: string; status: number }
+type BridgeResult = { data: unknown; kind: 'ok' } | { code: string; kind: 'error'; message: string; status: number }
 
 const sessions = new Map<string, BrowserSession>()
 const apiPrefix = '/api/'
+let authenticationGeneration = 0
+let signedOut = false
+let logoutPending: Promise<void> | null = null
+
+/** Explicit sign-out only. disconnect() remains page-local lifecycle cleanup. */
+export function logoutEnterpriseWebSession(): Promise<void> {
+  if (logoutPending) {
+    return logoutPending
+  }
+  authenticationGeneration += 1
+  logoutPending = (async () => {
+    const controller = new AbortController()
+    const deadline = window.setTimeout(() => controller.abort(), 20_000)
+    try {
+      const response = await fetch('/api/browser-logout', {
+        method: 'POST',
+        body: '{}',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal
+      })
+      // 401 also expires an already-invalid cookie on the server.
+      if (!response.ok && response.status !== 401) {
+        throw new Error('logout failed')
+      }
+      if (response.ok) {
+        const body = await readJson(response)
+        if (!body || typeof body !== 'object' || !('ok' in body) || body.ok !== true) {
+          throw new Error('logout failed')
+        }
+      }
+      signedOut = true
+      sessions.clear()
+    } finally {
+      window.clearTimeout(deadline)
+    }
+  })().finally(() => {
+    logoutPending = null
+  })
+  return logoutPending
+}
 
 function newSessionId(): string {
   return crypto.randomUUID()
@@ -108,7 +149,10 @@ async function protectedFetch(sessionId: string, path: string, init: RequestInit
   // here: a response can be lost after the server has durably staged the file.
   // The user gets a recoverable timeout instead of a duplicate upload.
   const controller = new AbortController()
-  const deadlineMs = init.body instanceof FormData ? 60_000 : 20_000
+  // Match the installed desktop's assist budget, without extending every
+  // business operation or retrying potentially committed POSTs.
+  const deadlineMs =
+    safePath.split('?')[0] === '/api/tenant-ai-assist' ? 75_000 : init.body instanceof FormData ? 60_000 : 20_000
   const deadline = window.setTimeout(() => controller.abort(), deadlineMs)
 
   try {
@@ -118,9 +162,10 @@ async function protectedFetch(sessionId: string, path: string, init: RequestInit
       headers: headersFor(session, init.body !== undefined && !(init.body instanceof FormData)),
       signal: controller.signal
     } satisfies RequestInit
-    const response = (init.method ?? 'GET').toUpperCase() === 'GET'
-      ? await fetchReadWithRetry(safePath, request)
-      : await fetch(safePath, request)
+    const response =
+      (init.method ?? 'GET').toUpperCase() === 'GET'
+        ? await fetchReadWithRetry(safePath, request)
+        : await fetch(safePath, request)
     const data = await readJson(response)
 
     if (!response.ok) {
@@ -141,7 +186,10 @@ async function protectedFetch(sessionId: string, path: string, init: RequestInit
   }
 }
 
-async function loginWithPassword(payload: { loginName: string; password: string }): Promise<
+async function loginWithPassword(payload: {
+  loginName: string
+  password: string
+}): Promise<
   | { baseUrl: string; mustChangePassword: boolean; ok: true; sessionId: string }
   | { code: string; message: string; ok: false }
 > {
@@ -155,16 +203,22 @@ async function loginWithPassword(payload: { loginName: string; password: string 
     const body = await readJson(response)
 
     if (!response.ok || !body || typeof body !== 'object') {
-      const code = response.status === 403 ? 'invalid_credentials'
-        : response.status === 429 ? 'rate_limited'
-          : response.status >= 500 ? 'service_unavailable'
-            : 'request_failed'
+      const code =
+        response.status === 403
+          ? 'invalid_credentials'
+          : response.status === 429
+            ? 'rate_limited'
+            : response.status >= 500
+              ? 'service_unavailable'
+              : 'request_failed'
       return { code, message: 'login failed', ok: false }
     }
 
     const result = body as { must_change_password?: unknown }
 
     const sessionId = newSessionId()
+    signedOut = false
+    authenticationGeneration += 1
     sessions.set(sessionId, {})
 
     return {
@@ -249,22 +303,35 @@ export function installEnterpriseWebBridge(): void {
 
   const enterprise = {
     async autoConnect() {
+      if (signedOut || logoutPending) {
+        return { code: 'no_native_session', message: 'login required', ok: false } as const
+      }
+      const generation = authenticationGeneration
       try {
         const response = await fetchReadWithRetry('/api/whoami', { credentials: 'same-origin' })
         const body = await readJson(response)
+
+        if (generation !== authenticationGeneration || signedOut || logoutPending) {
+          return { code: 'no_native_session', message: 'login required', ok: false } as const
+        }
 
         if (!response.ok || !body || typeof body !== 'object') {
           // A confirmed 401 is the only unauthenticated result. A gateway
           // timeout/5xx is connectivity, not a reason to throw the member back
           // to the login form or make them manually reconnect.
-          const code = response.status === 401
-            ? 'no_native_session'
-            : response.status === 429
-              ? 'rate_limited'
-              : response.status >= 500
-                ? 'service_unavailable'
-                : 'request_failed'
-          return { code, message: code === 'no_native_session' ? 'login required' : 'service unavailable', ok: false } as const
+          const code =
+            response.status === 401
+              ? 'no_native_session'
+              : response.status === 429
+                ? 'rate_limited'
+                : response.status >= 500
+                  ? 'service_unavailable'
+                  : 'request_failed'
+          return {
+            code,
+            message: code === 'no_native_session' ? 'login required' : 'service unavailable',
+            ok: false
+          } as const
         }
 
         const identity = body as { must_change_password?: unknown }
@@ -307,7 +374,12 @@ export function installEnterpriseWebBridge(): void {
 
       return protectedFetch(request.sessionId, request.path, { body: form, method: 'POST' })
     },
-    async request(request: { body?: unknown; method?: string; path: string; sessionId: string }): Promise<BridgeResult> {
+    async request(request: {
+      body?: unknown
+      method?: string
+      path: string
+      sessionId: string
+    }): Promise<BridgeResult> {
       const method = request.method === 'POST' ? 'POST' : 'GET'
       const body = method === 'POST' ? JSON.stringify(request.body ?? {}) : undefined
 
@@ -330,7 +402,7 @@ export function installEnterpriseWebBridge(): void {
 
   window.hermesDesktop = {
     enterprise,
-    notify: async () => false,
+    notify: notifyInBrowser,
     revealLogs: async () => undefined,
     reportEnterpriseActivity: () => undefined,
     setTitleBarTheme: () => undefined

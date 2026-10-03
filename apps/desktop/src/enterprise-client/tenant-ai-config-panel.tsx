@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import type { EnterpriseClientRuntime } from './runtime'
+import { useWebPresentation } from './web-presentation'
 
 interface ProviderCatalogItem {
   default_model?: string
@@ -60,7 +61,9 @@ function errorText(reason: unknown): string {
   return reason instanceof Error && reason.message ? reason.message : 'AI 配置服务暂时不可用。'
 }
 
-export function TenantAiConfigPanel({ runtime }: { runtime: EnterpriseClientRuntime | null }) {
+export function TenantAiConfigPanel({ runtime, section }: { runtime: EnterpriseClientRuntime | null; section?: 'models' | 'embedding' }) {
+  const web = useWebPresentation()
+  const [editorOpen, setEditorOpen] = useState(false)
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -230,6 +233,7 @@ export function TenantAiConfigPanel({ runtime }: { runtime: EnterpriseClientRunt
 
       setStatus(next)
       resetEditor(next)
+      setEditorOpen(false)
       setNotice(editingId ? '模型配置已更新；未重新输入的密钥仍只保留在服务器。' : '新模型配置已加密保存到服务器。')
     } catch (reason) {
       setError(errorText(reason))
@@ -288,6 +292,7 @@ export function TenantAiConfigPanel({ runtime }: { runtime: EnterpriseClientRunt
   }, [editingId, resetEditor, runtime, submitting])
 
   const edit = useCallback((entry: TenantAiModel) => {
+    setEditorOpen(true)
     setEditingId(entry.configuration_id)
     setProvider(entry.provider)
     setModel(entry.model)
@@ -301,27 +306,31 @@ export function TenantAiConfigPanel({ runtime }: { runtime: EnterpriseClientRunt
   const catalog = status?.providers ?? []
 
   return (
-    <article className="hesc-card hesc-tenant-ai-config" data-testid="tenant-ai-config-panel">
-      <div className="hesc-section-heading">
+    <article className="hesc-card hesc-tenant-ai-config" style={web.enabled ? {display:'flex',flexDirection:'column',gap:16} : undefined} data-testid="tenant-ai-config-panel">
+      {(!web.enabled || section !== 'embedding') ? <div className="hesc-section-heading">
         <div>
-          <h2 className="hesc-section-title">企业 AI 模型与密钥</h2>
-          <p className="hesc-muted-copy">同一厂商、模型和地址可重复添加不同密钥；额度不足或限流时自动尝试备用密钥（每次最多四个）。密钥加密保存在服务器。同一账户的多把密钥可能共享额度。</p>
+          <h2 className="hesc-section-title">{web.enabled ? '回复服务配置' : '企业 AI 模型与密钥'}</h2>
+          {!web.enabled ? <p className="hesc-muted-copy">同一厂商、模型和地址可重复添加不同密钥；额度不足或限流时自动尝试备用密钥（每次最多四个）。密钥加密保存在服务器。同一账户的多把密钥可能共享额度。</p> : null}
         </div>
         <span className="hesc-status" data-tone={status?.configured ? 'success' : status?.encryption_ready === false ? 'error' : 'warning'}>
           {status?.configured ? `${models.length} 个已配置模型` : '尚未配置'}
         </span>
-      </div>
+      </div> : null}
 
-      <div className="hesc-ai-config-grid">
-        <section aria-label="企业 AI 模型配置" className="hesc-ai-config-section">
-          <div className="hesc-provisioning-form">
+      <div className="hesc-ai-config-grid" style={web.enabled ? {display:'flex',flexDirection:'column',order:2} : undefined}>
+        {(!web.enabled || section !== 'embedding') ? <section aria-label="企业 AI 模型配置" className="hesc-ai-config-section">
+          {web.enabled ? <button className="hesc-action" type="button" onClick={() => {resetEditor(status);setEditorOpen(true)}}>新增回答模型</button> : null}
+          <div className="hesc-provisioning-form" hidden={web.enabled && !editorOpen}>
             <label>AI 厂商
               <select disabled={!runtime || submitting} onChange={event => {
                 const next = event.target.value
                 setProvider(next)
                 const entry = catalog.find(item => item.key === next)
 
-                if (!editingId && entry?.default_model) {setModel(entry.default_model)}
+                if (web.enabled) {
+                  setEditingId(null); setApiKey(''); setBaseUrl(''); setModel(entry?.default_model ?? '')
+                  setNotice('已切换厂商，原配置未修改；模型、地址和密钥已重置。请重新填写该厂商密钥，可手动填写兼容接口地址。')
+                } else if (!editingId && entry?.default_model) {setModel(entry.default_model)}
               }} value={provider}>
                 <option value="">请选择厂商</option>
                 {catalog.map(item => <option key={item.key} value={item.key}>{item.label ?? item.key}</option>)}
@@ -337,23 +346,26 @@ export function TenantAiConfigPanel({ runtime }: { runtime: EnterpriseClientRunt
                 {editingId ? '更新模型配置' : '安全保存新模型'}
               </button>
               {editingId ? <button className="hesc-action hesc-action-secondary" disabled={submitting} onClick={() => resetEditor(status)} type="button">取消更新</button> : null}
+              {web.enabled ? <button className="hesc-action hesc-action-secondary" disabled={submitting} onClick={() => {resetEditor(status);setEditorOpen(false)}} type="button">关闭编辑</button> : null}
             </div>
           </div>
 
           {notice ? <p className="hesc-success-copy" role="status">{notice}</p> : null}
           {error ? <div className="hesc-error" role="status"><div><strong>企业 AI 配置未完成</strong><span>{error}</span></div></div> : null}
-        </section>
+        </section> : null}
 
-        <section aria-labelledby="tenant-embedding-config-title" className="hesc-embedding-config" data-testid="tenant-embedding-config-panel">
+        {(!web.enabled || section !== 'models') ? <section aria-labelledby="tenant-embedding-config-title" className="hesc-embedding-config" data-testid="tenant-embedding-config-panel">
           <div className="hesc-section-heading">
             <div>
-              <h3 className="hesc-section-title" id="tenant-embedding-config-title">知识库向量检索配置</h3>
-              <p className="hesc-muted-copy">向量检索密钥独立于 MiniMax 对话密钥。保存时会真实验证；密钥加密保存在服务器且不会回显。</p>
+              <h3 className="hesc-section-title" id="tenant-embedding-config-title">{web.enabled ? '知识检索配置' : '知识库向量检索配置'}</h3>
+              {!web.enabled ? <p className="hesc-muted-copy">向量检索密钥独立于 MiniMax 对话密钥。保存时会真实验证；密钥加密保存在服务器且不会回显。</p> : null}
             </div>
             <span className="hesc-status" data-tone={embeddingStatus?.reindex_state === 'running' || embeddingStatus?.reindex_required ? 'warning' : embeddingStatus?.configured ? 'success' : embeddingStatus?.encryption_ready === false ? 'error' : 'warning'}>
               {embeddingStatus?.reindex_state === 'running' ? '重建中' : embeddingStatus?.reindex_required ? '待重建' : embeddingStatus?.configured ? '已验证' : '待配置'}
             </span>
           </div>
+          <details open={!web.enabled || undefined}><summary hidden={!web.enabled}>编辑知识检索配置</summary>
+          {web.enabled ? <p>当前配置：{embeddingStatus?.provider_label || embeddingStatus?.provider || '未配置'} · {embeddingStatus?.model || '未配置模型'}</p> : null}
           <div className="hesc-provisioning-form">
             <label>向量厂商
               <select disabled={!runtime || embeddingSubmitting || reindexSubmitting || embeddingStatus?.reindex_state === 'running'} onChange={event => selectEmbeddingProvider(event.target.value)} value={embeddingProvider}>
@@ -375,10 +387,12 @@ export function TenantAiConfigPanel({ runtime }: { runtime: EnterpriseClientRunt
               </button>
             </div>
           </div>
-          <p className="hesc-muted-copy hesc-embedding-note">当前索引固定为 {embeddingStatus?.dimension ?? 768} 维。厂商预设可编辑，切换回来会恢复该厂商已保存的模型和接口地址；接口地址只能使用所选厂商的 HTTPS embeddings 域名。</p>
-          {embeddingStatus?.reindex_state === 'running' ? <p className="hesc-warning-copy">正在后台全量重建已发布知识切片。完成前企业知识检索不会混用新旧向量，页面会自动刷新状态。</p> : null}
+          {web.enabled ? <p className="hesc-muted-copy">接口须使用所选厂商支持的 HTTPS 地址；已有密钥无需重复填写。</p> : null}
+          </details>
+          {!web.enabled ? <p className="hesc-muted-copy hesc-embedding-note">当前索引固定为 {embeddingStatus?.dimension ?? 768} 维。厂商预设可编辑，切换回来会恢复该厂商已保存的模型和接口地址；接口地址只能使用所选厂商的 HTTPS embeddings 域名。</p> : null}
+          {embeddingStatus?.reindex_state === 'running' ? <p className="hesc-warning-copy">{web.enabled ? '正在更新知识检索，完成后自动恢复。' : '正在后台全量重建已发布知识切片。完成前企业知识检索不会混用新旧向量，页面会自动刷新状态。'}</p> : null}
           {embeddingStatus?.reindex_required && embeddingStatus?.reindex_state !== 'running' ? <div className="hesc-warning-copy">
-            <p>{embeddingStatus.reindex_error ?? '已验证的新向量模型等待全量重建索引后生效；在此之前系统不会把新旧向量混合检索。'}</p>
+            <p>{embeddingStatus.reindex_error ?? (web.enabled ? '新配置需重建索引后生效。' : '已验证的新向量模型等待全量重建索引后生效；在此之前系统不会把新旧向量混合检索。')}</p>
             {!reindexConfirming ? <button className="hesc-action hesc-action-secondary" disabled={!runtime || embeddingSubmitting || reindexSubmitting} onClick={() => setReindexConfirming(true)} type="button">全量重建现有索引</button> : <div className="hesc-inline-actions">
               <span>将重新生成全部已发布知识切片的向量，不删除原始文档；重建期间企业知识检索暂停。</span>
               <button className="hesc-action" disabled={reindexSubmitting} onClick={() => void startReindex()} type="button">{reindexSubmitting ? '正在启动…' : '确认全量重建'}</button>
@@ -387,10 +401,10 @@ export function TenantAiConfigPanel({ runtime }: { runtime: EnterpriseClientRunt
           </div> : null}
           {embeddingNotice ? <p className="hesc-success-copy" role="status">{embeddingNotice}</p> : null}
           {embeddingError ? <div className="hesc-error" role="status"><div><strong>知识库向量配置未完成</strong><span>{embeddingError}</span></div></div> : null}
-        </section>
+        </section> : null}
       </div>
 
-      <div className="hesc-scroll-region hesc-tenant-model-list">
+      {(!web.enabled || section !== 'embedding') ? <div style={web.enabled ? {order:1} : undefined} className="hesc-scroll-region hesc-tenant-model-list">
         <table className="hesc-table">
           <thead><tr><th scope="col">厂商</th><th scope="col">模型</th><th scope="col">默认</th><th scope="col">操作</th></tr></thead>
           <tbody>
@@ -407,7 +421,7 @@ export function TenantAiConfigPanel({ runtime }: { runtime: EnterpriseClientRunt
             {models.length === 0 ? <tr><td colSpan={4}>尚无企业 AI 模型。保存第一项后它将自动成为默认模型。</td></tr> : null}
           </tbody>
         </table>
-      </div>
+      </div> : null}
     </article>
   )
 }

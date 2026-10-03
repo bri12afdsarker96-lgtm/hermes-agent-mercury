@@ -14,6 +14,39 @@
 
 @source '../../desktop/src/enterprise-client';
 @source '../../desktop/src/components/chat';
+@source '../../desktop/src/components/ui';
+
+/* Shared form primitives need the same semantic utility mapping as Desktop,
+   without importing the unrelated native-shell stylesheet. */
+@theme inline {
+  --color-background: var(--dt-background);
+  --color-foreground: var(--dt-foreground);
+  --color-card: var(--dt-card);
+  --color-card-foreground: var(--dt-card-foreground);
+  --color-muted: var(--dt-muted);
+  --color-muted-foreground: var(--dt-muted-foreground);
+  --color-primary: var(--dt-primary);
+  --color-primary-foreground: var(--dt-primary-foreground);
+  --color-secondary: var(--dt-secondary);
+  --color-secondary-foreground: var(--dt-secondary-foreground);
+  --color-accent: var(--dt-accent);
+  --color-accent-foreground: var(--dt-accent-foreground);
+  --color-border: var(--dt-border);
+  --color-input: var(--dt-input);
+  --color-ring: var(--dt-ring);
+  --color-destructive: var(--dt-destructive);
+  --color-destructive-foreground: var(--dt-destructive-foreground);
+}
+
+.desktop-input-chrome {
+  border-color: var(--ui-stroke-primary);
+  background: var(--ui-bg-surface);
+  color: var(--ui-text-primary);
+}
+.desktop-input-chrome:focus-visible {
+  border-color: var(--ui-focus-ring);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ui-focus-ring) 25%, transparent);
+}
 
 html,
 body,
@@ -23,5 +56,7 @@ body,
 }
 
 :root {
+  --z-modal-backdrop: 90;
+  --z-modal: 91;
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
 }

@@ -1,4 +1,6 @@
 import { useStore } from '@nanostores/react'
+import { useWebPresentation } from './web-presentation'
+import { useWebLayoutCopy } from './web-sections'
 import { atom } from 'nanostores'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
@@ -87,6 +89,9 @@ async function retryKnowledgeRequest<T>(request: () => Promise<T>, attempts = 3)
 }
 
 export function KnowledgePage({ runtime }: { runtime: EnterpriseClientRuntime | null }) {
+  const web = useWebPresentation()
+  const layout = useWebLayoutCopy()
+  const [section, setSection] = useState('knowledge')
   const [$work] = useState(() => atom<{ topic: string; file: File | null; staged: UploadResponse | null; reason: string; busy: boolean }>({ topic: '', file: null, staged: null, reason: '', busy: false }))
   const { topic, file, staged, reason, busy: working } = useStore($work)
   const frozen = useStore($enterprisePackageInstallFrozen)
@@ -394,7 +399,7 @@ export function KnowledgePage({ runtime }: { runtime: EnterpriseClientRuntime | 
     await perform(async () => {
       await retryKnowledgeRequest(() => origin.post!('/api/knowledge-discard', { candidate_id: selected.candidate_id }))
 
-      return '知识已永久删除，服务端的知识记录、切片和检索索引已一并清除。'
+      return web.enabled ? '知识已永久删除。' : '知识已永久删除，服务端的知识记录、切片和检索索引已一并清除。'
     })
   }
 
@@ -422,7 +427,7 @@ export function KnowledgePage({ runtime }: { runtime: EnterpriseClientRuntime | 
         const more = failedTopics.length > 3 ? ` 等 ${failedTopics.length} 条` : ''
         throw new Error(`已删除 ${done}/${rows.length} 条；${preview}${more} 自动重试 3 次后仍未完成。其余资料已从知识库和检索索引清除；失败项仍保持勾选，可刷新后继续删除。`)
       }
-      return `已批量删除 ${done} 条知识；资料、审核候选、切片和检索索引均已从服务器清除。`
+      return web.enabled ? `已永久删除 ${done} 条知识。` : `已批量删除 ${done} 条知识；资料、审核候选、切片和检索索引均已从服务器清除。`
     })
   }
 
@@ -431,9 +436,9 @@ export function KnowledgePage({ runtime }: { runtime: EnterpriseClientRuntime | 
       <header className="hesc-page-header">
         <div>
           <h1>企业知识</h1>
-          <p>只有已发布且当前有效的资料参与企业知识问答。删除会永久清除资料、审核候选、切片和检索索引。</p>
+          <p>{web.enabled ? '管理企业资料，审核发布后可用于问答。' : '只有已发布且当前有效的资料参与企业知识问答。删除会永久清除资料、审核候选、切片和检索索引。'}</p>
         </div>
-        {canUpload ? <button className="hesc-action" disabled={busy || Boolean(staged)} onClick={() => fileInput.current?.click()} type="button">上传文件</button> : null}
+        {canUpload ? <button className="hesc-action" disabled={busy || Boolean(staged)} onClick={() => {setSection('upload'); fileInput.current?.click()}} type="button">上传文件</button> : null}
         <button
           className="hesc-action"
           disabled={!runtime || loading || busy}
@@ -457,9 +462,10 @@ export function KnowledgePage({ runtime }: { runtime: EnterpriseClientRuntime | 
         </p>
       ) : null}
       {!runtime ? <p className="hesc-muted-copy">连接企业服务后即可读取知识状态。</p> : null}
+      {web.enabled ? <div className="web-section-tabs" role="group" aria-label={layout.settings}>{[['knowledge',layout.knowledge],...(canUpload ? [['upload',layout.upload]] : []),['gaps',layout.gaps]].map(([id,label]) => <button className="hesc-action" type="button" aria-pressed={section === id} key={id} onClick={() => setSection(id)}>{label}</button>)}</div> : null}
 
       {canUpload ? (
-        <article className="hesc-card">
+        <article className="hesc-card" hidden={web.enabled && section !== 'upload'}>
           {runtime ? <KnowledgeUploadHistory runtime={runtime} disabled={busy || Boolean(staged || file || topic)} onResume={row => perform(async () => {
             const preview = await runtime.get<UploadResponse>(`/api/knowledge-preview?upload_id=${encodeURIComponent(row.upload_id)}&offset=0&limit=50`)
             if (!Array.isArray(preview.chunks) || typeof preview.total !== 'number') {throw new Error('服务端未返回有效预览')}
@@ -469,7 +475,7 @@ export function KnowledgePage({ runtime }: { runtime: EnterpriseClientRuntime | 
           <div className="hesc-knowledge-upload-layout">
             <div>
               <h2 className="hesc-section-title">上传企业知识</h2>
-              <p className="hesc-muted-copy">文件先解析为待审核切片。Markdown 文件以每个 <code>##</code> 标题作为知识单元起点；XLSX 表格会以每条数据行作为一个完整知识单元，保留问题、相似问法和答案在同一切片。旧版“已入库”资料需重新上传并审核，不会自动发布。</p>
+              {web.enabled ? <details><summary>文件格式说明</summary><p>Markdown 按 <code>##</code> 标题分段，XLSX 按行导入。请核对预览并提交审核，资料不会自动发布。</p></details> : <p className="hesc-muted-copy">文件先解析为待审核切片。Markdown 文件以每个 <code>##</code> 标题作为知识单元起点；XLSX 表格会以每条数据行作为一个完整知识单元，保留问题、相似问法和答案在同一切片。旧版“已入库”资料需重新上传并审核，不会自动发布。</p>}
               <form
                 className="hesc-provisioning-form"
                 onSubmit={event => {
@@ -533,6 +539,7 @@ export function KnowledgePage({ runtime }: { runtime: EnterpriseClientRuntime | 
                   本次已解析 {staged.total} 条知识；单次最多可提交 {reviewSubmissionLimit(staged)} 条。
                 </p>
               ) : null}
+              {web.enabled && editableChunks ? <p role="status" className="web-editing-notice">{web.words.editing}</p> : null}
               {editableChunks ? editableChunks.map((text, index) => (
                 <label key={index}>第 {index + 1} 段
                   <textarea className="hesc-pre" rows={6} value={text} disabled={busy} onChange={event => setEditableChunks(current => current!.map((value, i) => i === index ? event.target.value : value))} />
@@ -575,7 +582,7 @@ export function KnowledgePage({ runtime }: { runtime: EnterpriseClientRuntime | 
         </article>
       ) : null}
 
-      <div className="hesc-knowledge-layout">
+      <div className="hesc-knowledge-layout" hidden={web.enabled && section !== 'knowledge'}>
         <aside aria-label="知识审核队列" className="hesc-card hesc-knowledge-collections">
           <h2 className="hesc-section-title">知识审核与发布</h2>
           <label>
@@ -600,11 +607,11 @@ export function KnowledgePage({ runtime }: { runtime: EnterpriseClientRuntime | 
             <p className="hesc-muted-copy">此列表暂无资料。企业管理员可上传、审核并发布。</p>
           ) : null}
           <div className="hesc-collection-list">
-            {data?.role === 'tenant_admin' ? <div className="hesc-inline-actions"><button className="hesc-action" disabled={busy} type="button" onClick={() => setChecked(data.candidates.filter(row => row.status === 'approved' || (row.status === 'needs_review' && has(row.risk_level === 'high' ? 'kb.candidate.approve' : 'kb.candidate.review'))).map(row => row.candidate_id))}>选择本页待处理</button><button className="hesc-action" type="button" disabled={busy || !checkedForPublish.length} onClick={() => void publishChecked()}>审核并发布所选（{checkedForPublish.length}）</button>{has('kb.delete') ? <><button className="hesc-action" disabled={busy} type="button" onClick={() => setChecked(data.candidates.map(row => row.candidate_id))}>选择本页知识</button><button className="hesc-action hesc-action-danger" disabled={busy || !checkedRows.length} onClick={() => setConfirmBatchWithdraw(true)} type="button">批量删除（{checkedRows.length}）</button></> : null}</div> : null}
+            {data?.role === 'tenant_admin' ? <div className="hesc-inline-actions"><button className="hesc-action" disabled={busy} type="button" onClick={() => setChecked(data.candidates.filter(row => row.status === 'approved' || (row.status === 'needs_review' && has(row.risk_level === 'high' ? 'kb.candidate.approve' : 'kb.candidate.review'))).map(row => row.candidate_id))}>选择本页待处理</button><button className="hesc-action" type="button" hidden={web.enabled && !checkedRows.length} disabled={busy || !checkedForPublish.length} onClick={() => void publishChecked()}>审核并发布所选（{checkedForPublish.length}）</button>{has('kb.delete') ? <><button className="hesc-action" disabled={busy} type="button" onClick={() => setChecked(data.candidates.map(row => row.candidate_id))}>选择本页知识</button><button className="hesc-action hesc-action-danger" hidden={web.enabled && !checkedRows.length} disabled={busy || !checkedRows.length} onClick={() => setConfirmBatchWithdraw(true)} type="button">批量删除（{checkedRows.length}）</button></> : null}</div> : null}
             {confirmBatchWithdraw ? <div className="hesc-confirmation" role="alert"><p>确认永久删除所选 {checkedRows.length} 条知识？资料、审核候选、切片和检索索引都会从服务器清除，无法恢复。</p><div className="hesc-inline-actions"><button className="hesc-action hesc-action-danger" disabled={busy} onClick={() => void withdrawChecked()} type="button">确认批量删除</button><button className="hesc-action hesc-action-secondary" disabled={busy} onClick={() => setConfirmBatchWithdraw(false)} type="button">取消</button></div></div> : null}
             {data?.candidates.map(row => (
               <div key={row.candidate_id}>
-              {data.role === 'tenant_admin' && (['needs_review', 'approved'].includes(row.status) || has('kb.delete')) ? <label><input type="checkbox" aria-label={`选择 ${row.topic ?? '企业知识'} ${row.candidate_id}`} checked={checked.includes(row.candidate_id)} disabled={busy} onChange={event => { setConfirmBatchWithdraw(false); setChecked(current => event.target.checked ? [...current, row.candidate_id] : current.filter(id => id !== row.candidate_id)) }} />{has('kb.delete') ? '加入批量删除' : '加入批量处理'}</label> : null}
+              {data.role === 'tenant_admin' && (['needs_review', 'approved'].includes(row.status) || has('kb.delete')) ? <label><input type="checkbox" aria-label={`选择 ${row.topic ?? '企业知识'} ${row.candidate_id}`} checked={checked.includes(row.candidate_id)} disabled={busy} onChange={event => { setConfirmBatchWithdraw(false); setChecked(current => event.target.checked ? [...current, row.candidate_id] : current.filter(id => id !== row.candidate_id)) }} />{web.enabled ? web.words.selectKnowledge : has('kb.delete') ? '加入批量删除' : '加入批量处理'}</label> : null}
               <button
                 aria-current={row.candidate_id === selectedId ? 'true' : undefined}
                 key={row.candidate_id}
@@ -718,7 +725,7 @@ export function KnowledgePage({ runtime }: { runtime: EnterpriseClientRuntime | 
           )}
         </article>
       </div>
-      <KnowledgeGapsPanel runtime={runtime} />
+      <div hidden={web.enabled && section !== 'gaps'}><KnowledgeGapsPanel runtime={runtime} /></div>
     </section>
   )
 }

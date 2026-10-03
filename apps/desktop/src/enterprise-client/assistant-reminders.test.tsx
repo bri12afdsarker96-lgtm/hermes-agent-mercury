@@ -67,10 +67,10 @@ describe('natural language reminders', () => {
     const post=vi.fn(async()=>({reminder_id:'overdue',state:'cancelled'}))
     const runtime={get:vi.fn(async()=>({reminders:[{reminder_id:'overdue',title:'回访客户',scheduled_for:Date.now()/1000-60,state:'active',overdue:true}]})),post,disconnect:vi.fn()} as unknown as EnterpriseClientRuntime
     render(<AssistantReminders runtime={runtime} scope="test-overdue" open request="" onClose={()=>{}} />)
-    await screen.findByRole('alert')
+    await screen.findByText('到时间了 · 回访客户')
     expect(screen.getByText('已到期，等待处理。')).toBeTruthy()
     fireEvent.click(screen.getByRole('button',{name:'完成并移除'}))
-    await waitFor(() => expect(post).toHaveBeenCalledWith('/api/assistant-reminder-action', {action:'cancel',reminder_id:'overdue'}))
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/api/assistant-reminder-action', {action:'complete',reminder_id:'overdue'}))
   })
 
   it('renders source-backed receivable work ahead of ordinary reminders and keeps result forms unmounted until requested', async () => {
@@ -86,6 +86,7 @@ describe('natural language reminders', () => {
     render(<AssistantReminders runtime={runtime} scope="test-receivable" open request="" onClose={() => {}} />)
 
     await screen.findByText('华北客户年度服务费')
+    expect(get).toHaveBeenCalledWith('/api/reminder-center?filter=all&scope=combined')
     expect(screen.getByText('逾期风险')).toBeTruthy()
     expect(screen.getByText('12800.00 CNY')).toBeTruthy()
     expect(screen.queryByLabelText('新的预计到账日期')).toBeNull()
@@ -93,5 +94,16 @@ describe('natural language reminders', () => {
     expect(screen.getByText('选择处理结果')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '已收款' }))
     await waitFor(() => expect(post).toHaveBeenCalledWith('/api/business-followup-action', expect.objectContaining({ action: 'received', followup_id: 'followup-1' })))
+  })
+
+  it('keeps personal reminders usable when the receivable inbox fails', async () => {
+    const runtime = {get: vi.fn(async (path: string) => {
+      if (path.startsWith('/api/reminder-center')) {throw new Error('offline')}
+      return {reminders: [{reminder_id: 'personal-independent', title: '独立个人提醒', scheduled_for: Date.now()/1000 + 600, state: 'active'}]}
+    }), post: vi.fn(), disconnect: vi.fn()} as unknown as EnterpriseClientRuntime
+    render(<AssistantReminders runtime={runtime} scope="independent" open request="" onClose={() => {}} />)
+    await screen.findByText('独立个人提醒')
+    expect(screen.queryByText('当前筛选下暂无待处理任务。')).toBeNull()
+    expect(screen.getByRole('alert').textContent).toContain('Unable to complete')
   })
 })

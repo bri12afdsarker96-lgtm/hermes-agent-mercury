@@ -58,6 +58,19 @@ test('packaged delivery iteration exposes complete daily workflows', async ({}, 
           case '/api/knowledge-conflicts': data={conflicts:[]}; break
           case '/api/seat-requests': data={requests:[]}; break
           case '/api/password-change': data={ok:true}; break
+          case '/api/receivables-report': {
+            const history = query.searchParams.get('detail_view') === 'history'
+            const status = query.searchParams.get('status')
+            const keyword = query.searchParams.get('query') ?? ''
+            const rows = (history ? historical : [...followups,...overdueRows])
+              .filter(row => (!status || status === 'all' || row.status === status) && String(row.business_subject).includes(keyword))
+              .map(row => ({amount:'100.00',currency:'CNY',received_amount:'0.00',remaining_amount:'100.00',...row}))
+            data={available:true,as_of_date:'2026-10-03',page:1,page_size:100,total:rows.length,followups:rows,daily:[],customers:[],
+              scope_options:{current_principal_id:'fixture-admin',groups:[{group_id:'team',name:'验收团队'}],people:[{principal_id:'fixture-seat',name:'验收坐席',role:'operator',group_id:'team',active:true}]},
+              summary_totals:[{currency:'CNY',due_today:'100.00',unpaid:'3000.00',overdue:'2900.00',outstanding:'3000.00',inactive:'0.00',received:'0.00',receivable:'3000.00'}]}
+            break
+          }
+          case '/api/business-followup-history': data={available:true,can_record_receipt:true,can_correct_receipt:true,can_add_note:true,transfer_targets:[],received_amount:'0.00',remaining_amount:'128.30',receipts:[],history:[]}; break
           case '/api/business-followups':
             if (req.method === 'POST') {
               const existing = followups.find(row=>row.idempotency_key===req.body.idempotency_key)
@@ -77,12 +90,11 @@ test('packaged delivery iteration exposes complete daily workflows', async ({}, 
     await page.setViewportSize({width:1280,height:900})
     const nav = page.getByRole('navigation',{name:'企业客户端主导航'})
     const preview = page.getByRole('region',{name:'逾期事项预览'})
-    await expect(preview.getByText('逾期验收群29',{exact:true})).toBeAttached()
-    const geometry = await preview.evaluate(el => ({height:el.clientHeight,scroll:el.scrollHeight,overflow:getComputedStyle(el).overflowY}))
-    expect(geometry.height).toBe(320)
-    expect(geometry.scroll).toBeGreaterThan(geometry.height)
-    expect(geometry.overflow).toBe('auto')
-    await page.getByRole('button',{name:'查看全部与处理提醒',exact:true}).click()
+    await expect(preview).toHaveCount(0)
+    await expect(page.getByRole('heading',{name:'当前身份范围'})).toHaveCount(0)
+    await page.getByRole('article',{name:'收款金额概览'}).getByRole('button',{name:/未收款总额/}).click()
+    await expect(page.getByRole('region',{name:'对应任务明细'}).getByRole('heading')).toContainText('未收款总额')
+    await nav.getByRole('button',{name:/逾期未处理/}).click()
     await expect(page.getByRole('heading',{name:'逾期未处理',exact:true})).toBeVisible()
     await expect(page.getByRole('table').getByRole('cell',{name:/^逾期验收群29/})).toBeAttached()
     await page.getByRole('heading',{name:'逾期未处理',exact:true}).scrollIntoViewIfNeeded()
@@ -91,25 +103,33 @@ test('packaged delivery iteration exposes complete daily workflows', async ({}, 
     await page.screenshot({path:info.outputPath('workbench-1280.png')})
     await nav.getByRole('button',{name:/应收款跟进/}).click()
     await expect(page.getByText('历史验收closed',{exact:true})).toHaveCount(0)
-    await page.getByRole('button',{name:'历史记录（已处理）',exact:true}).click()
-    await page.getByLabel('状态筛选',{exact:true}).selectOption('closed')
+    await page.getByRole('button',{name:'历史记录',exact:true}).click()
+    await page.getByLabel('状态',{exact:true}).selectOption('closed')
+    await page.getByRole('button',{name:'查询',exact:true}).click()
     await expect(page.getByText('历史验收closed',{exact:true})).toBeVisible()
     await expect(page.getByText('历史验收completed',{exact:true})).toHaveCount(0)
-    await page.getByLabel('搜索业务对象或群名称',{exact:true}).fill('closed')
+    const report = page.getByRole('region',{name:'收款统计与客户台账'})
+    await report.getByLabel('业务对象 / 群名称',{exact:true}).fill('closed')
+    await report.getByRole('button',{name:'查询',exact:true}).click()
     await page.screenshot({path:info.outputPath('followup-history.png')})
-    await page.getByLabel('搜索业务对象或群名称',{exact:true}).fill('')
-    await page.getByRole('button',{name:'未处理',exact:true}).click()
-    await page.getByLabel('人员筛选',{exact:true}).selectOption('mine')
-    await page.getByLabel('业务对象 / 群名称',{exact:true}).fill('验收服务费')
-    await page.getByLabel('应收金额（元）',{exact:true}).fill('128.30')
-    await page.getByLabel('预计到账日期',{exact:true}).fill('2026-10-20')
-    await page.getByRole('button',{name:'新建',exact:true}).click()
+    await report.getByRole('button',{name:'清空筛选',exact:true}).click()
+    await report.getByLabel('业务团队',{exact:true}).selectOption('team')
+    await expect(report.getByLabel('人员范围',{exact:true}).locator('option')).toHaveText(['该团队全部负责人','验收坐席'])
+    await page.getByRole('button',{name:'新建应收款',exact:true}).click()
+    const create = page.getByRole('dialog',{name:'新建应收款',exact:true})
+    await create.getByLabel('业务对象 / 群名称',{exact:true}).fill('验收服务费')
+    await create.getByLabel('应收金额（元）',{exact:true}).fill('128.30')
+    await create.getByLabel('预计到账日期',{exact:true}).fill('2026-10-20')
+    await create.getByRole('button',{name:'创建应收款',exact:true}).click()
     await expect(page.getByText('已创建，提醒已同步到提醒中心。')).toBeVisible()
     await page.screenshot({path:info.outputPath('receivables-1280.png')})
-    await page.getByRole('button',{name:'查看与处理',exact:true}).click()
-    await expect(page.getByRole('region',{name:'应收款跟进详情'})).toBeVisible()
-    await expect(page.getByRole('button',{name:'已收款',exact:true})).toBeEnabled()
-    await page.getByRole('button',{name:'收起',exact:true}).click()
+    await page.keyboard.press('Escape')
+    await page.getByRole('row').filter({hasText:'验收服务费'}).getByRole('button',{name:'查看与处理',exact:true}).click()
+    const detail = page.getByRole('dialog',{name:'当前任务详情'})
+    await expect(detail.getByRole('heading',{name:'验收服务费',exact:true})).toBeVisible()
+    await expect(detail.getByRole('button',{name:'确认全部收款',exact:true})).toBeEnabled()
+    await expect(detail.getByText('逾期验收群29',{exact:true})).toHaveCount(0)
+    await page.keyboard.press('Escape')
     await nav.getByRole('button',{name:/企业 AI 助手/}).click()
     await page.locator('#enterprise-ai-composer').fill('验收售后问题')
     await page.getByRole('button',{name:'提交处理',exact:true}).click()

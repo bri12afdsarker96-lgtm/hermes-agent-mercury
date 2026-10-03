@@ -4,6 +4,7 @@ import { EnterpriseModalDialog } from './enterprise-design-system'
 import type { EnterpriseClientRuntime } from './runtime'
 import { enterpriseRoleLabel } from './role-presentation'
 import { $enterprisePackageInstallFrozen, registerEnterpriseInstallActivity } from './enterprise-install-readiness'
+import { WebDisclosure } from './web-sections'
 
 interface Member { principal_id: string; name: string; login_name: string; role: string; status: string }
 interface Credentials { login_name: string; temporary_password: string }
@@ -38,7 +39,7 @@ export function TenantMembersPanel({ runtime }: { runtime: EnterpriseClientRunti
 
   return <article className="hesc-card" data-testid="tenant-members">
     <h2>员工账号与角色</h2><p>主管负责团队协作与知识审核，坐席使用企业 AI 和个人提醒。账号首次登录必须修改初始密码。删除坐席会永久清除账号、主管申请、个人提醒和运营聚合记录。</p>
-    <form className="hesc-provisioning-form" onSubmit={event=>{event.preventDefault();void perform(async()=>{
+    <WebDisclosure label="开通员工账号"><form className="hesc-provisioning-form" onSubmit={event=>{event.preventDefault();void perform(async()=>{
       const created=await runtime.post!<Credentials>('/api/principals',{name:name.trim(),login_name:loginName.trim(),role})
       if(alive.current){setCredentials({login_name:created.login_name,temporary_password:created.temporary_password});setName('');setLoginName('')}
     })}}>
@@ -46,7 +47,7 @@ export function TenantMembersPanel({ runtime }: { runtime: EnterpriseClientRunti
       <label>员工登录账号<input required autoComplete="off" placeholder="例如：earlybird.zhangsan" value={loginName} onChange={event=>setLoginName(event.target.value)}/></label>
       <label>员工角色<select value={role} onChange={event=>setRole(event.target.value)}><option value="operator">坐席／员工</option><option value="supervisor">主管</option></select></label>
       <button className="hesc-action" disabled={busy || Boolean(credentials)} type="submit">{busy?'正在处理…':'开通员工账号'}</button>
-    </form>
+    </form></WebDisclosure>
     {credentials ? <LoginCredentials key={credentials.login_name} login={credentials.login_name} password={credentials.temporary_password} hideLabel="已保存，隐藏密码" onHide={() => setCredentials(null)} /> : null}
     {error?<p className="hesc-error-copy" role="alert">{error}</p>:null}
     <div className="hesc-table-wrap hesc-scroll-region"><table className="hesc-table"><thead><tr><th>员工</th><th>登录账号</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>{members.map(member=><tr key={member.principal_id}><td>{member.name}</td><td><span className="hesc-selectable">{member.login_name}</span> <CopyLoginText label="复制账号" text={member.login_name} /></td><td>{enterpriseRoleLabel(member.role)}</td><td>{member.status==='active'?'已启用':'已停用'}</td><td>{['operator','supervisor'].includes(member.role)&&member.status==='active'?<button className="hesc-action hesc-action-danger" disabled={busy} type="button" onClick={()=>setConfirm(member)}>删除账号</button>:null}</td></tr>)}</tbody></table></div>

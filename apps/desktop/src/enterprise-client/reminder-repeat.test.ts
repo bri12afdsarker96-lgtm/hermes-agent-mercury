@@ -3,6 +3,20 @@ import { REMINDER_REPEAT_MS, ReminderRepeatTracker } from './reminder-repeat'
 
 const cue = { id: 'r', occurrence: 'r:1', status: 'active', title: 'Follow up', body: 'Follow up' }
 describe('presentation-only reminder repetition', () => {
+  it('preserves the original thirty-minute clock through reloads without storing message content', () => {
+    const values = new Map<string, string>()
+    const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => {values.set(key, value)} }
+    new ReminderRepeatTracker(storage, 'tenant:user').reconcile([cue], 100)
+    expect(values.get('tenant:user')).not.toContain(cue.title)
+    expect(new ReminderRepeatTracker(storage, 'tenant:user').reconcile([cue], 1000)).toEqual([])
+    expect(new ReminderRepeatTracker(storage, 'tenant:user').reconcile([cue], 100 + REMINDER_REPEAT_MS)).toEqual([{...cue, repeated: true}])
+    expect(new ReminderRepeatTracker(storage, 'tenant:user').reconcile([cue], 100 + REMINDER_REPEAT_MS * 2)).toEqual([])
+    expect(new ReminderRepeatTracker(storage, 'other:user').reconcile([cue], 1000)[0].repeated).toBe(false)
+  })
+  it('keeps reminders available when persistence is corrupt or denied', () => {
+    const corrupt = { getItem: () => '{broken', setItem: () => {throw new Error('denied')} }
+    expect(new ReminderRepeatTracker(corrupt, 'key').reconcile([cue], 100)).toEqual([{...cue, repeated: false}])
+  })
   it('announces immediately and exactly once after thirty minutes, not every poll', () => {
     const tracker = new ReminderRepeatTracker()
     expect(tracker.reconcile([cue], 100)).toEqual([{...cue, repeated: false}])

@@ -1,5 +1,6 @@
 import { AssistantReplyCard } from './assistant-reply-card'
 import type { CustomerReplyOption, KnowledgeTrace } from './assistant-response'
+import { useWebPresentation } from './web-presentation'
 
 interface AssistantResponseDetailsProps {
   customerReplyOptions?: CustomerReplyOption[]
@@ -36,6 +37,7 @@ export function AssistantResponseDetails({
   knowledgeTrace,
   reasoningSummary
 }: AssistantResponseDetailsProps) {
+  const web = useWebPresentation()
   if (!knowledgeTrace && !reasoningSummary && customerReplyOptions.length === 0) {
     return null
   }
@@ -44,7 +46,7 @@ export function AssistantResponseDetails({
     <div className="hesc-assistant-response-details">
       {knowledgeTrace ? (
         <section aria-label="企业知识检索（本次）">
-          <details open className="hesc-response-detail">
+          <details open={!web.enabled || undefined} className="hesc-response-detail">
             <summary>企业知识检索（本次）</summary>
             <p>{retrievalCopy(knowledgeTrace)}</p>
           </details>
@@ -52,7 +54,7 @@ export function AssistantResponseDetails({
       ) : null}
       {reasoningSummary ? (
         <section aria-label="本次处理摘要">
-          <details open className="hesc-response-detail">
+          <details open={!web.enabled || undefined} className="hesc-response-detail">
             <summary>本次处理摘要</summary>
             <p>{reasoningSummary}</p>
           </details>

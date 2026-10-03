@@ -1,10 +1,11 @@
 import { act, render, cleanup } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AssistantReminders } from './assistant-reminders'
 import type { EnterpriseClientRuntime } from './runtime'
 import { REMINDER_REPEAT_MS } from './reminder-repeat'
 const sound = vi.hoisted(() => ({play: vi.fn(async () => true), stop: vi.fn()}))
 vi.mock('./reminder-sound', () => ({ReminderSound: class {play = sound.play; stop = sound.stop}}))
+beforeEach(() => localStorage.clear())
 afterEach(() => {cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.clearAllMocks()})
 
 describe('reminder polling and notification integration', () => {

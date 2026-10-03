@@ -1,12 +1,12 @@
 {
   "name": "hermes-enterprise-web",
   "private": true,
-  "version": "0.19.5",
+  "version": "0.20.8",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5185",
     "build": "npm run check:web-entry && vite build",
-    "check:web-entry": "tsc -p . --noEmit --noCheck",
+    "check:web-entry": "tsc -p tsconfig.check.json --noEmit",
     "typecheck": "npm run check:web-entry",
     "preview": "vite preview --host 127.0.0.1 --port 4185"
   },
