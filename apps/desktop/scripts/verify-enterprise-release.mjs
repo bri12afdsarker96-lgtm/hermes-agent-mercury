@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { extractFile, statFile } from '@electron/asar'
@@ -32,16 +33,55 @@ const compared = ['dist/index.html', 'dist/electron-main.mjs', 'dist/electron-pr
 })
 const sevenZip = process.argv[2]
 if (sevenZip) {
+  let archive = path.join(release, executable)
+  let temporary
   const embedded = file => {
-    const result = spawnSync(sevenZip, ['e', path.join(release, executable), file, '-so', '-bd'], { maxBuffer: 32 * 1024 * 1024 })
+    const result = spawnSync(sevenZip, ['e', archive, file, '-so', '-bd'], { maxBuffer: 64 * 1024 * 1024 })
     assert.equal(result.status, 0, `Cannot inspect installer payload ${file}`)
     return result.stdout
   }
-  assert.equal(hash(embedded('resources/app.asar')), hash(readFileSync(asar)), 'NSIS embeds a different ASAR')
-  for (const {file, sha256} of compared) {
-    if (statFile(asar, path.normalize(file)).unpacked) {
-      assert.equal(hash(embedded(`resources/app.asar.unpacked/${file}`)), sha256, `NSIS embeds stale resource ${file}`)
+  try {
+    // Current electron-builder puts the application inside app-64.7z; older
+    // layouts exposed resources directly. Verify either layout, never accept an
+    // empty extraction as proof that a payload matched.
+    if (!embedded('resources/app.asar').length) {
+      const prefix = path.join(tmpdir(), 'hermes-installer-verify-')
+      temporary = mkdtempSync(prefix)
+      assert.ok(path.resolve(temporary).startsWith(path.resolve(prefix)))
+      const result = spawnSync(sevenZip, ['e', archive, 'app-64.7z', '-r', `-o${temporary}`, '-y', '-bd'], {
+        encoding: 'utf8'
+      })
+      assert.equal(result.status, 0, 'Cannot unpack the embedded application archive')
+      archive = path.join(temporary, 'app-64.7z')
+      assert.ok(existsSync(archive), 'Missing embedded application archive')
     }
+    assert.equal(hash(embedded('resources/app.asar')), hash(readFileSync(asar)), 'NSIS embeds a different ASAR')
+    for (const { file, sha256 } of compared) {
+      if (statFile(asar, path.normalize(file)).unpacked) {
+        assert.equal(
+          hash(embedded(`resources/app.asar.unpacked/${file}`)),
+          sha256,
+          `NSIS embeds stale resource ${file}`
+        )
+      }
+    }
+  } finally {
+    if (temporary) rmSync(temporary, { recursive: true, force: true })
   }
 }
-console.log(JSON.stringify({version:metadata.version, installer:executable, size:bytes.length, sha256:hash(bytes), sha512:metadata.sha512, asarSha256:hash(readFileSync(asar)), nsisPayloadVerified:Boolean(sevenZip), compared}, null, 2))
+console.log(
+  JSON.stringify(
+    {
+      version: metadata.version,
+      installer: executable,
+      size: bytes.length,
+      sha256: hash(bytes),
+      sha512: metadata.sha512,
+      asarSha256: hash(readFileSync(asar)),
+      nsisPayloadVerified: Boolean(sevenZip),
+      compared
+    },
+    null,
+    2
+  )
+)
