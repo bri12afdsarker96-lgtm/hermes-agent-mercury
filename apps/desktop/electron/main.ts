@@ -33,6 +33,7 @@ import nodePty from 'node-pty'
 
 import enterpriseDeployment from '../assets/enterprise-deployment.json'
 import openVpnConnectManifest from '../assets/openvpn-connect-manifest.json'
+import { applyEnterpriseWindowIdentity, ENTERPRISE_APP_ID, repairEnterpriseShortcuts } from './enterprise-windows-identity'
 
 import { classifyActiveRuntime } from './active-runtime-state'
 import { stopBackendChild as stopBackendChildImpl, stopBackendTreesForUpdate } from './backend-child'
@@ -1222,7 +1223,7 @@ app.setName(APP_NAME)
 // need this, so gate it on Windows. (Fixes: desktop approval/turn notifications
 // never firing on Windows.)
 if (IS_WINDOWS) {
-  app.setAppUserModelId('com.qiqiaoban.hermes-enterprise-assistant')
+  app.setAppUserModelId(ENTERPRISE_APP_ID)
 }
 
 // Seed the native About panel with the live Hermes version. This is refreshed
@@ -10774,6 +10775,7 @@ function spawnSecondaryWindow({ sessionId, watch }: { sessionId?: string; watch?
 
   // Chat-surface registration: applyWindowTranslucency swaps this window's
   // backing between opaque-themed and alpha-0 when glass toggles.
+  if (IS_WINDOWS && icon) applyEnterpriseWindowIdentity(win, app.getPath('exe'), icon)
   translucencyBackedWindows.add(win)
 
   if (IS_MAC) {
@@ -10868,6 +10870,7 @@ function createInstanceWindow() {
     webPreferences: chatWindowWebPreferences(PRELOAD_PATH)
   })
 
+  if (IS_WINDOWS && icon) applyEnterpriseWindowIdentity(win, app.getPath('exe'), icon)
   instanceWindows.add(win)
 
   // Chat-surface registration: see applyWindowTranslucency.
@@ -11739,6 +11742,7 @@ function createWindow() {
   })
 
   const createdMainWindow = mainWindow
+  if (IS_WINDOWS && icon) applyEnterpriseWindowIdentity(createdMainWindow, app.getPath('exe'), icon)
   const updateSenderId = createdMainWindow.webContents.id
   createdMainWindow.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
     if (isMainFrame) {
@@ -16298,6 +16302,22 @@ app.whenReady().then(async () => {
     return
   }
   createWindow()
+  if (IS_WINDOWS && app.isPackaged && !BOOT_FAKE_MODE && fs.existsSync(path.join(process.resourcesPath, 'enterprise-nsis-install.json'))) {
+    const icon = getAppIconPath()
+    if (icon) {
+      const appData = app.getPath('appData')
+      const links = [
+        path.join(app.getPath('desktop'), 'Hermes-企业助手.lnk'),
+        path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Hermes-企业助手.lnk')
+      ]
+      if (process.env.PUBLIC) links.push(path.join(process.env.PUBLIC, 'Desktop', 'Hermes-企业助手.lnk'))
+      if (process.env.ProgramData) links.push(path.join(process.env.ProgramData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Hermes-企业助手.lnk'))
+      const pinned = path.join(appData, 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'TaskBar')
+      if (fs.existsSync(pinned)) links.push(...fs.readdirSync(pinned).filter(name => name.toLowerCase().endsWith('.lnk')).map(name => path.join(pinned, name)))
+      const migration = repairEnterpriseShortcuts(links, app.getPath('exe'), icon, shell)
+      if (migration.failed.length) console.warn('[enterprise] Shortcut migration unavailable:', migration.failed)
+    }
+  }
   const packageUpdateTimer = setTimeout(() => {
     void enterprisePackageUpdater?.check()
   }, 30_000)

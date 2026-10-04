@@ -14,7 +14,7 @@ function fillReceipt() {
   fireEvent.click(screen.getByRole('button', {name:'确认登记收款'}))
 }
 describe('receivable ledger operations', () => {
-  beforeEach(() => sessionStorage.clear())
+  beforeEach(() => { sessionStorage.clear(); localStorage.clear() })
   it('recovers a lost response after remount with exactly the same receipt and key', async () => {
     const post = vi.fn().mockRejectedValueOnce(new Error('lost response')).mockResolvedValue({ok:true})
     const api = runtime(post)

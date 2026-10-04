@@ -1,7 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ThemeProvider, useTheme } from '@/themes/context'
 
 import { EnterpriseClientApp } from './app'
+import { enterpriseNativeAppearance } from './native-appearance'
 import { WebPresentationContext } from './web-presentation'
 
 type EnterpriseBridgeResponse =
@@ -95,13 +97,21 @@ describe('EnterpriseClientApp authority lifecycle', () => {
     const bridge = installAuthorityBridge({})
     bridge.autoConnect.mockResolvedValue({ ok: false, code: 'no_native_session', message: '' } as never)
 
-    render(<EnterpriseClientApp />)
+    const toggleNativeTheme = vi.fn()
+    Object.assign(window.hermesDesktop!, { setNativeTheme: toggleNativeTheme })
+    function ChangeSkinMode() {
+      const theme = useTheme()
+      return <button onClick={() => theme.setMode('light')}>浅色聊天主题</button>
+    }
+    render(<ThemeProvider nativeAppearance={enterpriseNativeAppearance}><EnterpriseClientApp /><ChangeSkinMode /></ThemeProvider>)
 
     await screen.findByText('等待登录企业账号')
-    expect(bridge.setTitleBarTheme).toHaveBeenCalledWith({
-      background: '#0c1825',
+    fireEvent.click(screen.getByRole('button', { name: '浅色聊天主题' }))
+    expect(bridge.setTitleBarTheme).toHaveBeenLastCalledWith({
+      background: '#0c1725',
       foreground: '#ffffff'
     })
+    expect(toggleNativeTheme).toHaveBeenLastCalledWith('dark')
   })
 
   it('keeps rejected credentials on the login form without claiming the service is offline', async () => {

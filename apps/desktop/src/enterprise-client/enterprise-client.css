@@ -1,7 +1,7 @@
 /* HarmonyOS Sans SC is bundled under its original Huawei license; see
    ../fonts/LICENSE-HarmonyOS-Sans.txt. */
 .hesc-update-content { display: contents; }
-.hesc-package-update-trigger { -webkit-app-region: no-drag; }
+.hesc-package-update-trigger { -webkit-app-region: no-drag; flex-shrink: 0; }
 .hesc-login-titlebar .hesc-package-update-trigger { margin-left: auto; }
 .hesc-reminder-backdrop { position: fixed; inset: 34px 0 0; z-index: 80; background: #020913bb; display: grid; place-items: center; padding: 24px; }
 .hesc-reminder-dialog { width: min(1040px, 100%); max-height: 90%; overflow: auto; display: grid; gap: 14px; box-shadow: 0 0 60px #40d8f322; }
@@ -174,7 +174,7 @@
   align-items: center;
   gap: 10px;
   /* Electron's native Windows caption controls occupy the right edge. */
-  padding: 0 164px 0 18px;
+  padding: 0 calc(var(--hesc-window-controls-width, 0px) + var(--hesc-titlebar-inset, 18px)) 0 18px;
   border-bottom: 1px solid var(--ui-stroke-tertiary);
   background: var(--ui-bg-chrome);
   -webkit-app-region: drag;
@@ -428,6 +428,8 @@
 }
 .hesc-page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 24px;
   width: min(100%, var(--content-max-width));
   margin: 0 auto;
@@ -1286,7 +1288,9 @@
 .hesc-login {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
   background: var(--ui-bg-canvas);
   color: var(--ui-text-primary);
   font-family: var(--font-sans);
@@ -1297,7 +1301,7 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 10px;
-  padding: 0 16px;
+  padding: 0 calc(var(--hesc-window-controls-width, 0px) + var(--hesc-titlebar-inset, 16px)) 0 16px;
   border-bottom: 1px solid var(--ui-stroke-tertiary);
   background: var(--ui-bg-chrome);
   color: var(--ui-text-secondary);
@@ -1308,11 +1312,18 @@
   width: 20px;
   height: 20px;
 }
+.hesc-login-titlebar > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .hesc-login-content {
   display: grid;
   flex: 1;
   grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.8fr);
   min-height: 0;
+  overflow: auto;
 }
 .hesc-login-brand {
   position: relative;
@@ -2266,8 +2277,10 @@
   }
   .hesc-login-brand {
     min-height: auto;
-    gap: 48px;
+    gap: 20px;
+    padding: 24px;
   }
+  .hesc-login-orbit, .hesc-login-points { display: none; }
   .hesc-login-panel {
     border-top: 1px solid var(--ui-stroke-secondary);
     border-left: 0;
@@ -2355,10 +2368,9 @@
 }
 @media (width < 640px) {
   .hesc-titlebar { gap: 6px; }
-  .hesc-titlebar .hesc-package-update-trigger,
   .hesc-title-connection .hesc-title-status { display: none; }
   .hesc-product-name {
-    max-width: 112px;
+    max-width: 96px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2460,4 +2472,10 @@
 @media (width < 640px) {
   .hesc-response-option { grid-template-columns: minmax(0, 1fr); }
   .hesc-answer-actions { justify-self: end; }
+}
+
+/* Compact title bars still reserve native controls at high page zoom. */
+@media (width < 480px) {
+  .hesc-titlebar, .hesc-login-titlebar { --hesc-titlebar-inset: 8px; gap: 4px; padding-left: 8px; }
+  .hesc-titlebar .hesc-brand-mark, .hesc-login-titlebar img { width: 18px; height: 18px; }
 }

@@ -1,11 +1,25 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { type ComponentProps, type CSSProperties, type ReactNode, useEffect, useRef } from 'react'
 
+import { useWindowControlsOverlayWidth } from '@/app/shell/hooks/use-window-controls-overlay-width'
 import { Brain, FileText, LayoutDashboard, Lock, MessageSquareText, Network, NotebookTabs, Settings, Users, Wrench } from '@/lib/icons'
 
 import hermesMark from './assets/hermes-mark.svg'
 import { EnterprisePackageUpdateButton } from './package-update-ui'
 
 export type EnterpriseStatusTone = 'error' | 'success' | 'warning'
+
+interface EnterpriseTitlebarProps extends ComponentProps<'header'> {
+  style?: CSSProperties
+}
+
+/** One reservation for login, password-change and connected desktop chrome. */
+export function EnterpriseTitlebar({ style, ...props }: EnterpriseTitlebarProps) {
+  const measured = useWindowControlsOverlayWidth()
+  const overlay = (navigator as Navigator & { windowControlsOverlay?: { visible: boolean } }).windowControlsOverlay
+  const width = measured ?? (overlay?.visible ? 138 : 0)
+
+  return <header {...props} style={{ ...style, '--hesc-window-controls-width': `${width}px` } as CSSProperties} />
+}
 
 export interface EnterpriseShellWorkspace {
   glyph: string
@@ -160,7 +174,7 @@ export function EnterpriseClientShell({
       <a className="hesc-skip-link" href="#enterprise-main">
         {activeWorkspace.label}
       </a>
-      <header className="hesc-titlebar">
+      <EnterpriseTitlebar className="hesc-titlebar">
         <img alt="" aria-hidden="true" className="hesc-brand-mark" src={hermesMark} />
         <strong className="hesc-product-name">{productName}</strong>
         <div className="hesc-title-spacer" />
@@ -169,7 +183,7 @@ export function EnterpriseClientShell({
           <span className="hesc-connection-dot" data-state={indicatorState} />
           <span className="hesc-title-status">{connectionStatus}</span>
         </div>
-      </header>
+      </EnterpriseTitlebar>
 
       <aside className="hesc-sidebar">
         <div className="hesc-sidebar-brand">

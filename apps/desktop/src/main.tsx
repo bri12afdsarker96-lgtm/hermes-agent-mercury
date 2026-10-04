@@ -20,6 +20,7 @@ import { createRoot } from 'react-dom/client'
 import { RootErrorBoundary } from './components/error-boundary'
 import { HapticsProvider } from './components/haptics-provider'
 import { RootTooltipProvider } from './components/ui/tooltip'
+import { enterpriseNativeAppearance } from './enterprise-client/native-appearance'
 import { EnterpriseWorkspaceApp } from './enterprise-client/workspace-app'
 import { I18nProvider } from './i18n'
 import { installClipboardShim } from './lib/clipboard'
@@ -60,7 +61,7 @@ if (winParam === 'overlay') {
       <RootErrorBoundary>
         <QueryClientProvider client={queryClient}>
           <I18nProvider initialLocale="zh">
-            <ThemeProvider>
+            <ThemeProvider nativeAppearance={enterpriseNativeAppearance}>
               <HapticsProvider>
                 {/* ONE tooltip provider for the whole app. Every `Tip` used to
                     carry its own, and with ~107 call sites those subtrees

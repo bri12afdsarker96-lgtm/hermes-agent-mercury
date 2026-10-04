@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useStore } from '@nanostores/react'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../components/ui/dialog'
@@ -7,6 +8,9 @@ import { EnterpriseClientError, type EnterpriseClientRuntime } from '../runtime'
 import type { ReminderCenterTask } from '../reminder-state'
 import { statusLabels } from './receivables-data'
 import { ReceivableWriteoff } from './receivable-writeoff'
+import { clearPendingOperation, readPendingOperation, savePendingOperation } from '../receivable-pending'
+import { $enterprisePackageInstallFrozen } from '../enterprise-install-readiness'
+import { useDeliveryWork } from '../use-delivery-work'
 
 interface TaskDetailsProps {
   runtime: EnterpriseClientRuntime
@@ -38,6 +42,7 @@ const actions: Record<string, string> = {
 }
 
 export function WebTaskDetails({ runtime, scope, task, onClose }: TaskDetailsProps) {
+  const frozen = useStore($enterprisePackageInstallFrozen)
   const receivable = task.source_type === 'receivable_followup'
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [revision, refresh] = useState(0)
@@ -51,13 +56,15 @@ export function WebTaskDetails({ runtime, scope, task, onClose }: TaskDetailsPro
   const [uncertain, setUncertain] = useState(false)
   const [writeoffLocked, setWriteoffLocked] = useState(false)
   const [writeoffBusy, setWriteoffBusy] = useState(false)
+  const [ledgerBusy, setLedgerBusy] = useState(false)
   const pending = useRef<PendingAction | null>(null)
   const writing = useRef(false)
   const opener = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null)
   const recoveryKey = `hermes:web-task-action:${scope}:${task.source_type}:${task.source_id}`
+  useDeliveryWork(busy || uncertain || Boolean(action || date) || writeoffLocked || writeoffBusy)
   useEffect(() => {
     try {
-      const saved = sessionStorage.getItem(recoveryKey)
+      const saved = readPendingOperation(recoveryKey)
       if (saved) {
         const value: PendingAction = JSON.parse(saved)
         if ((receivable ? value.followup_id : value.reminder_id) !== task.source_id || !actions[value.action])
@@ -122,12 +129,12 @@ export function WebTaskDetails({ runtime, scope, task, onClose }: TaskDetailsPro
     return () => window.removeEventListener('hermes:followup-changed', changed)
   }, [scope])
   const submit = async () => {
-    if (writing.current || !runtime.post || (!pending.current && !detail?.allowed_actions.includes(action))) return
+    if ($enterprisePackageInstallFrozen.get() || writing.current || !runtime.post || (!pending.current && !detail?.allowed_actions.includes(action))) return
     if (uncertain && !pending.current) return
     setError('')
     setNotice('')
     try {
-      if (receivable && sessionStorage.getItem(`hermes:receivable-pending:${scope}:${task.source_id}`))
+      if (receivable && readPendingOperation(`hermes:receivable-pending:${scope}:${task.source_id}`))
         throw new Error('请先在流水区确认上次未完成的提交，再更新任务状态。')
       if (!pending.current) {
         if (action === 'reschedule' && (!date || (!receivable && !Number.isFinite(Date.parse(`${date}+08:00`)))))
@@ -145,7 +152,7 @@ export function WebTaskDetails({ runtime, scope, task, onClose }: TaskDetailsPro
               ...(action === 'reschedule' ? { scheduled_for: Date.parse(`${date}+08:00`) / 1000 } : {})
             }
       }
-      sessionStorage.setItem(recoveryKey, JSON.stringify(pending.current))
+      savePendingOperation(recoveryKey, pending.current)
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : '无法保存操作，请勿重复提交。')
       return
@@ -161,13 +168,9 @@ export function WebTaskDetails({ runtime, scope, task, onClose }: TaskDetailsPro
         receivable ? !result.ok || result.followup?.source_id !== task.source_id : result.reminder_id !== task.source_id
       )
         throw new Error('unconfirmed')
-      if (
-        receivable &&
-        pending.current.action === 'reschedule' &&
-        result.followup?.expected_receive_date !== pending.current.expected_receive_date
-      )
-        throw new Error('date mismatch')
-      sessionStorage.removeItem(recoveryKey)
+      // ok confirms this exact idempotent request. The returned row is current
+      // server truth and may include a later change from another client.
+      clearPendingOperation(recoveryKey)
       pending.current = null
       setUncertain(false)
       setAction('')
@@ -177,7 +180,7 @@ export function WebTaskDetails({ runtime, scope, task, onClose }: TaskDetailsPro
       window.dispatchEvent(new CustomEvent('hermes:followup-changed', { detail: { scope } }))
     } catch (failure) {
       if (failure instanceof EnterpriseClientError && [400, 403, 404, 409, 422].includes(failure.status)) {
-        sessionStorage.removeItem(recoveryKey)
+        clearPendingOperation(recoveryKey)
         pending.current = null
         setUncertain(false)
         setError('服务端拒绝了此次操作，请刷新当前任务后核对状态和权限。')
@@ -194,7 +197,7 @@ export function WebTaskDetails({ runtime, scope, task, onClose }: TaskDetailsPro
     <Dialog
       open
       onOpenChange={open => {
-        if (!open && !writing.current && !writeoffBusy) onClose()
+        if (!open && !$enterprisePackageInstallFrozen.get() && !writing.current && !writeoffBusy && !ledgerBusy) onClose()
       }}
     >
       <DialogContent
@@ -214,7 +217,7 @@ export function WebTaskDetails({ runtime, scope, task, onClose }: TaskDetailsPro
           {notice ? <p role="status">{notice}</p> : null}
           <Button
             variant="outline"
-            disabled={loading || busy || writeoffLocked}
+            disabled={frozen || loading || busy || writeoffLocked || ledgerBusy}
             onClick={() => {
               setError('')
               refresh(value => value + 1)
@@ -279,7 +282,7 @@ export function WebTaskDetails({ runtime, scope, task, onClose }: TaskDetailsPro
                     <Button
                       key={key}
                       variant="outline"
-                      disabled={busy || loading || uncertain || writeoffLocked}
+                      disabled={frozen || busy || loading || uncertain || writeoffLocked || ledgerBusy}
                       onClick={() => {
                         setAction(key)
                         setDate('')
@@ -305,30 +308,30 @@ export function WebTaskDetails({ runtime, scope, task, onClose }: TaskDetailsPro
                       新的日期{!receivable ? '时间（北京时间）' : ''}
                       <Input
                         type={receivable ? 'date' : 'datetime-local'}
-                        disabled={busy || uncertain}
+                        disabled={frozen || busy || uncertain}
                         value={date}
                         onChange={event => setDate(event.target.value)}
                       />
                     </label>
                   ) : null}
-                  <Button disabled={busy || loading || (uncertain && !pending.current)} onClick={() => void submit()}>
+                  <Button disabled={frozen || busy || loading || (uncertain && !pending.current)} onClick={() => void submit()}>
                     {busy ? '正在提交…' : uncertain ? '重试原提交' : '确认操作'}
                   </Button>
                   {!uncertain ? (
-                    <Button variant="outline" disabled={busy} onClick={() => setAction('')}>
+                    <Button variant="outline" disabled={frozen || busy} onClick={() => setAction('')}>
                       返回详情
                     </Button>
                   ) : null}
                 </section>
               ) : null}
               {receivable ? (
-                <fieldset disabled={busy || uncertain || writeoffLocked}>
-                  <ReceivableLedger refreshKey={ledgerRevision} hideRefresh runtime={runtime} scope={scope} followupId={task.source_id} />
+                <fieldset disabled={frozen || busy || uncertain || writeoffLocked}>
+                  <ReceivableLedger onBusy={setLedgerBusy} refreshKey={ledgerRevision} hideRefresh runtime={runtime} scope={scope} followupId={task.source_id} />
                 </fieldset>
               ) : null}
               {receivable && ['closed', 'cancelled'].includes(detail.status) ? <ReceivableWriteoff
                 runtime={runtime} scope={scope} followupId={task.source_id} subject={detail.business_subject}
-                refreshKey={ledgerRevision} disabled={busy || uncertain || Boolean(action)}
+                refreshKey={ledgerRevision} disabled={frozen || busy || uncertain || Boolean(action) || ledgerBusy}
                 onLock={setWriteoffLocked} onBusy={setWriteoffBusy}
                 onChanged={() => {
                   refreshLedger(value => value + 1)

@@ -5,6 +5,7 @@ import { Check, Lock, Users } from '@/lib/icons'
 
 import hermesMark from './assets/hermes-mark.svg'
 import { EnterprisePackageUpdateButton } from './package-update-ui'
+import { EnterpriseTitlebar } from './enterprise-design-system'
 
 export interface EnterpriseLoginPageProps {
   busy: boolean
@@ -120,11 +121,11 @@ export function EnterpriseLoginPage({ busy, error, onLogin, onOpenLogs, status }
 
   return (
     <main className="hesc-login" data-testid="enterprise-login-root">
-      <header className="hesc-login-titlebar">
+      <EnterpriseTitlebar className="hesc-login-titlebar">
         <img alt="" aria-hidden="true" src={hermesMark} />
         <span>Hermes-企业助手</span>
         <EnterprisePackageUpdateButton />
-      </header>
+      </EnterpriseTitlebar>
       <div className="hesc-login-content">
         <section aria-labelledby="enterprise-login-product" className="hesc-login-brand">
           <div className="hesc-login-brand-lockup">
@@ -343,11 +344,11 @@ export function EnterprisePasswordChangePage({ error, onComplete }: EnterprisePa
 
   return (
     <main className="hesc-login" data-testid="enterprise-password-change-root">
-      <header className="hesc-login-titlebar">
+      <EnterpriseTitlebar className="hesc-login-titlebar">
         <img alt="" aria-hidden="true" src={hermesMark} />
         <span>Hermes-企业助手</span>
         <EnterprisePackageUpdateButton />
-      </header>
+      </EnterpriseTitlebar>
       <div className="hesc-login-content hesc-password-change-content">
         <section className="hesc-login-brand">
           <div>

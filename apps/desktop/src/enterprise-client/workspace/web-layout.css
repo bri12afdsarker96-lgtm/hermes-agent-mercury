@@ -24,7 +24,7 @@
 .hesc-root .hesc-reminder-toast > div { min-width:0; display:grid; gap:8px; overflow-wrap:anywhere; }
 .hesc-root .hesc-reminder-toast strong { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .hesc-root .hesc-reminder-toast button { flex-shrink:0; }
-.hesc-root .hesc-titlebar { padding-right:18px; }
+.hesc-root .hesc-titlebar { padding-right:calc(var(--hesc-window-controls-width, 0px) + var(--hesc-titlebar-inset, 18px)); }
 /* Keep the connected indicator in the status bar; abnormal page banners remain. */
 .hesc-root .hesc-title-connection { display:none; }
 .hesc-root .hesc-knowledge-collections { max-height:none; overflow:visible; }
@@ -40,11 +40,12 @@
   .hesc-root .hesc-sidebar-brand { justify-content:center; padding:0; }
   .hesc-root .hesc-sidebar-brand > span,.hesc-root .hesc-sidebar-orbit,.hesc-root .hesc-nav-label { display:none; }
   .hesc-root .hesc-nav button { justify-content:center; padding-inline:8px; }
-  .hesc-root .hesc-ai-workbench .hesc-agent-transcript { min-height:0; }
-  .hesc-root .hesc-ai-workbench { min-height:0; height:calc(100dvh - 180px); grid-template-rows:auto minmax(0,1fr); overflow:hidden; }
+  .hesc-root .hesc-ai-workbench .hesc-agent-transcript { min-height:0; height:auto; overflow:visible; }
+  .hesc-root .hesc-ai-workbench { min-height:0; height:auto; grid-template-rows:auto minmax(0,1fr); overflow:visible; }
+  .hesc-root .hesc-ai-workbench .hesc-assistant-layout { height:auto; overflow:visible; }
   .hesc-root .hesc-ai-conversation-sidebar { max-height:120px; overflow:auto; }
-  .hesc-root .hesc-ai-chat-column { min-height:0; }
-  .hesc-root .hesc-ai-workbench .hesc-agent-messages { min-height:60px; overflow:auto; }
+  .hesc-root .hesc-ai-chat-column { min-height:0; overflow:visible; }
+  .hesc-root .hesc-ai-workbench .hesc-agent-messages { min-height:80px; max-height:35dvh; overflow:auto; }
   .hesc-root .hesc-ai-workbench .hesc-agent-composer textarea { min-height:72px; max-height:120px; }
 }
 @media (max-width:800px) {

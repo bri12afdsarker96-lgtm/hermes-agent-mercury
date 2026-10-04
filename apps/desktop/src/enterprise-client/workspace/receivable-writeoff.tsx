@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import { useStore } from '@nanostores/react'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { EnterpriseClientError, type EnterpriseClientRuntime } from '../runtime'
+import { clearPendingOperation, readPendingOperation, savePendingOperation } from '../receivable-pending'
+import { $enterprisePackageInstallFrozen } from '../enterprise-install-readiness'
+import { useDeliveryWork } from '../use-delivery-work'
 
 interface Writeoff {
   amount: string
@@ -40,6 +44,8 @@ interface Props {
 }
 
 export function ReceivableWriteoff({ runtime, scope, followupId, subject, refreshKey, disabled, onLock, onBusy, onChanged }: Props) {
+  const frozen = useStore($enterprisePackageInstallFrozen)
+  const blocked = disabled || frozen
   const [balance, setBalance] = useState<Balance | null>(null)
   const [stage, setStage] = useState<'idle' | 'reason' | 'confirm'>('idle')
   const [note, setNote] = useState('')
@@ -52,9 +58,10 @@ export function ReceivableWriteoff({ runtime, scope, followupId, subject, refres
   const pending = useRef<Confirmation | null>(null)
   const writing = useRef(false)
   const recoveryKey = `hermes:web-writeoff:${scope}:${followupId}`
+  useDeliveryWork(busy || uncertain || stage !== 'idle' || Boolean(note))
   useEffect(() => {
     try {
-      const saved = sessionStorage.getItem(recoveryKey)
+      const saved = readPendingOperation(recoveryKey)
       if (saved) {
         const value: Confirmation = JSON.parse(saved)
         if (value.action !== 'write_off' || value.followup_id !== followupId || !value.idempotency_key ||
@@ -87,18 +94,18 @@ export function ReceivableWriteoff({ runtime, scope, followupId, subject, refres
   }, [runtime, followupId, refreshKey, revision])
 
   const submit = async () => {
-    if (writing.current || !runtime.post || disabled || (uncertain && !pending.current)) return
+    if ($enterprisePackageInstallFrozen.get() || writing.current || !runtime.post || disabled || (uncertain && !pending.current)) return
     setError('')
     try {
-      if (sessionStorage.getItem(`hermes:receivable-pending:${scope}:${followupId}`) ||
-        sessionStorage.getItem(`hermes:web-task-action:${scope}:receivable_followup:${followupId}`))
+      if (readPendingOperation(`hermes:receivable-pending:${scope}:${followupId}`) ||
+        readPendingOperation(`hermes:web-task-action:${scope}:receivable_followup:${followupId}`))
         throw new Error('请先核对本任务上次未完成的操作。')
       if (!pending.current) {
         if (stage !== 'confirm' || !balance?.can_write_off || !note.trim()) return
         pending.current = { action: 'write_off', followup_id: followupId, idempotency_key: crypto.randomUUID(),
           amount: balance.remaining_amount, expected_version: balance.version, note: note.trim() }
       }
-      sessionStorage.setItem(recoveryKey, JSON.stringify(pending.current))
+      savePendingOperation(recoveryKey, pending.current)
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : '无法保存确认信息，请勿提交。')
       return
@@ -110,7 +117,7 @@ export function ReceivableWriteoff({ runtime, scope, followupId, subject, refres
       const result = await runtime.post<{ok?: boolean; followup_id?: string; resolution?: string}>(
         '/api/receivable-receipt-action', pending.current)
       if (!result.ok || result.followup_id !== followupId || result.resolution !== 'written_off') throw new Error('unconfirmed')
-      sessionStorage.removeItem(recoveryKey)
+      clearPendingOperation(recoveryKey)
       pending.current = null
       setUncertain(false)
       setStage('idle')
@@ -120,7 +127,7 @@ export function ReceivableWriteoff({ runtime, scope, followupId, subject, refres
       onChanged()
     } catch (failure) {
       if (failure instanceof EnterpriseClientError && [400, 403, 404, 409, 422].includes(failure.status)) {
-        sessionStorage.removeItem(recoveryKey)
+        clearPendingOperation(recoveryKey)
         pending.current = null
         setUncertain(false)
         setStage('idle')
@@ -145,7 +152,7 @@ export function ReceivableWriteoff({ runtime, scope, followupId, subject, refres
       <p>原因：{item.note}</p>
       <p>操作人：{item.actor_name || '企业管理员'} · {new Date(item.recorded_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</p>
     </div>)}
-    {stage === 'idle' && balance?.can_write_off ? <Button variant="outline" disabled={disabled || loading || uncertain}
+    {stage === 'idle' && balance?.can_write_off ? <Button variant="outline" disabled={blocked || loading || uncertain}
       onClick={() => { setStage('reason'); setError(''); setNotice('') }}>冲销未收余额</Button> : null}
     {stage !== 'idle' ? <div aria-label={stage === 'confirm' ? '再次确认冲销' : '填写冲销原因'}>
       <h3>{stage === 'confirm' ? '再次确认冲销' : '冲销未收余额'}</h3>
@@ -157,13 +164,13 @@ export function ReceivableWriteoff({ runtime, scope, followupId, subject, refres
       </dl>
       <p>将冲销全部剩余未收金额，未收余额归零，不计入已收款。原账目和操作记录保留在“已冲销”历史中。</p>
       {stage === 'reason' ? <label>冲销原因（必填）<Input maxLength={1000} value={note}
-        disabled={busy || disabled} onChange={event => setNote(event.target.value)} /></label> : <p>冲销原因：{note}</p>}
+        disabled={busy || blocked} onChange={event => setNote(event.target.value)} /></label> : <p>冲销原因：{note}</p>}
       <div className="hesc-inline-actions">
-        {stage === 'reason' ? <Button disabled={disabled || loading || !note.trim()}
+        {stage === 'reason' ? <Button disabled={blocked || loading || !note.trim()}
           onClick={() => setStage('confirm')}>下一步：核对冲销</Button>
-          : <Button disabled={disabled || busy || loading || (uncertain && !pending.current)} onClick={() => void submit()}>
+          : <Button disabled={blocked || busy || loading || (uncertain && !pending.current)} onClick={() => void submit()}>
             {busy ? '正在冲销…' : uncertain ? '重试原冲销' : '确认冲销全部剩余金额'}</Button>}
-        {!uncertain ? <Button variant="outline" disabled={busy} onClick={() => { setStage('idle'); setNote('') }}>取消冲销</Button> : null}
+        {!uncertain ? <Button variant="outline" disabled={frozen || busy} onClick={() => { setStage('idle'); setNote('') }}>取消冲销</Button> : null}
       </div>
     </div> : null}
   </section>

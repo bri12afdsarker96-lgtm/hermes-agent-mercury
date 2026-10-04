@@ -14,7 +14,7 @@ const wrap = (child: ReactNode) => <I18nProvider initialLocale="zh"><WebPresenta
 const ledger = {available:true,can_record_receipt:true,can_correct_receipt:false,can_add_note:true,received_amount:'0',remaining_amount:'20',receipts:[],history:[],transfer_targets:[{principal_id:'p2',name:'小林',group_id:'g2',group_name:'第二组'}]}
 function api(get: ReturnType<typeof vi.fn>, post = vi.fn(async () => ({ok:true}))) {return {get,post,disconnect:vi.fn()} as unknown as EnterpriseClientRuntime}
 describe('web business controls preserve dependencies and authority', () => {
-  beforeEach(() => sessionStorage.clear())
+  beforeEach(() => { sessionStorage.clear(); localStorage.clear() })
   it('keeps unavailable filters explicit without silently broadening the selection', () => {
     const onChange = vi.fn()
     render(wrap(<FollowupFilterBar rows={[]} statuses={[]} value={{query:'订单',owner:'id:removed',status:'open'}} onChange={onChange}/>))

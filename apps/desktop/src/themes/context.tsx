@@ -176,7 +176,13 @@ const mixesFor = (isDark: boolean): Record<string, string> => ({
   '--theme-mix-bubble': isDark ? '46%' : '0%'
 })
 
-function applyTheme(theme: DesktopTheme, mode: 'light' | 'dark') {
+interface NativeAppearance {
+  background: string
+  foreground: string
+  mode: 'light' | 'dark'
+}
+
+function applyTheme(theme: DesktopTheme, mode: 'light' | 'dark', nativeAppearance?: NativeAppearance) {
   if (typeof document === 'undefined') {
     return
   }
@@ -233,11 +239,11 @@ function applyTheme(theme: DesktopTheme, mode: 'light' | 'dark') {
     root.style.setProperty(k, v)
   }
 
-  const chromeBg = chromeBackground(c.background, isDark)
+  const chromeBg = nativeAppearance?.background ?? chromeBackground(c.background, isDark)
 
   window.hermesDesktop?.setTitleBarTheme?.({
     background: chromeBg,
-    foreground: c.foreground
+    foreground: nativeAppearance?.foreground ?? c.foreground
   })
 
   // Raw (non-JSON) keys read by the inline pre-paint script in index.html —
@@ -245,7 +251,7 @@ function applyTheme(theme: DesktopTheme, mode: 'light' | 'dark') {
   // frame, before this module has even loaded.
   try {
     window.localStorage.setItem('hermes-boot-background', chromeBg)
-    window.localStorage.setItem('hermes-boot-color-scheme', rendered)
+    window.localStorage.setItem('hermes-boot-color-scheme', nativeAppearance?.mode ?? rendered)
   } catch {
     // Storage may be unavailable (private mode / quota); the inline script
     // falls back to prefers-color-scheme.
@@ -313,7 +319,12 @@ const ThemeContext = createContext<ThemeContextValue>({
   setMode: () => {}
 })
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
+interface ThemeProviderProps {
+  children: ReactNode
+  nativeAppearance?: NativeAppearance
+}
+
+export function ThemeProvider({ children, nativeAppearance }: ThemeProviderProps) {
   // Skin + mode are assigned per profile; the active profile drives which
   // appearance shows. Single-profile users only ever see "default", so their
   // behavior is unchanged.
@@ -390,11 +401,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // What actually gets painted (matches the `.dark` class applyTheme toggles).
   const renderedMode = useMemo(() => renderedModeFor(activeTheme.colors, resolvedMode), [activeTheme, resolvedMode])
 
-  useEffect(() => applyTheme(activeTheme, resolvedMode), [activeTheme, resolvedMode])
+  useEffect(() => applyTheme(activeTheme, resolvedMode, nativeAppearance), [activeTheme, resolvedMode, nativeAppearance])
 
   // Keep the native window appearance pinned to the app theme (vibrancy
   // material, titlebar, new-window pre-paint background).
-  useEffect(() => syncNativeTheme(mode, renderedMode), [mode, renderedMode])
+  useEffect(() => syncNativeTheme(nativeAppearance?.mode ?? mode, nativeAppearance?.mode ?? renderedMode), [mode, renderedMode, nativeAppearance])
 
   // Assign to whichever profile is live right now (read fresh so the callbacks
   // stay stable across profile switches).

@@ -9,12 +9,41 @@ export interface ReceivableMutation {
   target_principal_id?: string
 }
 
-/** A tab-local recovery journal, scoped to server, tenant, principal and record.
- * Persist before sending: reload/closing a detail pane must not mint a second
- * payment while the first request's outcome is unknown. Cleared on confirmation.
+/** Recovery keys include the server, tenant, principal and record. Migrate the
+ * old tab journal before returning it so a restart keeps the original request.
+ * Storage failures and conflicting journals must block a new financial write.
  */
+export function readPendingOperation(key: string): string | null {
+  const saved = localStorage.getItem(key)
+  const legacy = sessionStorage.getItem(key)
+  if (saved !== null && legacy !== null && saved !== legacy) {
+    throw new Error('Conflicting pending operations')
+  }
+  if (legacy !== null) {
+    if (saved === null) localStorage.setItem(key, legacy)
+    sessionStorage.removeItem(key)
+  }
+  return saved ?? legacy
+}
+
+export function savePendingOperation(key: string, request: unknown): void {
+  const value = JSON.stringify(request)
+  const saved = readPendingOperation(key)
+  if (saved !== null && saved !== value) {
+    throw new Error('A previous operation must be confirmed first')
+  }
+  localStorage.setItem(key, value)
+}
+
+export function clearPendingOperation(key: string): void {
+  // Keep the durable journal if clearing the legacy store fails.
+  sessionStorage.removeItem(key)
+  localStorage.removeItem(key)
+}
+
+/** Persist before sending; clear only after confirmation or definitive rejection. */
 export function readPendingReceivable(key: string, followupId: string): ReceivableMutation | null {
-  const value = sessionStorage.getItem(key)
+  const value = readPendingOperation(key)
   if (!value) {return null}
   const parsed = JSON.parse(value) as ReceivableMutation
   if (parsed.followup_id !== followupId || typeof parsed.idempotency_key !== 'string'

@@ -564,7 +564,6 @@ function EnterpriseClientContent({ additionalAccountActions, onBeforeLogout, rec
 
   useEffect(() => {
     document.title = 'Hermes-企业助手'
-    window.hermesDesktop?.setTitleBarTheme?.({ background: '#0c1825', foreground: '#ffffff' })
     void refresh()
 
     return () => {
