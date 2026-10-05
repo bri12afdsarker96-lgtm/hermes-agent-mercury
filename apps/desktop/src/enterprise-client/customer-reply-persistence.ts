@@ -105,7 +105,7 @@ function snapshot(workspace: CustomerReplyWorkspaceStore): StoredWorkspace {
         memoryConfirmedAt: reply.memoryConfirmedAt,
         draft: reply.draft,
         knowledgeGrounded: reply.knowledgeGrounded,
-        interrupted: reply.requestId !== null
+        interrupted: reply.requestId !== null || reply.outcomeUnknown === true
       }
     })
   }
@@ -258,6 +258,13 @@ export async function reloadCustomerDrafts(workspace: CustomerReplyWorkspaceStor
 
     validateResponse(result)
 
+    // Reloading drafts replaces store objects, not the customer conversation.
+    // A stale remote draft cannot erase a local binding or unconfirmed POST.
+    const currentBindings = new Map(workspace.get().customers.map(customer => {
+      const reply = customer.reply.get()
+      return [customer.id, { backendChoice: reply.backendChoice, outcomeUnknown: reply.outcomeUnknown === true || reply.requestId !== null }] as const
+    }))
+
     if (result.workspace || replacing) {
       for (const customer of workspace.get().customers) {
         customer.reply.set({ ...customer.reply.get(), requestId: null, phase: null })
@@ -269,9 +276,12 @@ export async function reloadCustomerDrafts(workspace: CustomerReplyWorkspaceStor
         activeId: result.workspace.activeId,
         nextNumber: result.workspace.nextNumber,
         customers: result.workspace.customers.map(customer => {
+          const binding = currentBindings.get(customer.id)
+          const outcomeUnknown = customer.interrupted === true || binding?.outcomeUnknown === true
           const reply = createCustomerReplyStore()
           reply.set({
             ...reply.get(),
+            ...(binding?.backendChoice ? { backendChoice: binding.backendChoice } : {}),
             context: customer.context,
             instructions: customer.instructions,
             memoryNote: customer.memoryNote ?? '',
@@ -280,7 +290,8 @@ export async function reloadCustomerDrafts(workspace: CustomerReplyWorkspaceStor
             memoryPending: false,
             draft: customer.draft,
             knowledgeGrounded: customer.knowledgeGrounded,
-            error: customer.interrupted ? '上次生成已中断，请核对上下文后重新生成。' : null
+            outcomeUnknown,
+            error: outcomeUnknown ? '上次生成结果未确认，未自动重发。请核实结果后新建客户会话。' : null
           })
 
           return { id: customer.id, label: customer.label, reply }

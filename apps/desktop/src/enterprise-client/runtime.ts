@@ -13,6 +13,76 @@ import {
 
 export { EnterpriseClientError } from './runtime-errors'
 
+export type EnterpriseAssistantBackendId = 'tenant_model' | 'codex'
+
+/** Public selections only. Credentials and trusted identity remain on S. */
+export interface EnterpriseAssistantBackendChoice {
+  backend_id: EnterpriseAssistantBackendId
+  configuration_id: string
+  configuration_version?: number
+  model: string
+  runtime_protocol: string
+  reasoning_effort: string | null
+  availability: 'available' | 'unavailable'
+  reason?: string | null
+}
+
+export interface EnterpriseAssistantBackendOption {
+  backend_id: EnterpriseAssistantBackendId
+  label: string
+  runtime_protocol?: string
+  model?: string
+  reasoning_effort?: string | null
+  availability?: 'available' | 'unavailable'
+  reason?: string | null
+}
+
+export const CODEX_SOFTWARE_DEFAULTS = { model: 'gpt-6-luna', reasoning_effort: 'medium' } as const
+
+export function assistantBackendReason(reason: string | null | undefined): string {
+  const messages: Readonly<Record<string, string>> = {
+    CODEX_LOCAL_RUNTIME_REQUIRED: '当前企业助手尚未接通本机 Codex。接通后由你使用自己的账号登录。',
+    // Older servers used a deployment-wide reason for this unimplemented local path.
+    CODEX_QUALIFICATION_REQUIRED: '当前企业助手尚未接通本机 Codex。接通后由你使用自己的账号登录。',
+    CONFIGURATION_CHANGED: '此对话的模型配置已变化，请新建对话后重新选择。',
+    CONFIGURATION_UNAVAILABLE: '此对话的模型配置已不可用，请新建对话后重新选择。'
+  }
+  return messages[reason ?? ''] ?? '当前后端不可用，请联系企业管理员。'
+}
+
+export class EnterpriseAssistantRequestUnknown extends Error {
+  constructor() {
+    super('本次 AI 请求结果未确认，未自动重发。请先核实结果，再发起新请求。')
+    this.name = 'EnterpriseAssistantRequestUnknown'
+  }
+}
+
+/** Only a definitive HTTP rejection can safely remain editable for another submission. */
+export function assistantRequestError(reason: unknown): Error {
+  if (reason instanceof EnterpriseClientError && [400, 401, 403, 404, 409, 413, 422, 429].includes(reason.status)) {
+    return enterpriseClientErrorForStatus(reason.status)
+  }
+  return new EnterpriseAssistantRequestUnknown()
+}
+
+/** All transmitted settings are assertions against the server-owned config. */
+export function assistantChoiceRequest(choice: EnterpriseAssistantBackendChoice) {
+  return {
+    backend_id: choice.backend_id,
+    configuration_id: choice.configuration_id || undefined,
+    ...(choice.configuration_version !== undefined ? { configuration_version: choice.configuration_version } : {}),
+    runtime_protocol: choice.runtime_protocol,
+    model: choice.model,
+    reasoning_effort: choice.reasoning_effort
+  }
+}
+
+export function assistantChoicesMatch(left: EnterpriseAssistantBackendChoice, right: EnterpriseAssistantBackendChoice): boolean {
+  return left.backend_id === right.backend_id && left.configuration_id === right.configuration_id &&
+    left.configuration_version === right.configuration_version && left.runtime_protocol === right.runtime_protocol &&
+    left.model === right.model && left.reasoning_effort === right.reasoning_effort
+}
+
 export interface EnterpriseAlert {
   code?: string
   level?: string

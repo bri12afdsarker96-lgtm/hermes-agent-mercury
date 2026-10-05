@@ -183,6 +183,107 @@ class TestLifecycle:
         assert client._closed is True
 
 
+class TestStrictTextConsumer:
+    """Protocol tests only: these do not prove native sandbox enforcement."""
+
+    @pytest.mark.parametrize("status,interrupted,error", [
+        ("completed", False, False), ("failed", False, True),
+        ("interrupted", True, False), (None, False, True),
+    ])
+    def test_only_matching_completed_is_success(self, status, interrupted, error):
+        client = FakeClient()
+        client.queue_notification("turn/completed", threadId="t", turn={"id": "tu1", "status": status})
+        result = make_session(client, strict_protocol=True).run_turn("summarize", turn_timeout=.05)
+        assert result.protocol_terminal_observed
+        assert result.terminal_status == status
+        assert result.interrupted == interrupted
+        assert bool(result.error) == error
+        assert result.turn_start_sent and result.turn_start_acknowledged
+        assert sum(m == "turn/start" for m, _ in client.requests) == 1
+
+    @pytest.mark.parametrize("scope", [{}, {"threadId": "foreign"}, {"threadId": "t", "turnId": "foreign"}])
+    def test_unscoped_or_foreign_completion_is_unknown(self, scope):
+        client = FakeClient()
+        client.queue_notification("turn/completed", **scope, turn={"id": "tu1", "status": "completed"})
+        result = make_session(client, strict_protocol=True).run_turn("summarize", turn_timeout=.01)
+        assert not result.protocol_terminal_observed
+        assert result.interrupt_acknowledged
+        assert result.should_retire
+        assert sum(m == "turn/start" for m, _ in client.requests) == 1
+
+    def test_final_text_without_terminal_remains_unknown(self):
+        client = FakeClient()
+        client.queue_notification("item/completed", threadId="t", turnId="tu1",
+                                  item={"id": "a", "type": "agentMessage", "text": "provisional"})
+        result = make_session(client, strict_protocol=True).run_turn("summarize", turn_timeout=.01)
+        assert result.final_text == "provisional"
+        assert not result.protocol_terminal_observed
+        assert result.terminal_status is None and result.should_retire
+
+    def test_completion_in_request_drain_is_observed(self):
+        client = FakeClient()
+        client.queue_server_request("mcpServer/elicitation/request", serverName="hermes-tools")
+        client.queue_notification("turn/completed", threadId="t", turn={"id": "tu1", "status": "failed"})
+        result = make_session(client, strict_protocol=True, deny_server_requests=True).run_turn("text")
+        assert result.protocol_terminal_observed and result.terminal_status == "failed" and result.error
+        assert client.responses[0][1]["action"] == "decline"
+
+    def test_policy_ack_rejected_before_turn_start(self):
+        client = FakeClient()
+        def reject(_):
+            raise ValueError("policy missing")
+        result = make_session(client, strict_protocol=True, validate_thread_start=reject).run_turn("text")
+        assert result.error and result.should_retire
+        assert not result.turn_start_sent
+        assert not any(m == "turn/start" for m, _ in client.requests)
+        assert client._closed
+
+    @pytest.mark.parametrize("drain", [False, True])
+    def test_observer_failure_cannot_finalize(self, drain):
+        client = FakeClient()
+        if drain:
+            client.queue_server_request("unknown")
+        client.queue_notification("turn/completed", threadId="t", turn={"id": "tu1", "status": "completed"})
+        def broken_observer(_):
+            raise RuntimeError("private diagnostic")
+        result = make_session(client, strict_protocol=True, on_event=broken_observer).run_turn("text")
+        assert result.error == "Codex event observer failed"
+        assert not result.protocol_terminal_observed and result.should_retire
+        assert result.interrupt_acknowledged
+
+    def test_missing_turn_identity_is_unknown_after_ack(self):
+        client = FakeClient()
+        client._request_handler = lambda m, p: {"thread": {"id": "t"}} if m == "thread/start" else {}
+        result = make_session(client, strict_protocol=True).run_turn("text")
+        assert result.turn_start_sent and result.turn_start_acknowledged
+        assert not result.protocol_terminal_observed and result.should_retire
+        assert not result.interrupt_acknowledged
+
+    @pytest.mark.parametrize("method", ["item/commandExecution/requestApproval", "item/fileChange/requestApproval",
+                                        "item/permissions/requestApproval", "item/tool/call", "unknown"])
+    def test_text_consumer_never_uses_auto_approval(self, method):
+        client = FakeClient()
+        session = make_session(client, deny_server_requests=True,
+                               request_routing=_ServerRequestRouting(auto_approve_exec=True, auto_approve_apply_patch=True))
+        session.ensure_started()
+        session._handle_server_request({"id": "r", "method": method, "params": {}})
+        assert all(r.get("decision") != "accept" for _, r in client.responses)
+        assert client.responses or client.error_responses
+
+    def test_frozen_settings_cannot_retarget_thread_or_input(self):
+        client = FakeClient()
+        params = {"model": "gpt-6-luna", "config": {"model_reasoning_effort": "medium"}}
+        session = make_session(client, thread_start_params=params,
+                               turn_start_params={"threadId": "foreign", "input": [], "effort": "medium"})
+        params["config"]["model_reasoning_effort"] = "high"
+        client.queue_notification("turn/completed", turn={"status": "completed"})
+        session.run_turn("intended")
+        thread = next(p for m, p in client.requests if m == "thread/start")
+        turn = next(p for m, p in client.requests if m == "turn/start")
+        assert thread["config"]["model_reasoning_effort"] == "medium"
+        assert turn["threadId"] == "thread-fake-001" and turn["input"][0]["text"] == "intended"
+
+
 # ---- turn loop ----
 
 class TestRunTurn:
@@ -895,4 +996,3 @@ class TestClassifyOAuthFailure:
         assert _classify_oauth_failure() is None
         assert _classify_oauth_failure("") is None
         assert _classify_oauth_failure("", None) is None  # type: ignore[arg-type]
-

@@ -79,6 +79,29 @@ afterEach(() => {
 })
 
 describe('customer draft durability', () => {
+  it('keeps same-customer binding and unsaved uncertainty when an explicit reload replaces its store', async () => {
+    const remote = server()
+    const runtime = remote.runtime('binding-seat')
+    const value = workspace()
+    await start(value, runtime)
+    const customer = value.get().customers[0]!
+    updateCustomerReplyInput(customer.reply, 'context', '已保存上下文')
+    await saveCustomerDrafts(value)
+    const choice = { backend_id: 'tenant_model' as const, configuration_id: 'owned', configuration_version: 4,
+      model: 'model', runtime_protocol: 'openai_chat_completions', reasoning_effort: null, availability: 'available' as const, persona_id: 'fixed-persona' }
+    customer.reply.set({ ...customer.reply.get(), backendChoice: choice, outcomeUnknown: false })
+    await reloadCustomerDrafts(value)
+    const restored = value.get().customers[0]!
+    expect(restored.reply).not.toBe(customer.reply)
+    expect(restored.reply.get().backendChoice).toEqual(choice)
+    expect(restored.reply.get().outcomeUnknown).toBe(false)
+    restored.reply.set({ ...restored.reply.get(), outcomeUnknown: true })
+    // The remote row still says interrupted=false because this state was not saved.
+    await reloadCustomerDrafts(value)
+    expect(value.get().customers[0]!.reply.get().backendChoice).toEqual(choice)
+    expect(value.get().customers[0]!.reply.get().outcomeUnknown).toBe(true)
+    expect(value.get().customers[0]!.reply.get().error).toContain('结果未确认')
+  })
   it('keeps an unconfirmed memory local across customer switches and blocks installation without storing it', async () => {
     const remote = server()
     const value = workspace()
@@ -222,7 +245,8 @@ describe('customer draft durability', () => {
       expect(customer.reply.get().requestId).toBeNull()
       expect(customer.reply.get().copiedDraft).toBeNull()
     })
-    expect(restored.get().customers[0].reply.get().error).toContain('上次生成已中断')
+    expect(restored.get().customers[0].reply.get().error).toContain('结果未确认')
+    expect(restored.get().customers[0].reply.get().outcomeUnknown).toBe(true)
     expect(reconnected.post).not.toHaveBeenCalled()
     const otherTenant = workspace()
     const otherSeat = workspace()

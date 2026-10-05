@@ -5,8 +5,59 @@ import {
   deleteAssistantChatThread,
   preserveAssistantSessionForPageReload,
   releaseAssistantSession,
-  renameAssistantChatThread
+  renameAssistantChatThread,
+  restartAssistantMode
 } from './assistant-session'
+
+const choice = { backend_id: 'tenant_model' as const, configuration_id: 'owned', configuration_version: 4,
+  model: 'model', runtime_protocol: 'openai_chat_completions', reasoning_effort: null, availability: 'available' as const }
+
+it('retains an in-flight choice and uncertainty across reload without restoring submitting state', () => {
+  const runtime = { get: vi.fn(), disconnect: vi.fn() }
+  const first = assistantSessionFor(runtime, 'pending-tenant', 'pending-seat', true)
+  first.conversations.chat.backendChoice.set(choice)
+  first.conversations.chat.outcomeUnknown.set(true)
+  first.conversations.chat.work.set({ ...first.conversations.chat.work.get(), submitting: true })
+  preserveAssistantSessionForPageReload(runtime)
+  const nextRuntime = { get: vi.fn(), disconnect: vi.fn() }
+  const next = assistantSessionFor(nextRuntime, 'pending-tenant', 'pending-seat', true)
+  expect(next.conversations.chat.backendChoice.get()).toEqual(choice)
+  expect(next.conversations.chat.outcomeUnknown.get()).toBe(true)
+  expect(next.conversations.chat.work.get().submitting).toBe(false)
+  releaseAssistantSession(nextRuntime)
+})
+
+it('starts a fresh text operation and preserves its unknown record using existing chat history', () => {
+  const runtime = { get: vi.fn(), disconnect: vi.fn() }
+  const session = assistantSessionFor(runtime, 'restart-tenant', 'restart-seat')
+  const operation = session.conversations.summarize
+  operation.messages.set([{ id: 'unconfirmed', role: 'user', text: '旧文本' }])
+  operation.backendChoice.set(choice)
+  operation.outcomeUnknown.set(true)
+  restartAssistantMode(session, 'summarize')
+  expect(operation.backendChoice.get()).toBeNull()
+  expect(operation.outcomeUnknown.get()).toBe(false)
+  expect(operation.messages.get()).toEqual([])
+  expect(session.chatThreads.get().at(-1)?.outcomeUnknown.get()).toBe(true)
+  expect(session.chatThreads.get().at(-1)?.messages.get()[0]?.text).toBe('旧文本')
+  releaseAssistantSession(runtime)
+})
+
+it('restores each customer binding only to its matching customer within the same identity', () => {
+  const runtime = { get: vi.fn(), disconnect: vi.fn() }
+  const first = assistantSessionFor(runtime, 'customer-tenant', 'customer-seat', true)
+  const customer = first.customerReply.get().customers[0]!
+  customer.reply.set({ ...customer.reply.get(), backendChoice: choice, outcomeUnknown: true })
+  preserveAssistantSessionForPageReload(runtime)
+  const nextRuntime = { get: vi.fn(), disconnect: vi.fn() }
+  const next = assistantSessionFor(nextRuntime, 'customer-tenant', 'customer-seat', true)
+  const replacement = next.customerReply.get().customers[0]!
+  expect(replacement.reply.get().backendChoice).toBeUndefined()
+  next.customerReply.set({ ...next.customerReply.get(), customers: [{ ...replacement, id: customer.id }] })
+  expect(replacement.reply.get().backendChoice).toEqual(choice)
+  expect(replacement.reply.get().outcomeUnknown).toBe(true)
+  releaseAssistantSession(nextRuntime)
+})
 
 it('keeps mode drafts and transcripts separate, retains same-session navigation, and clears logout', () => {
   const runtime = { get: vi.fn(), disconnect: vi.fn() }

@@ -1,9 +1,31 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { beginEnterpriseLogin, beginEnterprisePasswordLogin, connectEnterpriseClient } from './runtime'
+import { assistantChoiceRequest, assistantChoicesMatch, assistantRequestError, EnterpriseAssistantRequestUnknown, EnterpriseClientError, beginEnterpriseLogin, beginEnterprisePasswordLogin, connectEnterpriseClient, type EnterpriseAssistantBackendChoice } from './runtime'
 
 type EnterpriseResponse =
   { data: unknown; kind: 'ok' } | { code: string; kind: 'error'; message: string; status: number }
+
+describe('Assistant backend assertions', () => {
+  const choice: EnterpriseAssistantBackendChoice = { backend_id: 'tenant_model', configuration_id: 'owned', configuration_version: 7,
+    model: 'model', runtime_protocol: 'openai_chat_completions', reasoning_effort: null, availability: 'available' }
+  it('transmits public assertions and compares every bound setting', () => {
+    const request = assistantChoiceRequest({ ...choice, api_key: 'private' } as EnterpriseAssistantBackendChoice)
+    expect(request).not.toHaveProperty('api_key')
+    expect(request.configuration_id).toBe(choice.configuration_id)
+    expect(assistantChoicesMatch(choice, { ...choice })).toBe(true)
+    for (const patch of [{ model: 'other' }, { configuration_version: 8 }, { configuration_id: 'foreign' }, { runtime_protocol: 'other' }]) {
+      expect(assistantChoicesMatch(choice, { ...choice, ...patch })).toBe(false)
+    }
+  })
+  it('sanitizes definitive rejection and treats transport or 5xx as unknown', () => {
+    const denied = assistantRequestError(new EnterpriseClientError(403, { kind: 'forbidden', message: 'private provider path' }))
+    expect(denied.message).not.toContain('private')
+    expect(denied).not.toBeInstanceOf(EnterpriseAssistantRequestUnknown)
+    for (const failure of [new Error('private token'), new EnterpriseClientError(503, { kind: 'authority_unavailable', message: 'private' })]) {
+      expect(assistantRequestError(failure)).toBeInstanceOf(EnterpriseAssistantRequestUnknown)
+    }
+  })
+})
 
 function installBridge(response: EnterpriseResponse = { data: { ok: true }, kind: 'ok' }) {
   const bridge = {

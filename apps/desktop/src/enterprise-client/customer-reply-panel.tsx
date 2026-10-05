@@ -10,6 +10,7 @@ import {
   type CustomerReplyCustomer,
   type CustomerReplyStore,
   type CustomerReplyWorkspaceStore,
+  type CustomerReplyBackendChoice,
   generateCustomerReply,
   updateCustomerMemoryDraft,
   updateCustomerReplyInput
@@ -28,6 +29,8 @@ import type { EnterpriseClientRuntime } from './runtime'
 import { VOICE_INPUT_FROZEN, VoiceControls } from './voice-controls'
 
 interface CustomerReplyPanelProps {
+  backendChoice?: CustomerReplyBackendChoice
+  choiceProtocolSupported?: boolean
   customerId: string
   customerLabel: string
   configurationId?: string
@@ -75,7 +78,7 @@ function CustomerTab({
   )
 }
 
-export function CustomerReplyWorkspace({ configurationId, ready, runtime, workspace }: CustomerReplyWorkspaceProps) {
+export function CustomerReplyWorkspace({ backendChoice, choiceProtocolSupported, configurationId, ready, runtime, workspace }: CustomerReplyWorkspaceProps) {
   const frozen = useStore($enterprisePackageInstallFrozen)
   const state = useStore(workspace)
   const sync = useStore(customerDraftSyncFor(workspace))
@@ -208,6 +211,8 @@ export function CustomerReplyWorkspace({ configurationId, ready, runtime, worksp
             </Button>
           </div>
           <CustomerReplyPanel
+            backendChoice={backendChoice}
+            choiceProtocolSupported={choiceProtocolSupported}
             configurationId={configurationId}
             customerId={active.id}
             customerLabel={active.label || '未命名客户'}
@@ -224,6 +229,8 @@ export function CustomerReplyWorkspace({ configurationId, ready, runtime, worksp
 }
 
 function CustomerReplyPanel({
+  backendChoice,
+  choiceProtocolSupported,
   configurationId,
   customerId,
   customerLabel,
@@ -298,7 +305,7 @@ function CustomerReplyPanel({
 
           if (runtime && ready) {
             if (recordingBusy) {return}
-            void generateCustomerReply(workspace, store, runtime, configurationId)
+            void generateCustomerReply(workspace, store, runtime, configurationId, backendChoice, choiceProtocolSupported)
           }
         }}
       >

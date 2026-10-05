@@ -4,6 +4,7 @@ import { I18nProvider } from '@/i18n/context'
 import { describe, expect, it, vi } from 'vitest'
 
 import { AssistantPage } from './assistant-page'
+import { assistantSessionFor, createAssistantChatThread, preserveAssistantSessionForPageReload, releaseAssistantSession } from './assistant-session'
 import type { EnterpriseClientRuntime } from './runtime'
 
 function render(ui: ReactNode) {
@@ -26,7 +27,7 @@ describe('AssistantPage', () => {
     return { promise, resolve }
   }
 
-  function runtimeFor(post = vi.fn(async () => ({ text: '已完成' }))) {
+  function runtimeFor(post: unknown = vi.fn(async () => ({ text: '已完成' }))) {
     return {
       disconnect: vi.fn(async () => undefined),
       get: vi.fn(async (path: string) => path === '/api/customer-reply-workspace'
@@ -35,6 +36,97 @@ describe('AssistantPage', () => {
       post: post as unknown as NonNullable<EnterpriseClientRuntime['post']>
     }
   }
+
+  const choice = { backend_id: 'tenant_model' as const, configuration_id: 'default', configuration_version: 5,
+    model: 'test-model', runtime_protocol: 'openai_chat_completions', reasoning_effort: null, availability: 'available' as const }
+  function catalogRuntime(post: ReturnType<typeof vi.fn>) {
+    const runtime = runtimeFor(post)
+    runtime.get = vi.fn(async (path: string) => path === '/api/tenant-ai-personas' ? personaPool : {
+      ...pool, models: [{ ...pool.models[0], ...choice }],
+      backends: [{ backend_id: 'tenant_model', label: '企业配置模型' },
+        { backend_id: 'codex', label: 'Codex', model: 'gpt-6-luna', reasoning_effort: 'medium', runtime_protocol: 'codex_app_server', availability: 'available' }]
+    }) as unknown as EnterpriseClientRuntime['get']
+    return runtime
+  }
+
+  it('shows Codex settings but cannot enable it through a forged available catalog', async () => {
+    const post = vi.fn()
+    render(<AssistantPage runtime={catalogRuntime(post)} principalId="codex-catalog" />)
+    await screen.findByText('企业默认 · test · test-model')
+    fireEvent.change(screen.getByLabelText('运行后端'), { target: { value: 'codex' } })
+    expect(screen.getByText(/gpt-6-luna/)).toBeTruthy()
+    expect(screen.getByText(/尚未接通本机 Codex/)).toBeTruthy()
+    expect((screen.getByRole('button', { name: '提交处理' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('binds settings and blocks an unconfirmed result while letting a text mode start fresh', async () => {
+    const post = vi.fn(async () => {throw new Error('private endpoint token')})
+    render(<AssistantPage runtime={catalogRuntime(post)} principalId="unknown-text" />)
+    await screen.findByText('企业默认 · test · test-model')
+    fireEvent.click(screen.getByRole('button', { name: /文本摘要/ }))
+    fireEvent.change(screen.getByLabelText('输入内容'), { target: { value: '摘要材料' } })
+    fireEvent.click(screen.getByRole('button', { name: '提交处理' }))
+    await waitFor(() => expect(screen.getAllByText(/结果未确认/).length).toBeGreaterThan(0))
+    expect(post).toHaveBeenCalledOnce()
+    expect(post).toHaveBeenCalledWith('/api/tenant-ai-assist', expect.objectContaining({ configuration_id: choice.configuration_id,
+      backend_id: choice.backend_id, configuration_version: choice.configuration_version, model: choice.model }))
+    expect(screen.queryByText(/private endpoint/)).toBeNull()
+    expect((screen.getByRole('button', { name: '提交处理' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '新建处理' }))
+    expect((screen.getByLabelText('输入内容') as HTMLTextAreaElement).disabled).toBe(false)
+    expect(post).toHaveBeenCalledOnce()
+  })
+
+  it('keeps an in-flight request uncertain after a full page reload and does not resend', async () => {
+    const post = vi.fn(() => new Promise(() => undefined))
+    const runtime = catalogRuntime(post)
+    assistantSessionFor(runtime, 'reload-choice', 'reload-seat', true)
+    const view = render(<AssistantPage runtime={runtime} tenantId="reload-choice" principalId="reload-seat" separatedNavigation />)
+    await screen.findByText('企业默认 · test-model')
+    fireEvent.change(screen.getByLabelText('输入内容'), { target: { value: '未返回的问题' } })
+    fireEvent.click(screen.getByRole('button', { name: '提交处理' }))
+    await waitFor(() => expect(post).toHaveBeenCalledOnce())
+    view.unmount()
+    preserveAssistantSessionForPageReload(runtime)
+    const nextPost = vi.fn()
+    const nextRuntime = catalogRuntime(nextPost)
+    assistantSessionFor(nextRuntime, 'reload-choice', 'reload-seat', true)
+    render(<AssistantPage runtime={nextRuntime} tenantId="reload-choice" principalId="reload-seat" separatedNavigation />)
+    await screen.findByText(/结果未确认/)
+    expect((screen.getByRole('button', { name: '提交处理' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(nextPost).not.toHaveBeenCalled()
+    releaseAssistantSession(nextRuntime)
+  })
+
+  it('does not publish a late old-conversation failure into a new foreground conversation', async () => {
+    let reject!: (reason: Error) => void
+    const post = vi.fn(() => new Promise((_resolve, failed) => {reject = failed}))
+    const runtime = catalogRuntime(post)
+    const session = assistantSessionFor(runtime, 'late-choice', 'late-seat')
+    render(<AssistantPage runtime={runtime} tenantId="late-choice" principalId="late-seat" separatedNavigation />)
+    await screen.findByText('企业默认 · test-model')
+    fireEvent.change(screen.getByLabelText('输入内容'), { target: { value: '旧问题' } })
+    fireEvent.click(screen.getByRole('button', { name: '提交处理' }))
+    await waitFor(() => expect(post).toHaveBeenCalledOnce())
+    const old = session.chatThreads.get()[0]!
+    await act(async () => {createAssistantChatThread(session); reject(new Error('private old failure'))})
+    expect(old.outcomeUnknown.get()).toBe(true)
+    expect(screen.queryByText(/结果未确认/)).toBeNull()
+    expect((screen.getByLabelText('输入内容') as HTMLTextAreaElement).disabled).toBe(false)
+  })
+
+  it('locks the chosen configuration and rejects a response from a different backend', async () => {
+    const post = vi.fn(async () => ({ text: '未经核对的回复', backend_choice: { ...choice, configuration_id: 'other' } }))
+    render(<AssistantPage runtime={catalogRuntime(post)} principalId="mismatch-choice" />)
+    await screen.findByText('企业默认 · test · test-model')
+    fireEvent.change(screen.getByLabelText('输入内容'), { target: { value: '核对绑定' } })
+    fireEvent.click(screen.getByRole('button', { name: '提交处理' }))
+    await waitFor(() => expect(screen.getAllByText(/结果未确认/).length).toBeGreaterThan(0))
+    expect(screen.queryByText('未经核对的回复')).toBeNull()
+    expect((screen.getByLabelText('运行后端') as HTMLSelectElement).disabled).toBe(true)
+    expect(post).toHaveBeenCalledOnce()
+  })
 
   it('does not show a previous account response after identity changes during a request', async () => {
     const reply = deferredReply()
@@ -103,7 +195,7 @@ describe('AssistantPage', () => {
 
     await waitFor(() => {
       expect(post).toHaveBeenCalledWith('/api/tenant-ai-assist', {
-        configuration_id: undefined,
+        configuration_id: 'model_default',
         content: '会议记录需要整理',
         mode: 'summarize',
         persona_id: 'persona_default_1234'

@@ -3,13 +3,15 @@ import { atom, type WritableAtom } from 'nanostores'
 import {
   createCustomerReplyWorkspace,
   type CustomerReplyWorkspaceStore,
+  type CustomerReplyStore,
+  type CustomerReplyBackendChoice,
   invalidateCustomerReplies,
   retireCustomerReplyWorkspace
 } from './customer-reply'
 import { retireCustomerReplyFeedback } from './customer-reply-feedback'
 import { stopCustomerDraftSync } from './customer-reply-persistence'
 import { bindCustomerReplyPreferences } from './enterprise-reply-preferences'
-import type { EnterpriseClientRuntime } from './runtime'
+import type { EnterpriseAssistantBackendChoice, EnterpriseClientRuntime } from './runtime'
 import type { CustomerReplyOption, KnowledgeTrace } from './assistant-response'
 
 export type AssistantMode =
@@ -25,6 +27,8 @@ export interface ConversationMessage {
 }
 
 export interface AssistantConversation {
+  backendChoice: WritableAtom<(EnterpriseAssistantBackendChoice & { persona_id?: string }) | null>
+  outcomeUnknown: WritableAtom<boolean>
   id: string
   messages: WritableAtom<ConversationMessage[]>
   title: string
@@ -69,14 +73,30 @@ const MODE_TITLES: Record<Exclude<AssistantMode, 'chat'>, string> = {
 }
 
 interface StoredAssistantConversation {
+  outcomeUnknown?: boolean
+  backendChoice?: EnterpriseAssistantBackendChoice & { persona_id?: string }
   id: string
   messages: ConversationMessage[]
   title: string
 }
 
 interface StoredAssistantChatState {
+  customerBindings?: Array<{ id: string; backendChoice: CustomerReplyBackendChoice; outcomeUnknown: boolean }>
   activeThreadId: string | null
   threads: StoredAssistantConversation[]
+}
+
+function normalizeBackendChoice(raw: unknown): CustomerReplyBackendChoice | undefined {
+  if (!raw || typeof raw !== 'object') {return undefined}
+  const choice = raw as CustomerReplyBackendChoice
+  if ((choice.backend_id !== 'tenant_model' && choice.backend_id !== 'codex') ||
+    typeof choice.configuration_id !== 'string' || typeof choice.model !== 'string' ||
+    typeof choice.runtime_protocol !== 'string' || (choice.reasoning_effort !== null && typeof choice.reasoning_effort !== 'string')) {return undefined}
+  return { backend_id: choice.backend_id, configuration_id: choice.configuration_id.slice(0, 96),
+    model: choice.model.slice(0, 256), runtime_protocol: choice.runtime_protocol.slice(0, 64),
+    reasoning_effort: choice.reasoning_effort?.slice(0, 32) ?? null, availability: 'available',
+    ...(Number.isInteger(choice.configuration_version) && choice.configuration_version! > 0 ? { configuration_version: choice.configuration_version } : {}),
+    ...(typeof choice.persona_id === 'string' ? { persona_id: choice.persona_id.slice(0, 96) } : {}) }
 }
 
 function sessionStorageForChats(): Storage | null {
@@ -161,7 +181,7 @@ function loadStoredChatState(scope: string): StoredAssistantChatState {
       return { activeThreadId: null, threads: [] }
     }
 
-    const candidate = parsed as { activeThreadId?: unknown; threads?: unknown }
+    const candidate = parsed as { activeThreadId?: unknown; threads?: unknown; customerBindings?: unknown }
     const threads = Array.isArray(candidate.threads) ? candidate.threads.slice(0, MAX_STORED_CHAT_THREADS).flatMap(raw => {
       if (!raw || typeof raw !== 'object') {
         return []
@@ -177,11 +197,16 @@ function loadStoredChatState(scope: string): StoredAssistantChatState {
           .map(normalizeStoredMessage)
           .filter((message): message is ConversationMessage => message !== null)
         : []
-      return [{ id: thread.id.slice(0, 128), messages, title: thread.title.slice(0, 64) || '新对话' }]
+      const backendChoice = normalizeBackendChoice((raw as StoredAssistantConversation).backendChoice)
+      return [{ id: thread.id.slice(0, 128), messages, title: thread.title.slice(0, 64) || '新对话', outcomeUnknown: (raw as StoredAssistantConversation).outcomeUnknown === true, ...(backendChoice ? { backendChoice } : {}) }]
     }) : []
 
     return {
       activeThreadId: typeof candidate.activeThreadId === 'string' ? candidate.activeThreadId : null,
+      customerBindings: Array.isArray(candidate.customerBindings) ? candidate.customerBindings.slice(0, 200).flatMap(item => {
+        const choice = normalizeBackendChoice(item?.backendChoice)
+        return typeof item?.id === 'string' && choice ? [{ id: item.id.slice(0, 128), backendChoice: choice, outcomeUnknown: item.outcomeUnknown === true }] : []
+      }) : [],
       threads
     }
   } catch {
@@ -189,15 +214,22 @@ function loadStoredChatState(scope: string): StoredAssistantChatState {
   }
 }
 
-function persistChatState(session: AssistantSession): void {
+function persistChatState(session: AssistantSession, retainedCustomers: StoredAssistantChatState['customerBindings'] = []): void {
   const storage = sessionStorageForChats()
   if (!storage) {
     return
   }
 
   const state: StoredAssistantChatState = {
+    customerBindings: [...retainedCustomers!.filter(item => !session.customerReply.get().customers.some(customer => customer.id === item.id)),
+      ...session.customerReply.get().customers.flatMap(customer => {
+        const reply = customer.reply.get()
+        return reply.backendChoice ? [{ id: customer.id, backendChoice: reply.backendChoice, outcomeUnknown: reply.outcomeUnknown === true || reply.requestId !== null }] : []
+      })].slice(-200),
     activeThreadId: session.activeChatThreadId.get(),
     threads: session.chatThreads.get().slice(0, MAX_STORED_CHAT_THREADS).map(thread => ({
+      ...(thread.backendChoice.get() ? { backendChoice: thread.backendChoice.get()! } : {}),
+      outcomeUnknown: thread.outcomeUnknown.get(),
       id: thread.id,
       messages: thread.messages.get().slice(-MAX_STORED_CHAT_MESSAGES),
       title: thread.title
@@ -212,7 +244,28 @@ function persistChatState(session: AssistantSession): void {
   }
 }
 
-function bindChatPersistence(session: AssistantSession): () => void {
+function bindChatPersistence(session: AssistantSession, restoredCustomers: StoredAssistantChatState['customerBindings'] = []): () => void {
+  let retainedCustomers = restoredCustomers ?? []
+  const customerDisposes = new Map<CustomerReplyStore, () => void>()
+  const persist = () => persistChatState(session, retainedCustomers)
+  const syncCustomers = () => {
+    const current = new Set(session.customerReply.get().customers.map(customer => customer.reply))
+    for (const [store, dispose] of customerDisposes) {
+      if (!current.has(store)) {dispose(); customerDisposes.delete(store)}
+    }
+    for (const customer of session.customerReply.get().customers) {
+      const saved = retainedCustomers.find(item => item.id === customer.id)
+      if (saved && !customer.reply.get().backendChoice) {
+        customer.reply.set({ ...customer.reply.get(), backendChoice: saved.backendChoice,
+          outcomeUnknown: customer.reply.get().outcomeUnknown === true || saved.outcomeUnknown })
+        retainedCustomers = retainedCustomers.filter(item => item.id !== customer.id)
+      }
+      if (!customerDisposes.has(customer.reply)) {customerDisposes.set(customer.reply, customer.reply.listen(persist))}
+    }
+    persist()
+  }
+  const unlistenCustomers = session.customerReply.listen(syncCustomers)
+  syncCustomers()
   const unlistenMessages = new Map<AssistantConversation, () => void>()
   const sync = () => {
     const current = new Set(session.chatThreads.get())
@@ -224,17 +277,20 @@ function bindChatPersistence(session: AssistantSession): () => void {
     }
     for (const thread of current) {
       if (!unlistenMessages.has(thread)) {
-        unlistenMessages.set(thread, thread.messages.listen(() => {persistChatState(session)}))
+        const dispose = [thread.messages, thread.backendChoice, thread.outcomeUnknown].map(store => store.listen(persist))
+        unlistenMessages.set(thread, () => dispose.forEach(unlisten => unlisten()))
       }
     }
-    persistChatState(session)
+    persist()
   }
 
   const unlistenThreads = session.chatThreads.listen(sync)
-  const unlistenActiveThread = session.activeChatThreadId.listen(() => {persistChatState(session)})
+  const unlistenActiveThread = session.activeChatThreadId.listen(persist)
   sync()
 
   return () => {
+    unlistenCustomers()
+    for (const dispose of customerDisposes.values()) {dispose()}
     unlistenThreads()
     unlistenActiveThread()
     for (const dispose of unlistenMessages.values()) {
@@ -254,6 +310,8 @@ function createConversation(title = '新对话', restored?: StoredAssistantConve
   const id = restored?.id || `conversation-${++nextConversationId}`
   updateConversationCounter(id)
   return {
+    backendChoice: atom(restored?.backendChoice ?? null),
+    outcomeUnknown: atom(restored?.outcomeUnknown === true),
     id,
     messages: atom<ConversationMessage[]>(restored?.messages ?? []),
     title,
@@ -266,6 +324,22 @@ export function createAssistantChatThread(session: AssistantSession): AssistantC
   session.chatThreads.set([...session.chatThreads.get(), thread])
   session.activeChatThreadId.set(thread.id)
   return thread
+}
+
+export function restartAssistantMode(session: AssistantSession, mode: Exclude<AssistantMode, 'chat' | 'customer_reply'>): void {
+  const current = session.conversations[mode]
+  if (current.work.get().submitting) {return}
+  if (current.messages.get().length || current.backendChoice.get()) {
+    const archived = createConversation(`${MODE_TITLES[mode]} · 上次处理`)
+    archived.messages.set(current.messages.get())
+    archived.backendChoice.set(current.backendChoice.get())
+    archived.outcomeUnknown.set(current.outcomeUnknown.get())
+    session.chatThreads.set([...session.chatThreads.get(), archived])
+  }
+  current.messages.set([])
+  current.backendChoice.set(null)
+  current.outcomeUnknown.set(false)
+  current.work.set({ composer: '', fileName: null, fileText: null, readingFile: false, submitting: false })
 }
 
 export function renameAssistantChatThread(session: AssistantSession, threadId: string, title: string): void {
@@ -324,6 +398,8 @@ function releaseAssistantSessionInternal(
       ...existing.chatThreads.get()
     ])
     for (const conversation of conversations) {
+      conversation.backendChoice.set(null)
+      conversation.outcomeUnknown.set(false)
       conversation.messages.set([])
       conversation.work.set({ composer: '', fileName: null, fileText: null, readingFile: false, submitting: false })
     }
@@ -365,7 +441,7 @@ export function assistantSessionFor(
   const customerReply = createCustomerReplyWorkspace()
   bindCustomerReplyPreferences(customerReply, runtime?.serverOrigin, tenantId, principalId)
 
-  const restoredChatState = runtime && persistChatHistory
+  const restoredChatState: StoredAssistantChatState = runtime && persistChatHistory
     ? loadStoredChatState(scope)
     : { activeThreadId: null, threads: [] }
   const restoredChats = restoredChatState.threads.map(thread => createConversation(thread.title, thread))
@@ -390,7 +466,7 @@ export function assistantSessionFor(
 
   if (runtime) {
     if (persistChatHistory) {
-      session.disposeChatPersistence = bindChatPersistence(session)
+      session.disposeChatPersistence = bindChatPersistence(session, restoredChatState.customerBindings)
     }
     sessions.set(runtime, session)
   }

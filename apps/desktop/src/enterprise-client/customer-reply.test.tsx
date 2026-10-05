@@ -16,11 +16,57 @@ import {
 import { customerDraftSyncFor, startCustomerDraftSync, stopCustomerDraftSync } from './customer-reply-persistence'
 import { updateCustomerReplyPreferences } from './enterprise-reply-preferences'
 import type { EnterpriseClientRuntime } from './runtime'
+import { enterpriseClientErrorForStatus } from './runtime-errors'
 
 interface Reply {
   text: string
   knowledge_grounded: boolean
 }
+
+it('keeps customer A unknown without clearing it when concurrent customer B succeeds', async () => {
+  const choice = { backend_id: 'tenant_model' as const, configuration_id: 'first', configuration_version: 3,
+    model: 'model', runtime_protocol: 'openai_chat_completions', reasoning_effort: null, availability: 'available' as const }
+  let reject!: (error: Error) => void
+  const pending = new Promise<Reply>((_resolve, failed) => {reject = failed})
+  const post = vi.fn(async (_path: string, body: unknown) => (body as { configuration_id: string }).configuration_id === 'first'
+    ? pending : { text: 'B 的审核建议', knowledge_grounded: true, backend_choice: { ...choice, configuration_id: 'second' } })
+  const runtime = makeRuntime(post)
+  const workspace = createCustomerReplyWorkspace()
+  await startWorkspace(workspace, runtime)
+  const first = workspace.get().customers[0]!
+  updateCustomerReplyInput(first.reply, 'context', '客户 A')
+  const requestA = generateCustomerReply(workspace, first.reply, runtime, undefined, choice, true)
+  await waitFor(() => expect(post).toHaveBeenCalledOnce())
+  addCustomerReply(workspace)
+  const second = workspace.get().customers[1]!
+  updateCustomerReplyInput(second.reply, 'context', '客户 B')
+  await generateCustomerReply(workspace, second.reply, runtime, undefined, { ...choice, configuration_id: 'second' }, true)
+  expect(first.reply.get().outcomeUnknown).toBe(true)
+  expect(second.reply.get().outcomeUnknown).toBe(false)
+  reject(new Error('private provider token'))
+  await requestA
+  expect(first.reply.get().error).toContain('结果未确认')
+  expect(first.reply.get().error).not.toContain('private')
+  await generateCustomerReply(workspace, first.reply, runtime, undefined, choice, true)
+  expect(post).toHaveBeenCalledTimes(2)
+  await generateCustomerReply(workspace, second.reply, runtime, undefined, { ...choice, configuration_id: 'changed' }, true)
+  expect(second.reply.get().error).toContain('模型配置已变化')
+  expect(post).toHaveBeenCalledTimes(2)
+})
+
+it('rejects a customer response that does not match the captured model choice', async () => {
+  const choice = { backend_id: 'tenant_model' as const, configuration_id: 'owned', configuration_version: 1,
+    model: 'model', runtime_protocol: 'openai_chat_completions', reasoning_effort: null, availability: 'available' as const }
+  const runtime = makeRuntime(vi.fn(async () => ({ text: '不可信结果', knowledge_grounded: true, backend_choice: { ...choice, configuration_id: 'foreign' } })))
+  const workspace = createCustomerReplyWorkspace()
+  await startWorkspace(workspace, runtime)
+  const customer = workspace.get().customers[0]!
+  updateCustomerReplyInput(customer.reply, 'context', '退款条件')
+  await generateCustomerReply(workspace, customer.reply, runtime, undefined, choice, true)
+  expect(customer.reply.get().outcomeUnknown).toBe(true)
+  expect(customer.reply.get().draft).toBe('')
+  expect(customer.reply.get().backendChoice?.configuration_id).toBe(choice.configuration_id)
+})
 
 const testRuntimes: EnterpriseClientRuntime[] = []
 const directWorkspaces: CustomerReplyWorkspaceStore[] = []
@@ -176,7 +222,7 @@ describe('customer reply workspaces', () => {
     fireEvent.change(screen.getByLabelText('当前使用模型'), { target: { value: 'fast' } })
     fireEvent.click(screen.getByRole('button', { name: '生成回复建议' }))
     await waitFor(() => expect(post).toHaveBeenCalledTimes(2))
-    expect(post.mock.calls[0][1]).toMatchObject({ mode: 'knowledge_answer', configuration_id: undefined })
+    expect(post.mock.calls[0][1]).toMatchObject({ mode: 'knowledge_answer', configuration_id: 'default' })
     expect(post.mock.calls[0][1].content).toContain('客户甲：甲订单')
     expect(post.mock.calls[0][1].content).not.toContain('客户乙')
     expect(post.mock.calls[1][1]).toMatchObject({ mode: 'knowledge_answer', configuration_id: 'fast' })
@@ -373,7 +419,7 @@ describe('customer reply queue', () => {
 
     const post = vi
       .fn()
-      .mockRejectedValueOnce(new Error('模型暂不可用'))
+      .mockRejectedValueOnce(enterpriseClientErrorForStatus(429))
       .mockResolvedValue({ text: '恢复后的建议', knowledge_grounded: true })
 
     const runtime = makeRuntime(post)
@@ -381,7 +427,7 @@ describe('customer reply queue', () => {
     updateCustomerReplyInput(store, 'context', '客户的完整退款问题')
     await generateCustomerReply(workspace, store, runtime)
     expect(store.get().context).toBe('客户的完整退款问题')
-    expect(store.get().error).toBe('模型暂不可用')
+    expect(store.get().error).toContain('当前并发已满')
     await generateCustomerReply(workspace, store, runtime)
     expect(store.get().draft).toBe('恢复后的建议')
     updateCustomerReplyInput(store, 'context', '文'.repeat(24_001))

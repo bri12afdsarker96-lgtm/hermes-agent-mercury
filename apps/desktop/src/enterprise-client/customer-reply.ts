@@ -4,9 +4,18 @@ import { flushCustomerDraftsForRequest } from './customer-reply-persistence'
 import { $enterprisePackageInstallFrozen } from './enterprise-install-readiness'
 import { customerReplyPreferencesFor, DEFAULT_REPLY_PREFERENCES, ENTERPRISE_LEARNING_ENABLED } from './enterprise-reply-preferences'
 import { assistantPresentationFrom, type CustomerReplyOption, type KnowledgeTrace } from './assistant-response'
-import type { EnterpriseClientRuntime } from './runtime'
+import {
+  assistantChoiceRequest, assistantChoicesMatch, assistantRequestError,
+  EnterpriseAssistantRequestUnknown, EnterpriseClientError,
+  type EnterpriseAssistantBackendChoice, type EnterpriseClientRuntime
+} from './runtime'
+import { enterpriseClientErrorForStatus } from './runtime-errors'
+
+export interface CustomerReplyBackendChoice extends EnterpriseAssistantBackendChoice { persona_id?: string }
 
 interface CustomerReplyState {
+  backendChoice?: CustomerReplyBackendChoice
+  outcomeUnknown?: boolean
   customerReplyOptions: CustomerReplyOption[]
   context: string
   instructions: string
@@ -25,6 +34,7 @@ interface CustomerReplyState {
 }
 
 interface CustomerReplyResponse {
+  backend_choice?: EnterpriseAssistantBackendChoice
   answer_text?: string
   customer_reply_options?: Array<{ kind?: string; text?: string }>
   knowledge_grounded: boolean
@@ -250,15 +260,23 @@ export async function generateCustomerReply(
   workspace: CustomerReplyWorkspaceStore,
   store: CustomerReplyStore,
   runtime: EnterpriseClientRuntime,
-  configurationId?: string
+  configurationId?: string,
+  backendChoice?: CustomerReplyBackendChoice,
+  choiceProtocolSupported = false
 ): Promise<void> {
   const current = store.get()
   const post = runtime.post?.bind(runtime)
 
-  if ($enterprisePackageInstallFrozen.get() || !post || retiredWorkspaces.has(workspace) || current.requestId ||
+  if ($enterprisePackageInstallFrozen.get() || !post || retiredWorkspaces.has(workspace) || current.requestId || current.outcomeUnknown ||
     (ENTERPRISE_LEARNING_ENABLED && (current.memoryPending || current.memoryDraft !== current.memoryNote)) || !current.context.trim()) {
     return
   }
+  const requestChoice = current.backendChoice ?? backendChoice
+  if (backendChoice && current.backendChoice && !assistantChoicesMatch(backendChoice, current.backendChoice)) {
+    store.set({ ...current, error: '此客户会话的模型配置已变化，请新建客户会话。' })
+    return
+  }
+  if (requestChoice && (requestChoice.backend_id !== 'tenant_model' || requestChoice.availability !== 'available')) {return}
 
   // Reuse the authenticated tenant knowledge route. Customer context never
   // enters the general assistant transcript or another customer's request.
@@ -282,6 +300,7 @@ export async function generateCustomerReply(
   const preferences = { ...(ENTERPRISE_LEARNING_ENABLED ? customerReplyPreferencesFor(workspace).get() : DEFAULT_REPLY_PREFERENCES) }
   store.set({
     ...current,
+    ...(requestChoice ? { backendChoice: requestChoice } : {}),
     draft: '',
     error: null,
     customerReplyOptions: [],
@@ -293,6 +312,7 @@ export async function generateCustomerReply(
     copiedDraft: null
   })
   await runQueuedReply(workspace, async () => {
+    let dispatched = false
     // Closing a customer or changing identity invalidates queued work before
     // it can consume credentials or send the old customer's text.
     if (
@@ -310,10 +330,12 @@ export async function generateCustomerReply(
       const customer = workspace.get().customers.find(item => item.reply === store)
 
       if ($enterprisePackageInstallFrozen.get() || retiredWorkspaces.has(workspace) || store.get().requestId !== requestId || !customer) {return}
-      store.set({ ...store.get(), phase: 'generating' })
+      store.set({ ...store.get(), phase: 'generating', outcomeUnknown: true })
+      dispatched = true
 
       const result = await post<CustomerReplyResponse>('/api/tenant-ai-assist', {
-        configuration_id: configurationId,
+        ...(requestChoice && choiceProtocolSupported ? assistantChoiceRequest(requestChoice) : { configuration_id: requestChoice?.configuration_id ?? configurationId }),
+        ...(requestChoice ? { persona_id: requestChoice.persona_id || undefined } : {}),
         content,
         mode: 'knowledge_answer',
         customer_id: customer.id,
@@ -326,12 +348,15 @@ export async function generateCustomerReply(
       }
 
       const presentation = assistantPresentationFrom(result)
-      if (!presentation.text || typeof result.knowledge_grounded !== 'boolean') {
-        throw new Error('未收到完整的回复建议，请重试。')
+      if (!presentation.text || typeof result.knowledge_grounded !== 'boolean' ||
+        (requestChoice && result.backend_choice && !assistantChoicesMatch(requestChoice, result.backend_choice)) ||
+        (requestChoice && choiceProtocolSupported && !result.backend_choice)) {
+        throw new EnterpriseAssistantRequestUnknown()
       }
 
       store.set({
         ...store.get(),
+        outcomeUnknown: false,
         customerReplyOptions: presentation.customerReplyOptions,
         draft: result.knowledge_grounded ? presentation.text : '',
         knowledgeGrounded: result.knowledge_grounded,
@@ -345,11 +370,14 @@ export async function generateCustomerReply(
         return
       }
 
+      const failure = dispatched ? assistantRequestError(reason) : reason instanceof EnterpriseClientError
+        ? enterpriseClientErrorForStatus(reason.status) : new Error('企业草稿尚未确认，未发送 AI 请求。')
       store.set({
         ...store.get(),
+        outcomeUnknown: dispatched && failure instanceof EnterpriseAssistantRequestUnknown,
         requestId: null,
         phase: null,
-        error: reason instanceof Error ? reason.message : '生成失败，请稍后重试。'
+        error: failure.message
       })
     }
   })
