@@ -1,5 +1,15 @@
 # Mercury 二期企业集成基线（P2-00B）
 
+## 2026-10-23 P2-03-02R3 阅读空间有限改善，原创建超时待闭合（最新）
+
+当前 **ACTIVE / NOT_COMPLETE / LIMITED_LAYOUT_GEOMETRY_CREATE_TIMEOUT_BLOCKED**，唯一项仍为 `SUMMARY_READING_SPACE_CLOSURE`，基线M `3494a4acb` / S `447ef8cd`。M仅增加五个语义class及摘要分栏的局部留白调整，原账号/连接/后端、stop/query、handler/UNKNOWN/权限/once保持；字号始终未改，后续五组spacing未再改变第一候选的textarea/按钮尺寸或按钮padding；窗口1220×800 DIP/zoom0.9、10秒超时/原滚动保持。两次renderer从对应真实源码构建，无编译JS补丁；诊断main `7c9f850f…` 不同于旧产品 `ccb95380…`，preload/guard复用，未改S运行代码。23组件用例/类型检查是第一class候选Builder原回执，第二次纯CSS未重跑，不代替几何验收。
+
+第一新鲜候选SDK1/UNKNOWN-before-send1、S accept1/backend completed，但完成后162px未达200px；原首段atStart/完整可见联合条件失败，中15次/尾14次真实wheel完整可见仅是部分证据。第二真实CSS候选提交前260px、create在途/失败态204px，仍无completed阅读证据：原10秒timer在Node同进程10002.9729ms精确reject，open状态下同RPC/conversation成功响应在其后2105.0218ms迟到；main unavailable，S只有prepare1，SDK0/UNKNOWN计数0，无revalidate/accept/held/release，尚无response_entries字段。此分型不证明SQLite锁、Python延迟或历史第三原因，不称已修复。两候选实际原UI提交尝试2次、SDK合计1，cap2不是实际2，旧请求/UNKNOWN不重放。
+
+第二候选仅UI1至8与quit40；UI8有query可见几何但未点，无答案/首中尾滚动/账号注销登录动作。root多文件采集曾OTHER，具体原因未捕获，未执行计划UI9至11；后采final明确UI8在quit前、其他最终文件在quit后。controller/M/S正常exit0；第二候选13个、第一候选11个已录身份有限退出核无匹配，不代表全历史。最终第一候选回执SHA256 `859e07682a4d898c31b53b1fa52a74d73313ead7c962beee8462eef6097ec9fc`（58绑定）、第二候选 `9947b835bac646bd593e74a3592dca9a75f2ee8c624b7578a219c17e5b93e111`（47绑定），Source/Security各自实际逐核一致，仅接受有限结果；准确路径、不可变源码副本及采样限界见 [阶段检查点](phase2-03-02-checkpoint.md)。
+
+下一步仍限本03-02原create断点诊断，不提高timer/重试、不重放旧请求或换答复迎测。此前 `c227f148…` scoped stop/query接受保持独立，历史第三原因未知，阅读首/中/尾完整验收及整体Gates未闭合；无真实OAuth/模型、PG/RLS、全owner矩阵、下一Gate、部署或发布，不进入03-03，推送不自动暂停。下方均保留历史时点含义。
+
 ## 2026-10-23 P2-03-02R3 原页面停止与原请求查询有限闭合（最新）
 
 当前为 **SCOPED_NATIVE_STOP_QUERY_VALIDATED_HISTORICAL_CREATE_PENDING / P2-03-02R3**，本轮唯一具体项 `CREATE_RETURN_AND_NATIVE_STOP_CLOSURE`。M `b06fb5b10` / S `14aeec9e` 的生产源码、正式测试及超时/重试未改；新鲜合成 lane 复用原 renderer/preload，诊断 main 从固定原源码通过一个精确审计 import alias 构建，`7c9f850f…` 与旧产品 main `ccb95380…` 字节不同。原对象和业务返回保留，观测有额外开销。

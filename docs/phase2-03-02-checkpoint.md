@@ -1,5 +1,24 @@
 # P2-03-02 阶段检查点
 
+## 2026-10-23 P2-03-02R3 阅读空间有限改善与原创建超时（最新）
+
+当前唯一具体项仍为 **P2-03-02R3 / SUMMARY_READING_SPACE_CLOSURE**，状态 **ACTIVE / NOT_COMPLETE / LIMITED_LAYOUT_GEOMETRY_CREATE_TIMEOUT_BLOCKED**。基线 M `3494a4acb` / S `447ef8cd`。两个真实 CSS 候选分别使用新鲜 HOME/userData/S DB 和新请求，旧失败、UNKNOWN 与原请求保留，不重放身份或请求。本阶段实际原 UI 提交尝试2次、SDK合计1次（第一候选1、第二候选0）；合同cap2不是实际2。
+
+M 只增加五个布局语义 class，并在宽屏、分栏、文本摘要范围调整配置卡、工具栏与 transcript/messages/composer 的留白。所有文字、账号/连接/后端、授权与stop/query动作及原handler/disabled/UNKNOWN条件保留，没有隐藏或折叠恢复控件，字号始终未改，后续五组spacing未再改变第一候选的textarea/按钮尺寸或按钮padding；没有修改窗口1220×800 DIP/zoom0.9、消息硬最小高度、overflow或原滚动。第二候选仅在第一候选实际失败后进一步减少五组空白，当前page SHA `4a3347e4…`、CSS `60a48ab3…`。两次renderer都由原Vite配置从对应真实源码构建，未修改编译后的JS。main复用已审诊断 `7c9f850f…` 和外置有限Node观测器，字节不同于旧产品main `ccb95380…`；preload/安全边界/10秒创建超时/retries0不变，本阅读夹具无Python创建/C-profile，不作性能基准。
+
+第一候选 `summary-reading-closure-1` 实际SDK1、发送前持久UNKNOWN1，正常完成S prepare/revalidate/accept与backend durable completed。tenant摘要消息区232px、codex提交前194px、持有回复时130px，**完成后162px，未达200px门槛**。原messages真实wheel的首段固定命令失败 `INPUT_READING_MARKER_NOT_REACHED`；随后仅读首短段交集14.187px、scrollTop34.444。首段在scrollTop0时底部约位于消息区内210.260px，162px下不能同时满足atStart与首段完整可见，不能据此称首段在任意滚动位置都不可读。中段15次、尾段14次原wheel后各短段完整可见/命中、尾部边界成立，只是部分阅读证据。首失败未重试，原账号/注销/登录页与正常退出另有实际回执。
+
+第二候选 `summary-reading-closure-2` 实际tenant摘要298px、codex提交前 **260px**、create在途及失败态 **204px**，相关控件和固定状态区有完整裁剪交集/命中；这不是completed阅读通过。唯一新请求在Node原 `session.create` 进入后 **10002.9729ms** 精确触发源码固定10秒timer reject，timeout布尔为true、connectionState为open；相同socket/RPC/conversation的成功响应帧在reject后 **2105.0218ms** 才到达，原Promise未resolve。main unavailable / `LOCAL_TEXT_UNAVAILABLE`；S只有prepare200=1，无revalidate/accept；SDK0、发送前UNKNOWN计数0，无held/release，`response_entries`尚未产生，回执记null/不可用，不伪填0。该分型不证明Python延迟原因、SQLite锁或历史第三次create原因，也不代表故障已修复。
+
+第二候选仅实际UI1至8与quit40。UI8为quit前仅读：answerCount0、三个marker均未渲染、toolbar unavailable完整可见，原query可见但未点击；没有completed答复、首/中/尾wheel、stop、account/logout/login或旧SID查询动作。root先等待SDK held未出现，没有因该等待发UI8或release；后来实际UI8已保存，但同次多文件采集报 `OTHER`，具体原因未捕获，未产生当时计划的snapshot或UI9至11，也未发新业务请求。退出后稳定重采final，明确UI8在quit前、其他最终文件在quit后，不推断产品或解析错误。controller/M/S各exit0；第二候选13个、第一候选11个已录PID/name/CreationDate及controller有限复核无匹配，不扩大为全历史进程或每个后代退出码为0。
+
+两份最终本地回执以不可变 `executed-source` 保存3个已审源码字节，避免未来合法源码变化破坏历史追溯：
+
+- `.cache/audits/p2-03-02-main-authority-20261022/.agent_tmp/summary-reading-closure-1/native-reading-results-2.json`，SHA256 `859e07682a4d898c31b53b1fa52a74d73313ead7c962beee8462eef6097ec9fc`，58绑定；保留原时点回执 `c87c0251…`，未修订失败事实。
+- `.cache/audits/p2-03-02-main-authority-20261022/.agent_tmp/summary-reading-closure-2/native-reading-results-1.json`，SHA256 `9947b835bac646bd593e74a3592dca9a75f2ee8c624b7578a219c17e5b93e111`，47绑定。
+
+Source与Security已各自实际核验两份最终回执全部绑定hash/字节数一致，仅接受上述有限结论。组件23/23、renderer类型exit0来自第一class候选Builder原工具回执；第二次纯CSS留白未重跑，不能证明原生几何。新两次真实Vite构建和对应源码已绑定。本轮尚未完成200px完成态与首/中/尾联合阅读验收，不提高timer、重试、替代请求或缩短/换答复凑通过。下一步仍严格在本03-02诊断原create返回断点，不回写历史根因。此前 `c227f148…` scoped stop/query接受保持独立，不重旧包。无真实OAuth/模型网络、PG/RLS、全owner矩阵、下一Gate、部署或发布；P2-03-02/Gates与二期未完成，提交/推送不自动暂停研发。
+
 ## 2026-10-23 P2-03-02R3 创建返回与原页面停止/查询闭合（最新）
 
 当前唯一具体项为 **P2-03-02R3 / CREATE_RETURN_AND_NATIVE_STOP_CLOSURE**，本轮结果 **SCOPED_NATIVE_STOP_QUERY_VALIDATED_HISTORICAL_CREATE_PENDING**。基于 M `b06fb5b10` / S `14aeec9e`，没有修改生产源码、正式测试、请求超时或重试策略。新鲜隔离 lane `native-stop-closure-1` 复用 attempt-7 renderer/preload；诊断 main 从固定原源码真实构建，仅一个精确 import alias 加入审计观测，SHA256 `7c9f850f…`，不是旧产品 main `ccb95380…` 的相同字节。原 class、Promise、响应与 coroutine 对象及调用参数保持，单独有限观测开销并非零。

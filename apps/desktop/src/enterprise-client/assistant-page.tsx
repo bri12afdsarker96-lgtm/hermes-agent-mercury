@@ -679,18 +679,18 @@ function AssistantSessionPage({
         )}
 
         <main className={separatedNavigation ? 'hesc-ai-chat-column' : undefined}>
-          <div className="hesc-card">
+          <div className="hesc-card hesc-ai-backend-card">
             <label className="hesc-ai-select-label" htmlFor="enterprise-assistant-backend">运行后端
               <select id="enterprise-assistant-backend" value={backendId} disabled={frozen || submitting || Boolean(fixedChoice)}
                 onChange={event => changeBackend(event.target.value as EnterpriseAssistantBackendId)}>
                 {visibleBackends.map(backend => <option key={backend.backend_id} value={backend.backend_id}>{backend.label}</option>)}
               </select>
             </label>
-            <p className="hesc-muted-copy">配置：{fixedChoice?.configuration_id ?? catalogChoice?.configuration_id ?? '待选择'} · 模型：{fixedChoice?.model ?? catalogChoice?.model ?? backendOption?.model ?? (backendId === 'codex' ? CODEX_SOFTWARE_DEFAULTS.model : '待选择')}
+            <p className="hesc-muted-copy hesc-ai-backend-metadata">配置：{fixedChoice?.configuration_id ?? catalogChoice?.configuration_id ?? '待选择'} · 模型：{fixedChoice?.model ?? catalogChoice?.model ?? backendOption?.model ?? (backendId === 'codex' ? CODEX_SOFTWARE_DEFAULTS.model : '待选择')}
               {' · '}调用方式：{fixedChoice?.runtime_protocol ?? catalogChoice?.runtime_protocol ?? backendOption?.runtime_protocol ?? '待选择'}
               {' · '}推理强度：{fixedChoice?.reasoning_effort ?? catalogChoice?.reasoning_effort ?? backendOption?.reasoning_effort ?? (backendId === 'codex' ? CODEX_SOFTWARE_DEFAULTS.reasoning_effort : '默认')}</p>
             {!modelBusy && !backendReady ? <p role="status">{unavailableReason}</p> : null}
-            {backendId === 'codex' && runtime?.localText ? <div className="hesc-toolbar">
+            {backendId === 'codex' && runtime?.localText ? <div className="hesc-toolbar hesc-ai-local-actions">
               <button type="button" className="hesc-action" disabled={frozen || submitting || local.state.state === 'connecting'} onClick={() => void local.command('connect')}>连接自己的 ChatGPT 账号</button>
               <button type="button" className="hesc-action" disabled={frozen} onClick={() => void local.refresh()}>检查本机连接</button>
               {local.state.state === 'connecting' ? <button type="button" className="hesc-action" onClick={() => void local.command('cancelLogin')}>取消登录</button> : null}
@@ -709,8 +709,8 @@ function AssistantSessionPage({
                 }).catch(() => {if (foregroundConversation.current === activeConversation) {setError(assistantBackendReason('LOCAL_TEXT_RESULT_UNKNOWN'))}}).finally(() => setSubmitting(false))
               }}>查询原请求</button> : null}
             </div> : null}
-            {fixedChoice ? <p className="hesc-muted-copy">此对话已固定后端、配置和人设；更换时请新建对话。</p> : null}
-            {mode !== 'chat' && mode !== 'customer_reply' ? <button className="hesc-action" type="button" disabled={frozen || submitting}
+            {fixedChoice ? <p className="hesc-muted-copy hesc-ai-backend-fixed-note">此对话已固定后端、配置和人设；更换时请新建对话。</p> : null}
+            {mode !== 'chat' && mode !== 'customer_reply' ? <button className="hesc-action hesc-ai-new-processing" type="button" disabled={frozen || submitting}
               onClick={() => {restartAssistantMode(session, mode); setError(null)}}>新建处理</button> : null}
           </div>
           {separatedNavigation ? (

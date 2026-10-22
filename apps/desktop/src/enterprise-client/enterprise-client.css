@@ -2235,6 +2235,66 @@
     overflow-y: auto;
     overscroll-behavior: contain;
   }
+
+  .hesc-assistant-page[data-layout='conversation-workspace'][data-mode='summarize'] .hesc-ai-backend-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    flex: 0 0 auto;
+    gap: 4px 12px;
+    padding: 8px;
+  }
+
+  .hesc-assistant-page[data-layout='conversation-workspace'][data-mode='summarize'] :is(.hesc-ai-backend-card, .hesc-ai-chat-toolbar) .hesc-ai-select-label {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .hesc-assistant-page[data-layout='conversation-workspace'][data-mode='summarize'] :is(.hesc-ai-backend-card, .hesc-ai-chat-toolbar) .hesc-ai-select-label select {
+    width: auto;
+    flex: 1;
+  }
+
+  .hesc-assistant-page[data-layout='conversation-workspace'][data-mode='summarize'] :is(.hesc-ai-backend-metadata, .hesc-ai-backend-fixed-note, .hesc-ai-local-actions, .hesc-ai-backend-card > [role='status']) {
+    grid-column: 1 / -1;
+    margin: 0;
+  }
+
+  .hesc-assistant-page[data-layout='conversation-workspace'][data-mode='summarize'] .hesc-ai-local-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .hesc-assistant-page[data-layout='conversation-workspace'][data-mode='summarize'] .hesc-ai-new-processing {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+  }
+
+  .hesc-assistant-page[data-layout='conversation-workspace'][data-mode='summarize'] :is(.hesc-ai-local-actions .hesc-action, .hesc-ai-new-processing) {
+    padding: 6px 10px;
+  }
+
+  .hesc-assistant-page[data-layout='conversation-workspace'][data-mode='summarize'] .hesc-ai-chat-toolbar {
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  .hesc-assistant-page[data-layout='conversation-workspace'][data-mode='summarize'] .hesc-agent-transcript {
+    padding-block: 8px;
+  }
+
+  .hesc-assistant-page[data-layout='conversation-workspace'][data-mode='summarize'] .hesc-agent-messages {
+    margin-block: 4px 6px;
+  }
+
+  .hesc-assistant-page[data-layout='conversation-workspace'][data-mode='summarize'] .hesc-agent-composer {
+    gap: 4px;
+    padding-top: 8px;
+  }
 }
 
 @media (width < 1360px) {
