@@ -1,5 +1,15 @@
 # Mercury 二期企业集成基线（P2-00B）
 
+## 2026-10-22 P2-03-02R 阶段检查点与暂停
+
+按用户本次“将进度提交到 GitHub”及阶段收尾指令，保存当前代码与可恢复的进度后暂停。状态为 **PAUSED_BY_USER / PARTIAL_CHECKPOINT**，P2-03-02R **NOT_COMPLETE**，Qualification/Product Gates **NOT_PASSED**；不进入 03-03，不部署或再发布。
+
+本轮已形成限定实施共识，新增 SIWC 独立授权存储/签名校验/轮换与退出基础，以及复用既有消费者的单次 no-tools Responses 入口。服务端新增独立于租户模型配置的摘要 context 准备、重新校权及完整结果净化接口。软件默认仍为 gpt-6-luna / medium，用户自行连接自己的账号，个人模型身份不替代企业权限。
+
+收尾复测：M 认证 27、严格文本流 27、既有 Spotify 3、既有流消费者 2，均通过；S 当前 context HTTP 用例 12 通过。认证与模型网络均使用本地 fixture/MockTransport，没有真实 OAuth 或模型请求。独立安全审查的六项反例已作修订，但完整修订后的独立闭合审查尚未完成，不把基础测试通过写成端到端通过。
+
+仍缺 web OAuth 入口、严格运行解析接缝、持久化单次请求保护、gateway/main/preload/UI 接线与实际新身份/新请求验证。现有客户端没有启用这些基础函数。具体进度、失败证据及恢复清单见 [阶段检查点](phase2-03-02-checkpoint.md)；下方 10 月 5 日各条保留为当时历史。
+
 ## 2026-10-05 P2-03-02 进度封存并暂停（用户指令）
 
 用户要求立即收尾、提交 Git 并暂停开发。当前为 **PAUSED_BY_USER / PARTIAL_CHECKPOINT**，不是 P2-03-02 完成或 Gate 通过。此前 P2-03-01 后端选择与“用户自行接入”修正已获监督接受；本轮仅增加 M 既有 app-server Session 的可选严格关联/终态事实、观察器失败关闭及 server-request 拒绝策略，53 项协议模拟测试通过。该策略未接入企业 UI，配置关闭 ACK 不能证明本机原生能力已经隔离。

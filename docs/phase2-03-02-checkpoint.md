@@ -1,5 +1,37 @@
 # P2-03-02 暂停检查点
 
+## 2026-10-22 当前检查点
+
+用户要求将进度提交到 GitHub，并在阶段收尾后暂停开发。当前为 **PAUSED_BY_USER / PARTIAL_CHECKPOINT**；P2-03-02R **NOT_COMPLETE**，Qualification/Product Gates **NOT_PASSED**。下方 2026-10-05 记录保持原时点含义，本节覆盖当前实施状态，不覆盖旧证据。
+
+### 本轮保存范围
+
+- M：`hermes_cli/auth.py` 在现有锁、原子存储、PKCE 和 loopback 生命周期上增加显式 SIWC 授权基础；限定 owned profile，验证签名/issuer/audience/nonce/subject/scope，Windows 使用 CurrentUser DPAPI，轮换以 generation/revision 防迟到覆盖，未知刷新不重放，退出区分本地清除和远端撤销确认。
+- M：`agent/codex_runtime.py` 在既有事件消费者中增加可选严格策略及单次 SDK 入口，固定 public Responses、gpt-6-luna/medium、空工具、store=false、stream=true、零重试；要求关联真实终态，断流/取消保持未知，拒绝工具输出，不进入 AIAgent/Relay。修订包含 SDK 私有正文日志过滤和有限错误转换。
+- M：新增 `tests/hermes_cli/test_auth_siwc.py`、`tests/agent/test_owned_text_responses.py`。本轮未修改 web OAuth、runtime resolver、gateway、Electron 或 renderer 接线；基础函数尚未通过产品入口启用。
+- S：`hermes_devices/enterprise/tenant_assistant.py` 抽取既有纯文本 messages 准备，新增有界摘要准备和结果出口；`hermes_devices/webserver.py` 增加 `/api/tenant-ai-assist/context` 的 status/prepare/revalidate/accept，每次使用当前企业 HTTP 身份校权和版本化关联 hash，不读取租户模型凭据、不新增会话表、不执行模型或业务写入；`tests/test_tenants_e2e.py` 增加临时真实 HTTP 验证。
+
+限定实施共识为 **READY_FOR_SCOPED_IMPLEMENTATION**，仅支持当前接缝施工，不是 runtime 或 Gate 通过。上游固定 pin `dce4abe9172d6478bed73525efdd49e6d10bed03` 和 T4 D1–D9 保持；D3 收窄为明确 SIWC grant 适配，D5 复用现有消费者，不新建通用 auth/session/RPC/SSE/executor。
+
+### 收尾验证与限制
+
+本次当前源码复测：认证 **27 passed**、严格文本流 **27 passed**、既有 Spotify **3 passed**、既有流消费者 **2 passed**；S context 临时 HTTP **12 passed**，均 exit 0，JUnit 均 0 failure/error/skip。按测试文件分列，不能替代全量回归、实际 OAuth、真实模型访问或完整企业调用链。DPAPI、签名 JWT、loopback 为本地真实机制验证，令牌/模型网络为合成 fixture 或 MockTransport。
+
+独立安全审查原状态 **CHANGES_REQUIRED**：六项原反例分别涉及 SDK DEBUG 正文、缺 ID 终态、提交前取消、原始 vendor 异常、退出后刷新和解密后坏结构。当前修订已处理这些分支；原反例最后复跑为 **5 passed / 1 failed**，失败项因提交前取消现在直接抛出有限 `TEXT_OBSERVATION_STOPPED`，旧用例未捕获该异常。原失败和测试原件保留；尚未完成该用例合同调整及完整修订后的独立复核，不能宣称六项审查均通过。并发日志隔离、损坏 store 各入口与既有回调错误码兼容仍需恢复后检查。
+
+本地证据在 `.cache/audits/p2-03-02-resume-20261022/`：`reuse-consensus.json`、`wire-contract.json`、`checkpoint-auth-tests.xml`、`checkpoint-stream-tests.xml`、`checkpoint-spotify-regression.xml`、`checkpoint-consumer-regression.xml`、`checkpoint-server-tests.xml` 及原安全反例结果。审计、临时依赖、学习记录、日志、发布包及无关工作区改动不进入本次提交。
+
+### 恢复顺序
+
+1. 对当前 auth/SSE 修订完成安全反例和兼容性复核，不把本次检查点当成验收批准。
+2. 在既有 OAuth session/HandlerRegistry/SessionDB/可信本机连接上完成 owned 登录入口、严格 resolver、物理请求前持久化 UNKNOWN 单次保护、generic session 操作隔离与 sender/main-frame/account generation fencing。
+3. 接入 main/preload/UI；复用当前 S prepare/revalidate/accept，结果先缓冲再经当前权限和 C4 出口，支持复制官方登录链接、取消 pending、有限状态和停止观察。renderer 不提供命令、路径、profile 或凭据。
+4. 先完成集成验证，再通过明确选定的 owned 登录入口验证新账号与一次全新请求；旧 02A UNKNOWN 和旧 OAuth URL 不重放。仍缺登录时只请求实际必要的当前登录动作。
+
+本轮没有新增真实登录、真实模型调用、部署或在线更新发布。提交及推送仅保存已有阶段进度，不改变后续开发暂停状态。
+
+## 2026-10-05 历史检查点
+
 2026-10-05，用户明确要求立即收尾、将进度提交 Git 并暂停。状态：**PAUSED_BY_USER / PARTIAL_CHECKPOINT**。P2-03-02 **NOT_COMPLETE**；Qualification/Product Gates **NOT_PASSED**。不继续 03-03。
 
 ## 已保存的进度

@@ -28,6 +28,7 @@ import stat
 import sys
 import base64
 import hashlib
+import hmac
 import subprocess
 import threading
 import time
@@ -3033,12 +3034,17 @@ def _spotify_validate_redirect_uri(redirect_uri: str) -> tuple[str, int, str]:
     return host, parsed.port, parsed.path or "/"
 
 
-def _make_spotify_callback_handler(expected_path: str) -> tuple[type[BaseHTTPRequestHandler], dict[str, Any]]:
+def _make_spotify_callback_handler(
+    expected_path: str, *, expected_state: str | None = None,
+    product_name: str = "Spotify",
+) -> tuple[type[BaseHTTPRequestHandler], dict[str, Any]]:
     result: dict[str, Any] = {
         "code": None,
         "state": None,
         "error": None,
         "error_description": None,
+        "client_id": None,
+        "scope": None,
     }
 
     class _SpotifyCallbackHandler(BaseHTTPRequestHandler):
@@ -3051,18 +3057,31 @@ def _make_spotify_callback_handler(expected_path: str) -> tuple[type[BaseHTTPReq
                 return
 
             params = parse_qs(parsed.query)
+            if expected_state is not None:
+                valid = (
+                    all(len(params.get(key, [])) <= 1 for key in
+                        ("code", "state", "error", "client_id", "scope"))
+                    and hmac.compare_digest(str(params.get("state", [""])[0]).encode(), expected_state.encode())
+                    and bool(params.get("code")) != bool(params.get("error"))
+                )
+                if not valid or result["code"] or result["error"]:
+                    self.send_response(400)
+                    self.end_headers()
+                    return
             result["code"] = params.get("code", [None])[0]
             result["state"] = params.get("state", [None])[0]
             result["error"] = params.get("error", [None])[0]
             result["error_description"] = params.get("error_description", [None])[0]
+            result["client_id"] = params.get("client_id", [None])[0]
+            result["scope"] = params.get("scope", [None])[0]
 
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             if result["error"]:
-                body = "<html><body><h1>Spotify authorization failed.</h1>You can close this tab.</body></html>"
+                body = f"<html><body><h1>{product_name} authorization failed.</h1>You can close this tab.</body></html>"
             else:
-                body = "<html><body><h1>Spotify authorization received.</h1>You can close this tab.</body></html>"
+                body = f"<html><body><h1>{product_name} authorization received.</h1>You can close this tab.</body></html>"
             self.wfile.write(body.encode("utf-8"))
 
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
@@ -3071,13 +3090,26 @@ def _make_spotify_callback_handler(expected_path: str) -> tuple[type[BaseHTTPReq
     return _SpotifyCallbackHandler, result
 
 
-def _spotify_wait_for_callback(
+def _oauth_wait_for_callback(
     redirect_uri: str,
     *,
     timeout_seconds: float = 180.0,
+    expected_state: str | None = None,
+    on_ready=None,
+    cancel_check=None,
+    product_name: str = "Spotify",
+    provider: str = "spotify",
+    ephemeral_port: bool = False,
 ) -> dict[str, Any]:
-    host, port, path = _spotify_validate_redirect_uri(redirect_uri)
-    handler_cls, result = _make_spotify_callback_handler(path)
+    if ephemeral_port:
+        parsed = urlparse(redirect_uri)
+        if parsed.scheme != "http" or parsed.hostname != "127.0.0.1" or parsed.path != "/auth/callback":
+            raise AuthError("Invalid loopback callback", provider=provider, code="callback_invalid")
+        host, port, path = "127.0.0.1", parsed.port or 0, parsed.path
+    else:
+        host, port, path = _spotify_validate_redirect_uri(redirect_uri)
+    handler_cls, result = _make_spotify_callback_handler(
+        path, expected_state=expected_state, product_name=product_name)
 
     class _ReuseHTTPServer(HTTPServer):
         allow_reuse_address = True
@@ -3086,16 +3118,20 @@ def _spotify_wait_for_callback(
         server = _ReuseHTTPServer((host, port), handler_cls)
     except OSError as exc:
         raise AuthError(
-            f"Could not bind Spotify callback server on {host}:{port}: {exc}",
-            provider="spotify",
-            code="spotify_callback_bind_failed",
+            "Could not bind local authorization callback",
+            provider=provider,
+            code="callback_bind_failed",
         ) from exc
 
     thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.1}, daemon=True)
     thread.start()
     deadline = time.monotonic() + max(5.0, timeout_seconds)
     try:
+        if on_ready is not None:
+            on_ready(f"http://{host}:{server.server_port}{path}")
         while time.monotonic() < deadline:
+            if cancel_check is not None and cancel_check():
+                raise AuthError("Authorization cancelled", provider=provider, code="oauth_cancelled")
             if result["code"] or result["error"]:
                 return result
             time.sleep(0.1)
@@ -3104,10 +3140,14 @@ def _spotify_wait_for_callback(
         server.server_close()
         thread.join(timeout=1.0)
     raise AuthError(
-        "Spotify authorization timed out waiting for the local callback.",
-        provider="spotify",
-        code="spotify_callback_timeout",
+        "Authorization callback timed out",
+        provider=provider,
+        code="callback_timeout",
     )
+
+
+def _spotify_wait_for_callback(redirect_uri: str, *, timeout_seconds: float = 180.0) -> dict[str, Any]:
+    return _oauth_wait_for_callback(redirect_uri, timeout_seconds=timeout_seconds)
 
 
 def _spotify_token_payload_to_state(
@@ -9367,3 +9407,339 @@ def logout_command(args) -> None:
             print("Model provider configuration was unchanged.")
     else:
         print(f"No auth state found for {provider_name}.")
+
+
+# SIWC is a distinct grant. These helpers deliberately never use the CLI,
+# singleton/global provider resolver, credential pool, or active_provider.
+SIWC_PROVIDER = "openai-siwc"
+SIWC_RESOURCE = "https://api.openai.com/v1"
+SIWC_ISSUER = "https://auth.openai.com"
+SIWC_TOKEN_ENDPOINT = SIWC_ISSUER + "/api/accounts/oauth/token"
+SIWC_AUTHORIZE_ENDPOINT = SIWC_ISSUER + "/api/accounts/authorize"
+SIWC_JWKS_ENDPOINT = SIWC_ISSUER + "/.well-known/jwks.json"
+SIWC_REVOKE_ENDPOINT = SIWC_ISSUER + "/api/accounts/oauth/revoke"
+SIWC_SCOPES = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct"
+
+
+def _siwc_error(code: str) -> AuthError:
+    return AuthError("Local ChatGPT connection unavailable", provider=SIWC_PROVIDER,
+                     code=code, relogin_required=code != "siwc_busy")
+
+
+def siwc_auth_path(profile: str) -> Path:
+    import re
+    if not isinstance(profile, str) or not re.fullmatch(r"enterprise-text-[a-f0-9]{32}", profile):
+        raise _siwc_error("siwc_owner_invalid")
+    return get_hermes_home() / "profiles" / profile / "auth.json"
+
+
+def _siwc_dpapi(data: bytes, entropy: bytes, *, decrypt: bool = False) -> bytes:
+    """CurrentUser DPAPI only. Never fall back to plaintext on Windows."""
+    import ctypes
+    class Blob(ctypes.Structure):
+        _fields_ = [("size", ctypes.c_ulong), ("data", ctypes.POINTER(ctypes.c_ubyte))]
+    buffers = [ctypes.create_string_buffer(value) for value in (data, entropy)]
+    incoming, extra = [Blob(len(value), ctypes.cast(buf, ctypes.POINTER(ctypes.c_ubyte)))
+                       for value, buf in zip((data, entropy), buffers)]
+    outgoing = Blob()
+    crypt = ctypes.WinDLL("crypt32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    function = crypt.CryptUnprotectData if decrypt else crypt.CryptProtectData
+    function.argtypes = [ctypes.POINTER(Blob), ctypes.c_void_p, ctypes.POINTER(Blob),
+                        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(Blob)]
+    function.restype = ctypes.c_int
+    kernel.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel.LocalFree.restype = ctypes.c_void_p
+    try:
+        if not function(ctypes.byref(incoming), None, ctypes.byref(extra), None,
+                        None, 1, ctypes.byref(outgoing)):
+            raise _siwc_error("siwc_storage_unavailable")
+        if outgoing.size > 1_048_576:
+            raise _siwc_error("siwc_storage_unavailable")
+        return ctypes.string_at(outgoing.data, outgoing.size)
+    finally:
+        if outgoing.data:
+            kernel.LocalFree(outgoing.data)
+
+
+def _siwc_seal(profile: str, registration: str, record: dict) -> dict:
+    raw = json.dumps(record, separators=(",", ":")).encode("utf-8")
+    if os.name == "nt":
+        protected = _siwc_dpapi(raw, (profile + ":" + registration).encode())
+        return {"dpapi": base64.b64encode(protected).decode("ascii")}
+    return {"record": record}
+
+
+def _siwc_unseal(profile: str, registration: str, stored: dict) -> dict:
+    try:
+        if os.name == "nt":
+            raw = _siwc_dpapi(base64.b64decode(stored["dpapi"], validate=True),
+                              (profile + ":" + registration).encode(), decrypt=True)
+            record = json.loads(raw)
+        else:
+            record = stored["record"]
+        import math
+        if (not isinstance(record, dict)
+                or any(not isinstance(record.get(key), str) for key in
+                       ("issuer", "subject", "client_id", "resource", "access_token", "refresh_token", "host_id"))
+                or record["issuer"] != SIWC_ISSUER or record["resource"] != SIWC_RESOURCE
+                or not record["subject"] or not record["client_id"] or record["client_id"] == "dynamic_agent_client"
+                or not isinstance(record.get("scopes"), list)
+                or not all(isinstance(value, str) for value in record["scopes"])
+                or type(record.get("expires_at")) not in (int, float)
+                or not math.isfinite(record["expires_at"])):
+            raise ValueError("credential shape")
+        return dict(record)
+    except Exception:
+        raise _siwc_error("siwc_storage_unavailable") from None
+
+
+def _siwc_state(store: dict) -> dict:
+    value = store.get("providers", {}).get(SIWC_PROVIDER)
+    if value is None:
+        return {"schema": 1, "host_id": "urn:uuid:" + str(uuid.uuid4()),
+                "generation": 0, "selected": None, "accounts": {}}
+    if not isinstance(value, dict) or value.get("schema") != 1 or not isinstance(value.get("accounts"), dict):
+        raise _siwc_error("siwc_storage_unavailable")
+    return dict(value)
+
+
+def _siwc_write(store: dict, state: dict, path: Path) -> None:
+    _store_provider_state(store, SIWC_PROVIDER, state, set_active=False)
+    _save_auth_store(store, target_path=path)
+
+
+def _siwc_target(profile: str) -> Path:
+    path = siwc_auth_path(profile)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    secure_parent_dir(path)
+    return path
+
+
+def siwc_status(profile: str) -> dict:
+    path = siwc_auth_path(profile)
+    if not path.exists():
+        return {"state": "disconnected", "generation": 0, "registration_id": None}
+    with _auth_store_lock(target_path=path):
+        state = _siwc_state(_load_auth_store(path))
+        registration = state.get("selected")
+        account = state["accounts"].get(registration)
+        public = {"generation": state["generation"], "registration_id": registration}
+        if not account:
+            return {**public, "state": "disconnected"}
+        record = _siwc_unseal(profile, registration, account["credential"])
+        if not record.get("access_token") and not record.get("refresh_token"):
+            return {**public, "state": "disconnected"}
+        ready = bool(record.get("access_token") and record.get("refresh_token")
+                     and "chatgpt.tokens.use.direct" in record.get("scopes", [])
+                     and not account.get("refresh_pending"))
+        return {**public, "state": "ready" if ready else "reconnect_required"}
+
+
+def siwc_prepare_login(profile: str, *, new_account: bool = False) -> dict:
+    path = _siwc_target(profile)
+    with _auth_store_lock(target_path=path):
+        store = _load_auth_store(path)
+        state = _siwc_state(store)
+        registration = None if new_account else state.get("selected")
+        record = None
+        if registration:
+            record = _siwc_unseal(profile, registration, state["accounts"][registration]["credential"])
+        _siwc_write(store, state, path)
+        return {"profile": profile, "generation": state["generation"],
+                "selected": state.get("selected"), "registration_id": registration,
+                "client_id": record["client_id"] if record else "dynamic_agent_client",
+                "subject": record["subject"] if record else None,
+                "host_id": state["host_id"], "state": uuid.uuid4().hex,
+                "nonce": uuid.uuid4().hex, "verifier": _oauth_pkce_code_verifier()}
+
+
+def siwc_authorize_url(attempt: dict, redirect_uri: str) -> str:
+    params = {"client_id": attempt["client_id"], "ext_agent_host_id": attempt["host_id"],
+              "response_type": "code", "redirect_uri": redirect_uri, "scope": SIWC_SCOPES,
+              "resource": SIWC_RESOURCE, "state": attempt["state"], "nonce": attempt["nonce"],
+              "code_challenge_method": "S256", "code_challenge": _oauth_pkce_code_challenge(attempt["verifier"])}
+    if attempt["client_id"] == "dynamic_agent_client":
+        params["agent_name_hint"] = "Hermes 企业助手"
+    # Deliberately omit optional id_token_hint: this URL is safe to copy.
+    return SIWC_AUTHORIZE_ENDPOINT + "?" + urlencode(params)
+
+
+def _siwc_http(url: str, *, form: dict | None = None) -> dict:
+    if url not in {SIWC_JWKS_ENDPOINT, SIWC_TOKEN_ENDPOINT, SIWC_REVOKE_ENDPOINT}:
+        raise _siwc_error("siwc_endpoint_invalid")
+    with httpx.Client(timeout=15.0, trust_env=False, follow_redirects=False) as client:
+        response = client.get(url) if form is None else client.post(url, data=form)
+        if response.status_code != 200 or len(response.content) > 1_048_576:
+            raise _siwc_error("siwc_authorization_failed")
+        return response.json() if response.content else {}
+
+
+def _siwc_verify_id_token(token: str, client_id: str, nonce: str | None = None) -> dict:
+    import jwt
+    try:
+        header = jwt.get_unverified_header(token)
+        if header.get("alg") != "RS256" or not header.get("kid") or header.get("jku") or header.get("x5u"):
+            raise ValueError("algorithm")
+        keys = _siwc_http(SIWC_JWKS_ENDPOINT)["keys"]
+        candidates = [key for key in keys if key.get("kid") == header["kid"] and key.get("kty") == "RSA"]
+        if len(candidates) != 1:
+            raise ValueError("key")
+        key = jwt.PyJWK.from_dict(candidates[0]).key
+        claims = jwt.decode(token, key, algorithms=["RS256"], audience=client_id,
+                            issuer=SIWC_ISSUER, leeway=30,
+                            options={"require": ["iss", "aud", "exp", "iat", "sub"] + (["nonce"] if nonce else [])})
+        if not isinstance(claims.get("sub"), str) or not claims["sub"]:
+            raise ValueError("subject")
+        if nonce is not None and not hmac.compare_digest(str(claims.get("nonce", "")), nonce):
+            raise ValueError("nonce")
+        return claims
+    except Exception:
+        raise _siwc_error("siwc_identity_invalid") from None
+
+
+def _siwc_token_record(payload: dict, client_id: str, *, nonce=None, previous=None) -> dict:
+    scopes = str(payload.get("scope") or "").split()
+    if not {"chatgpt.tokens.use.direct", "resource.invoke"}.issubset(scopes):
+        raise _siwc_error("siwc_permission_missing")
+    if str(payload.get("token_type", "")).lower() != "bearer":
+        raise _siwc_error("siwc_authorization_failed")
+    for key in ("access_token", "refresh_token"):
+        if not isinstance(payload.get(key), str) or not 1 <= len(payload[key]) <= 65536:
+            raise _siwc_error("siwc_authorization_failed")
+    expiry = payload.get("expires_in")
+    if type(expiry) not in (int, float) or not 0 < expiry <= 86400:
+        raise _siwc_error("siwc_authorization_failed")
+    if payload.get("id_token"):
+        claims = _siwc_verify_id_token(payload["id_token"], client_id, nonce)
+    elif previous is not None:
+        claims = {"sub": previous["subject"]}
+    else:
+        raise _siwc_error("siwc_identity_invalid")
+    if previous is not None and claims["sub"] != previous["subject"]:
+        raise _siwc_error("siwc_identity_invalid")
+    return {"issuer": SIWC_ISSUER, "subject": claims["sub"], "client_id": client_id,
+            "resource": SIWC_RESOURCE, "scopes": scopes,
+            "access_token": payload["access_token"], "refresh_token": payload["refresh_token"],
+            "id_token": payload.get("id_token") or (previous or {}).get("id_token"),
+            "expires_at": time.time() + expiry, "earliest_refresh_at": payload.get("earliest_refresh_at")}
+
+
+def siwc_exchange_login(attempt: dict, callback: dict, redirect_uri: str) -> dict:
+    if not hmac.compare_digest(str(callback.get("state") or "").encode(), attempt["state"].encode()) or callback.get("error"):
+        raise _siwc_error("siwc_authorization_failed")
+    selected_client = attempt["client_id"]
+    issued = callback.get("client_id") or (selected_client if selected_client != "dynamic_agent_client" else None)
+    if (not isinstance(issued, str) or not 1 <= len(issued) <= 256 or issued == "dynamic_agent_client"
+            or any(ord(c) <= 32 for c in issued)
+            or (selected_client != "dynamic_agent_client" and issued != selected_client)
+            or not isinstance(callback.get("code"), str)):
+        raise _siwc_error("siwc_registration_incomplete")
+    payload = _siwc_http(SIWC_TOKEN_ENDPOINT, form={"grant_type": "authorization_code", "client_id": issued,
+        "code": callback["code"], "code_verifier": attempt["verifier"],
+        "redirect_uri": redirect_uri, "resource": SIWC_RESOURCE})
+    record = _siwc_token_record(payload, issued, nonce=attempt["nonce"])
+    if attempt.get("subject") and record["subject"] != attempt["subject"]:
+        raise _siwc_error("siwc_identity_invalid")
+    record["host_id"] = attempt["host_id"]
+    return record
+
+
+def siwc_commit_login(attempt: dict, record: dict) -> dict:
+    profile = attempt["profile"]
+    path = _siwc_target(profile)
+    registration = hashlib.sha256((record["client_id"] + ":" + record["subject"]).encode()).hexdigest()[:32]
+    with _auth_store_lock(target_path=path):
+        store = _load_auth_store(path)
+        state = _siwc_state(store)
+        if state["generation"] != attempt["generation"] or state.get("selected") != attempt["selected"]:
+            raise _siwc_error("siwc_connection_changed")
+        revision = state["accounts"].get(registration, {}).get("revision", 0) + 1
+        state["accounts"][registration] = {"revision": revision,
+            "credential": _siwc_seal(profile, registration, record), "refresh_pending": False}
+        state["selected"] = registration
+        state["generation"] += 1
+        _siwc_write(store, state, path)
+    return {"registration_id": registration, "generation": state["generation"], "state": "ready"}
+
+
+def resolve_siwc_runtime_credentials(profile: str, registration: str, generation: int) -> dict:
+    if not isinstance(registration, str) or type(generation) is not int:
+        raise _siwc_error("siwc_connection_changed")
+    path = siwc_auth_path(profile)
+    if not path.exists():
+        raise _siwc_error("siwc_not_connected")
+    with _auth_store_lock(target_path=path):
+        store = _load_auth_store(path)
+        state = _siwc_state(store)
+        if state.get("selected") != registration or state["generation"] != generation:
+            raise _siwc_error("siwc_connection_changed")
+        account = state["accounts"][registration]
+        record = _siwc_unseal(profile, registration, account["credential"])
+        if not record.get("access_token") or not record.get("refresh_token"):
+            raise _siwc_error("siwc_not_connected")
+        if account.get("refresh_pending"):
+            raise _siwc_error("siwc_refresh_unconfirmed")
+        revision = account["revision"]
+        refresh = record["expires_at"] <= time.time() + 60
+        if refresh:
+            earliest = record.get("earliest_refresh_at")
+            if isinstance(earliest, (int, float)) and earliest > time.time():
+                raise _siwc_error("siwc_busy")
+            account["refresh_pending"] = True
+            _siwc_write(store, state, path)
+    if refresh:
+        # A timeout can mean rotation occurred remotely. Keep pending, never
+        # automatically replay the previous refresh token after uncertainty.
+        payload = _siwc_http(SIWC_TOKEN_ENDPOINT, form={"grant_type": "refresh_token",
+            "client_id": record["client_id"], "refresh_token": record["refresh_token"], "resource": SIWC_RESOURCE})
+        replacement = _siwc_token_record(payload, record["client_id"], previous=record)
+        replacement["host_id"] = record["host_id"]
+        with _auth_store_lock(target_path=path):
+            store = _load_auth_store(path)
+            state = _siwc_state(store)
+            current = state["accounts"].get(registration)
+            if (state.get("selected") != registration or state["generation"] != generation
+                    or not current or current["revision"] != revision or not current.get("refresh_pending")):
+                raise _siwc_error("siwc_connection_changed")
+            current.update(credential=_siwc_seal(profile, registration, replacement),
+                           revision=revision + 1, refresh_pending=False)
+            _siwc_write(store, state, path)
+        record = replacement
+    if record.get("resource") != SIWC_RESOURCE or "chatgpt.tokens.use.direct" not in record.get("scopes", []):
+        raise _siwc_error("siwc_permission_missing")
+    return {"provider": SIWC_PROVIDER, "source": "owned-siwc", "base_url": SIWC_RESOURCE,
+            "api_key": record["access_token"], "registration_id": registration, "generation": generation}
+
+
+def siwc_logout(profile: str) -> dict:
+    path = siwc_auth_path(profile)
+    record = None
+    revocation = None
+    if path.exists():
+        with _auth_store_lock(target_path=path):
+            store = _load_auth_store(path)
+            state = _siwc_state(store)
+            registration = state.get("selected")
+            account = state["accounts"].get(registration)
+            if account:
+                record = _siwc_unseal(profile, registration, account["credential"])
+                if record.get("refresh_token"):
+                    revocation = {"token": record["refresh_token"], "token_type_hint": "refresh_token",
+                                  "client_id": record["client_id"]}
+                # Keep validated registration mapping for later authorization,
+                # but no usable token set. Generation fences late workers.
+                record.update(access_token="", refresh_token="", id_token=None)
+                state["accounts"][registration] = {"revision": account["revision"] + 1,
+                    "credential": _siwc_seal(profile, registration, record), "refresh_pending": False}
+            state["generation"] += 1
+            _siwc_write(store, state, path)
+    confirmed = revocation is None
+    if revocation:
+        try:
+            _siwc_http(SIWC_REVOKE_ENDPOINT, form=revocation)
+            confirmed = True
+        except Exception:
+            # Local clearing is final even if the remote outcome is unknown.
+            pass
+    return {"state": "disconnected", "remote_revocation_confirmed": confirmed}

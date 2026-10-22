@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List
 
@@ -1035,6 +1036,66 @@ def _raise_stream_error(event: Any) -> None:
     )
 
 
+class CodexTextProtocolError(RuntimeError):
+    """Finite text-consumer failure; never contains provider payloads."""
+
+    def __init__(self, code="TEXT_PROTOCOL_INVALID"):
+        self.code = code
+        super().__init__(code)
+
+
+def _validate_text_stream_event(event, response_id, model):
+    kind = _event_field(event, "type", "")
+    ordinary = {"response.created", "response.in_progress", "response.completed",
+                "response.failed", "response.incomplete", "response.output_item.added",
+                "response.output_item.done", "response.content_part.added", "response.content_part.done",
+                "response.output_text.delta", "response.output_text.done", "response.output_text.annotation.added"}
+    if kind == "error":
+        # Do not enter _raise_stream_error: its ordinary path imports run_agent.
+        raise CodexTextProtocolError("TEXT_UPSTREAM_ERROR")
+    if kind not in ordinary and not str(kind).startswith("response.reasoning"):
+        raise CodexTextProtocolError("TEXT_FORBIDDEN_OUTPUT")
+    response = _event_field(event, "response")
+    observed = _event_field(response, "id") if response is not None else _event_field(event, "response_id")
+    if kind == "response.created":
+        if not isinstance(observed, str) or not observed or (response_id and observed != response_id):
+            raise CodexTextProtocolError("TEXT_RESPONSE_MISMATCH")
+        response_id = observed
+    elif not response_id or (observed is not None and observed != response_id):
+        raise CodexTextProtocolError("TEXT_RESPONSE_MISMATCH")
+    reported_model = _event_field(response, "model") if response is not None else None
+    if reported_model is not None and reported_model != model:
+        raise CodexTextProtocolError("TEXT_MODEL_MISMATCH")
+    items = []
+    item = _event_field(event, "item")
+    if item is not None:
+        items.append(item)
+    if response is not None:
+        items.extend(_event_field(response, "output", []) or [])
+    for item in items:
+        item_type = _item_field(item, "type", "")
+        if item_type not in {"message", "reasoning"}:
+            raise CodexTextProtocolError("TEXT_FORBIDDEN_OUTPUT")
+        if item_type == "message":
+            if _item_field(item, "role", "assistant") != "assistant":
+                raise CodexTextProtocolError("TEXT_FORBIDDEN_OUTPUT")
+            if any(_item_field(part, "type", "") not in {"output_text", "refusal"}
+                   for part in (_item_field(item, "content", []) or [])):
+                raise CodexTextProtocolError("TEXT_FORBIDDEN_OUTPUT")
+    if kind in _TERMINAL_EVENT_TYPES:
+        if not isinstance(observed, str) or observed != response_id:
+            raise CodexTextProtocolError("TEXT_RESPONSE_MISMATCH")
+        expected = kind.removeprefix("response.")
+        if _event_field(response, "status") != expected:
+            raise CodexTextProtocolError("TEXT_TERMINAL_MISMATCH")
+        if expected == "completed" and (
+            _event_field(response, "error") or _event_field(response, "incomplete_details")
+            or reported_model != model
+        ):
+            raise CodexTextProtocolError("TEXT_TERMINAL_MISMATCH")
+    return response_id
+
+
 def _consume_codex_event_stream(
     event_iter: Any,
     *,
@@ -1045,6 +1106,8 @@ def _consume_codex_event_stream(
     on_first_delta=None,
     on_event=None,
     interrupt_check=None,
+    strict_text: bool = False,
+    max_text_chars: int = 32_000,
 ) -> SimpleNamespace:
     """Consume a Codex Responses SSE event stream and return a final response.
 
@@ -1099,20 +1162,36 @@ def _consume_codex_event_stream(
     terminal_incomplete_details: Any = None
     terminal_error: Any = None
     saw_terminal = False
+    stream_response_id = None
+    terminal_type = None
+    locally_interrupted = False
+    text_chars = 0
 
     for event in event_iter:
+        if strict_text:
+            stream_response_id = _validate_text_stream_event(event, stream_response_id, model)
+            delta = _event_field(event, "delta", "")
+            if isinstance(delta, str):
+                text_chars += len(delta)
+                if text_chars > max_text_chars:
+                    raise CodexTextProtocolError("TEXT_OUTPUT_LIMIT")
         if on_event is not None:
             try:
                 on_event(event)
             except (TimeoutError, InterruptedError):
+                if strict_text:
+                    raise CodexTextProtocolError("TEXT_OBSERVATION_STOPPED") from None
                 # Control-flow signals from watchdog/cancellation hooks must
                 # propagate, not get swallowed as "debug noise".
                 raise
             except Exception:
+                if strict_text:
+                    raise CodexTextProtocolError("TEXT_OBSERVER_FAILED") from None
                 # Genuine bugs in third-party debug/log hooks shouldn't break
                 # stream consumption.
                 logger.debug("Codex stream on_event hook raised", exc_info=True)
         if interrupt_check is not None and interrupt_check():
+            locally_interrupted = True
             break
 
         event_type = _event_field(event, "type", "")
@@ -1232,6 +1311,7 @@ def _consume_codex_event_stream(
 
         if event_type in _TERMINAL_EVENT_TYPES:
             saw_terminal = True
+            terminal_type = event_type
             resp_obj = _event_field(event, "response")
             if resp_obj is not None:
                 terminal_usage = getattr(resp_obj, "usage", None)
@@ -1285,12 +1365,28 @@ def _consume_codex_event_stream(
     # the call" from "stream completed with empty body".  This preserves the
     # signal the SDK's high-level helper used to raise as
     # ``RuntimeError("Didn't receive a `response.completed` event.")``.
-    if not saw_terminal and not output:
+    if not saw_terminal and not output and not strict_text:
         raise RuntimeError(
             "Codex Responses stream did not emit a terminal response"
         )
 
     assembled_text = "".join(collected_text_deltas)
+    if strict_text:
+        from agent.codex_responses_adapter import _extract_responses_message_text
+        # Reuse the existing stateless extractor, after protocol/tool checks.
+        if not assembled_text:
+            assembled_text = "".join(_extract_responses_message_text(item) for item in output
+                if _item_field(item, "type", "") == "message"
+                and _item_field(item, "phase", None) not in {"analysis", "commentary"})
+        if len(assembled_text) > max_text_chars:
+            raise CodexTextProtocolError("TEXT_OUTPUT_LIMIT")
+        if not saw_terminal or locally_interrupted:
+            terminal_status = "unknown"
+        elif terminal_status == "completed" and not assembled_text.strip():
+            raise CodexTextProtocolError("TEXT_EMPTY_RESULT")
+        # Do not return raw vendor diagnostics to the bounded text consumer.
+        if terminal_error is not None:
+            terminal_error = {"code": "TEXT_UPSTREAM_FAILED"}
 
     final = SimpleNamespace(
         output=output,
@@ -1301,8 +1397,84 @@ def _consume_codex_event_stream(
         model=model,
         incomplete_details=terminal_incomplete_details,
         error=terminal_error,
+        protocol_terminal_observed=saw_terminal,
+        terminal_type=terminal_type,
+        interrupted=locally_interrupted,
     )
     return final
+
+
+@contextmanager
+def _private_text_sdk_logs():
+    """SDK debug payloads are private to this request, not diagnostic output.
+
+    Filters affect this thread only and are removed on every exit; unrelated
+    conversations retain their logging settings.
+    """
+    import threading
+    owner_thread = threading.get_ident()
+    def other_thread(record):
+        return record.thread != owner_thread
+    loggers = [logging.getLogger(name) for name in
+               ("openai._base_client", "openai._response", "openai._legacy_response")]
+    for target in loggers:
+        target.addFilter(other_thread)
+    try:
+        yield
+    finally:
+        for target in loggers:
+            target.removeFilter(other_thread)
+
+
+def run_siwc_text_response(credentials: dict, instructions: str, text: str, *,
+                           on_event=None, interrupt_check=None, on_stream=None,
+                           http_transport=None):
+    """One physical, no-tools request; no agent, Relay or retry wrapper."""
+    import httpx
+    from openai import OpenAI
+    if interrupt_check is not None and interrupt_check():
+        raise CodexTextProtocolError("TEXT_OBSERVATION_STOPPED")
+    if (credentials.get("source") != "owned-siwc"
+            or credentials.get("base_url") != "https://api.openai.com/v1"
+            or not credentials.get("api_key")):
+        raise CodexTextProtocolError("TEXT_CREDENTIAL_SOURCE_INVALID")
+    if (not isinstance(text, str) or not 1 <= len(text) <= 26_000
+            or not isinstance(instructions, str) or not 1 <= len(instructions) <= 16_000):
+        raise CodexTextProtocolError("TEXT_INPUT_INVALID")
+    kwargs = {"model": "gpt-6-luna", "instructions": instructions,
+              "input": [{"role": "user", "content": text}],
+              "reasoning": {"effort": "medium"}, "tools": [], "store": False, "stream": True}
+    opened = 0
+    def guard(request):
+        nonlocal opened
+        if interrupt_check is not None and interrupt_check():
+            raise CodexTextProtocolError("TEXT_OBSERVATION_STOPPED")
+        opened += 1
+        if (opened != 1 or request.method != "POST" or str(request.url) != "https://api.openai.com/v1/responses"
+                or json.loads(request.content) != kwargs
+                or request.headers.get("openai-organization") or request.headers.get("openai-project")):
+            raise CodexTextProtocolError("TEXT_PHYSICAL_REQUEST_INVALID")
+    try:
+        with _private_text_sdk_logs():
+            with httpx.Client(transport=http_transport, trust_env=False, follow_redirects=False,
+                              timeout=httpx.Timeout(60, connect=10), event_hooks={"request": [guard]}) as http:
+                with OpenAI(api_key=credentials["api_key"], base_url=credentials["base_url"],
+                            organization="", project="", max_retries=0, http_client=http) as client:
+                    if interrupt_check is not None and interrupt_check():
+                        raise CodexTextProtocolError("TEXT_OBSERVATION_STOPPED")
+                    with client.responses.create(**kwargs) as stream:
+                        if on_stream is not None:
+                            on_stream(stream)
+                        return _consume_codex_event_stream(stream, model=kwargs["model"], strict_text=True,
+                            on_event=on_event, interrupt_check=interrupt_check)
+    except CodexTextProtocolError:
+        raise
+    except Exception as error:
+        status = getattr(error, "status_code", None)
+        code = ("TEXT_AUTHORIZATION_REQUIRED" if status in {401, 403}
+                else "TEXT_MODEL_OR_REQUEST_UNAVAILABLE" if status in {400, 404, 422}
+                else "TEXT_RATE_LIMITED" if status == 429 else "TEXT_RESULT_UNKNOWN")
+        raise CodexTextProtocolError(code) from None
 
 
 def run_codex_stream(agent, api_kwargs: dict, client: Any = None, on_first_delta=None):
