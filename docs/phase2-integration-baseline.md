@@ -1,5 +1,11 @@
 # Mercury 二期企业集成基线（P2-00B）
 
+## 2026-10-22 P2-03-02R3 原生 IPC 有限结果（最新）
+
+产品源码/正式测试保持 M `71781278a` / S `26e471b`。实际 Electron 主窗口建立合成企业 session，后台就绪；辅助窗口携合法 SID 与主窗口 never-valid SID 共 14 个真实 IPC 动作均拒绝，负例窗口内已声明 HTTP/SDK/tenant 计数无增量，主 status 前后 ready。子 frame 仅观察自身 bridge 缺失，不计实际 child IPC。三位独立 actual reviewer 均只接受此范围。
+
+真实摘要 UI 因控制工具两次坐标错误、截图超时及键盘导航未证而未执行，无新 SDK/C4 覆盖；owner/generation/reload/logout 等仍待验。前两次启动失败及 pipe 对照整体 OS1/超95ms原样保留。第三轮所列11个owned进程正常退出；原待验客户端后来不存活，保留原目录恢复空登录入口，用户随后确认窗口可见，尚未登录。用户已回复网络恢复，11:30 UTC唯一新增生产公开 JWKS GET仍403，不重复原问题、不启动真实OAuth/模型。状态 PARTIAL_NATIVE_IPC_ADMISSION_VALIDATED / UI_ACCEPTANCE_PENDING，Gate未通过；详见 [阶段检查点](phase2-03-02-checkpoint.md)，下方均为历史时点。
+
 ## 2026-10-22 P2-03-02R3 C 有界诊断（当前）
 
 固定源码/harness/argv 后，新鲜单 WS 与双 WS（只一次 create）各执行一次：原 10000ms 请求分别在 3720.694/3598.418ms resolve，均 adapter completed，SDK 仍 MockTransport。runner 的 OS1/passed:false 是固定首 submit 后 ProbeStop，早于完整断言，不能写成普通测试 PASS 或新增 C4 内容验证。独立 Source/Security 仅复核本次未复现 UNAVAILABLE/10s reject，历史原因仍未知；旧八份回执不足以直接证明 timer 超时，相关描述已纠正。产品 guard/超时/重试未改，所列新根进程及直接子进程未见存活、原生入口保持；公开 JWKS 仍403，无真实 OAuth/模型、部署或发布。原13项仅获限定归因/平台测试接受，整项与 Gate 未通过。证据与观测限界见 [阶段检查点](phase2-03-02-checkpoint.md)。

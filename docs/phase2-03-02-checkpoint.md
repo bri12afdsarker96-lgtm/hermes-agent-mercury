@@ -1,5 +1,22 @@
 # P2-03-02 阶段检查点
 
+## 2026-10-22 P2-03-02R3 原生 IPC 有限验证与界面工具缺口（最新）
+
+本轮基于 M `71781278a` / S `26e471b`，产品源码与正式测试未变；仅本地隔离夹具和进度文档更新。标准 real-main、preload、renderer 原字节复用，没有把测试注入写入产品。当前 **PARTIAL_NATIVE_IPC_ADMISSION_VALIDATED / UI_ACCEPTANCE_PENDING**，下方记录保留其历史时点。
+
+第三个 fresh 合成环境通过真实主 frame 事件、原 password handler 和 S 正常密码接口建立企业 session；实际 Python 后台 READY，主窗口前后 status 均为 ready/generation1。此初始化不是密码 UI、原生 OAuth 或真实模型资格证明。
+
+- 实际辅助 sender 2 携带主窗口当前合法 SID，status/connect/cancelLogin/logout/submit/requestStatus/stop 七动作均返回 OWNER_CHANGED；主窗口使用从未有效 SID 的同七动作也均拒绝。共 14 项真实 Electron preload/IPC admission，不是普通 JS 假 event。
+- snapshot1 之后、snapshot5 之前的负例观测窗口中，三类 provider HTTP、S login/context、SDK、UNKNOWN 与 tenant-model 计数增量均为 0；snapshot5 在该窗口之外，主窗口仍 ready。不能扩称所有 auth-store 或 OS 副作用为零。
+- 实际普通子 frame 的自身 bridge/require 均不可用；没有执行子 frame IPC。无效 SID 也不等于曾有效旧 SID；owner/connection/generation 切换、reload UNKNOWN 查询、stop/迟到发布及 logout 竞态尚未在本 native lane 执行。
+- Sky 可读取已登录工作台，但两次点击均报 coordinate input geometry is unavailable，截图超时，Tab 未观察到焦点导航。因此实际摘要 UI 提交、SDK send、accept/C4 结果均未执行，不继承旧 wire 成功。冻结 runtime 的 Chromium 拒绝为 2 次，且末尾一个合法 status enter 没有配对 exit，不能称冻结时整体静止。
+
+前两次夹具启动失败全部保留。一次无凭据 pipe 对照中，EOF 案例出现 ACK_MISSING/EPIPE，NDJSON 案例收到精确 7B ACK；诊断 Electron exit0、最终所列进程消失，但整体超 8 秒预算约 95ms，仍为 shell OS1/verifiedOwnedExit:false，不记整体 PASS。第三轮按有界 NDJSON 协议获得真实解析 ACK，并正常建立上述 session。Source/Security/Integration 的 actual review 仅支持本节有限结论。测试收尾 M/S 均 exit0，11 个已记录 PID/CreationDate 对象无剩余，未自动强杀；不扩大为全部未观察历史后代证明。
+
+有限结果在既有审计 `.agent_tmp/native-ui-synthetic-1/attempt-3/native-results-2.json`，SHA256 `51b0cf6e1e5b9d24a88984d8de6249af5e84357c53e2ab10ec5a489f6d46ea3f`；原 results-1 保留，results-2 纠正 Chromium 数量并补退出记录。夹具仍为 strict SQLite identity / capability-policy-off，不构成动态 PG/RLS/EffectivePermissions 验收。本轮没有产品修复可提交，也没有新增类型检查或正式回归结论。
+
+用户报告网络恢复后，仅复测一次生产 `_siwc_http` 官方 JWKS GET（11:30:14 UTC）：仍403/Cloudflare HTML，不能泛称全部网络未恢复或归因账号/地区。原网络问题已获回复，不重复催问；无真实 OAuth/模型请求。另发现原待验客户端及其 backend 已退出，原因未归因；保留原 HOME/userData 恢复同一无合成 grant 的空登录入口，用户随后确认“现在能看到窗口”，尚未登录。原 S10431 保留。界面、真实 owned 登录/模型及其余技术闭合仍待验；P2-03-02/Gates 未通过，无部署或再次发布，进度推送不自动暂停研发。
+
 ## 2026-10-22 P2-03-02R3 C 有界创建诊断（当前）
 
 基于 M `d80be0298` / S `a81e8a5`，本轮未改产品源码、超时、重试或权限 guard。监督已限定接受原 13 项的同条件 A/B 与平台测试修订，不扩大为全项目回归或产品验收。历史创建失败仍未归因；八份旧有限回执没有直接的 10 秒 timer 异常及可靠执行 SHA/argv 绑定，下方旧记录的超时说法已据此修正。
