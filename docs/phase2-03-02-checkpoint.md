@@ -1,5 +1,24 @@
 # P2-03-02 阶段检查点
 
+## 2026-10-22 P2-03-02R3 C 有界创建诊断（当前）
+
+基于 M `d80be0298` / S `a81e8a5`，本轮未改产品源码、超时、重试或权限 guard。监督已限定接受原 13 项的同条件 A/B 与平台测试修订，不扩大为全项目回归或产品验收。历史创建失败仍未归因；八份旧有限回执没有直接的 10 秒 timer 异常及可靠执行 SHA/argv 绑定，下方旧记录的超时说法已据此修正。
+
+固定新 harness、实际导入源码和 Node/Python argv 后，只执行两次全新 first-submit。实际链路为 Node adapter → WebSocket → Python serve → auth/SessionDB → SDK MockTransport → 临时 S accept 返回 → adapter completed；第二例有两条 WS 连接，但只创建和提交一个请求，不是并发双 create。
+
+| 新例 | 原 client timeout | Node create Promise resolve | Python create / schema 区间 | 实际终态 |
+|---|---|---|---|---|
+| 单 WS | 10000 ms | 3720.694 ms | 3719 / 3672 ms | adapter completed |
+| 双 WS、一次 create | 10000 ms | 3598.418 ms | 3594 / 3500 ms | adapter completed |
+
+每例均 create started/completed=1、SDK 模拟发送=1、发送前持久 UNKNOWN=1，tenant model/external connection=0，无 client request reject、trace overflow 或 6 秒栈触发。两次 runner 均按固定 first-submit probe-stop 返回 **OS exit 1 / passed:false / INTEGRATION_FIRST_SUBMIT_PROBE_STOPPED**，同时 lastReply=completed；不改写为普通测试 PASS 或 OS0。旧请求未重放。
+
+仅支持 **NOT_REPRODUCED_IN_TWO_FRESH_SYNTHETIC_PROBES / HISTORICAL_CAUSE_UNDETERMINED**。本次时间集中在 schema/init，不能反推历史失败由 DB I/O、冷启动、锁或调度导致。未做 SQL/内核跟踪或无观测 A/B；观测有开销，两端相对时钟不能直接相减，同 tick 不证明零等待，database→init 也可能包含 lazy import。实际 SDK 网络与真实 Electron 操作未覆盖。
+
+本地证据位于既有审计的 `.agent_tmp/integration/`：`c-bounded-manifest-1.json`（SHA256 `97707dff04f328befcac96aaa81b2e2e043a050027ed330c297d1132287d7893`）、`receipt-probe-c-bounded-{single,double}-1.json`、对应 execution start/finish 和 `c-bounded-results-1.json`（SHA256 `2f9916f4670f34873e90cb785255c2b4c509114d7edfa9b9d93035ea6d7d92ef`）。两例后核实所列 owned runner/Python 根进程及直接子进程未见存活，未证明全部历史后代；14 个冻结文件 hash 未变。原 native S/Electron 及既有 HOME 保留，没有新建替代入口。独立 Source/Security 复核仅接受这两例观察：ProbeStop 早于后续完整断言，不新增 C4 内容验证或此前并发/重放验证结论。
+
+网络 lane 唯一新增公共 GET（09:17:13 UTC）仍由实际 `_siwc_http` 访问官方 JWKS，返回 HTTP403/HTML，无公开结构化原因；不据此推断账号、地区或凭据问题。未改代理/TLS/cookies，无真实 OAuth 或模型请求。09:33 UTC 原 S 仍监听 `127.0.0.1:10431`，客户端/backend 进程身份与创建时间一致；这只是入口存活，不是登录或完整 UI 验收。当前 **REAL_ACCEPTANCE_PENDING / NOT_COMPLETE**，不进入下一 Gate、不部署或发布。
+
 ## 2026-10-22 P2-03-02R3 同项回归与合成链路复核（当前）
 
 继续已派发的 R3，未进入下一 Gate。M 基于 `af2885378`、S 基于 `32e32df`；本轮产品源码没有修改，仅修订三份既有测试并同步进度。当前 **LOCAL_SYNTHETIC_VALIDATED / REAL_ACCEPTANCE_PENDING**，仍未完成产品验收。
@@ -32,7 +51,7 @@
 
 真实边界为 Node adapter、CLI serve、WebSocket、HTTP、SessionDB、DPAPI 与 SDK 序列化/消费；模型传输仍是 MockTransport，原 S 在 M 进程内线程。冷重启后的状态查询使用 main 私有签名 RPC，不等于真实 Electron 恢复界面已验；旧 proof 的 403 未单独记录 age，不单凭此区分 TTL 与 runtime 拒绝，仍依赖既有固定时间反例。两份 wire 回执分别记录模拟发送 3 次、5 次及各次发送前持久 UNKNOWN，不与重叠单测相加。
 
-历史首次 submit 失败及后来两次 10 秒 session.create 超时未完成根因归因；单/双 channel 的最小复跑均约 3.5 秒成功，不能把当前 PASS 写成间歇故障已修复。原 FAIL、探针启动观测副作用与后续 PASS 分开保留。当前实际 Python/runner 残留为零，库仅有有限事实、不含正文、draft 或凭据载荷。
+历史首次 submit 失败及两次 create 未完成的 UNAVAILABLE 尚未归因。独立复读八份有限旧回执后，未发现直接保存的 10 秒 timer 异常或可靠的 runner/fixture SHA、完整 argv 绑定；10 秒只是生产源码中的候选超时，不能将旧记录写成两次已证超时。原单/双 channel 最小复跑约 3.5 秒成功，不能补证历史原因或说明故障已修复。原 FAIL、探针启动观测副作用与后续 PASS 分开保留；库仅有有限事实、不含正文、draft 或凭据载荷。
 
 标准客户端本地构建通过，仍是未发布的验收候选。独立本机验收包只在构建时将固定 S origin 指向隔离 loopback 服务，并在测试 bootstrap 抑制 OS 协议注册；原产品资产和 main 源码不改，不用于发布。独立 S 的正常 password→strict/operator→context status 已验；该 S 使用 `CAPABILITY_POLICY_MODE=off` 的 fixture 兼容模式，不能扩写为 PostgreSQL capability-policy/EffectivePermissions/RLS 验收。实际 Electron 空登录页已通过 UIA 观察，main 使用新 HOME/userData、白名单环境和真实 Python 路径，无 BOOT_FAKE、旧 integration hook 或预置 grant。独立 Security 已核启动合同与实际 spawn 回执绑定，未读取私有 store 或子进程 secret。尚未自动操作认证输入，也未通过实际用户 OAuth 与一次全新 Luna 请求。
 

@@ -1,8 +1,12 @@
 # Mercury 二期企业集成基线（P2-00B）
 
+## 2026-10-22 P2-03-02R3 C 有界诊断（当前）
+
+固定源码/harness/argv 后，新鲜单 WS 与双 WS（只一次 create）各执行一次：原 10000ms 请求分别在 3720.694/3598.418ms resolve，均 adapter completed，SDK 仍 MockTransport。runner 的 OS1/passed:false 是固定首 submit 后 ProbeStop，早于完整断言，不能写成普通测试 PASS 或新增 C4 内容验证。独立 Source/Security 仅复核本次未复现 UNAVAILABLE/10s reject，历史原因仍未知；旧八份回执不足以直接证明 timer 超时，相关描述已纠正。产品 guard/超时/重试未改，所列新根进程及直接子进程未见存活、原生入口保持；公开 JWKS 仍403，无真实 OAuth/模型、部署或发布。原13项仅获限定归因/平台测试接受，整项与 Gate 未通过。证据与观测限界见 [阶段检查点](phase2-03-02-checkpoint.md)。
+
 ## 2026-10-22 P2-03-02R3 同项定向复核（当前）
 
-原 13 失败在完整 f274/af288 同 Windows/cp936/重建 argv 下逐条同现象，未观察到本次产品回归；三份测试最小适配后定向 10 PASS/6 SKIP，Windows DACL/file-symlink/macOS 未覆盖说明保留。实际合成 wire 的原五场景和新增并发/stop/epoch/冷重启/跨租户五组通过，SDK 仍为 MockTransport；间歇 session.create 超时未归因。标准客户端本地构建通过，原生入口及真实用户验收待完成；官方 JWKS 公共 GET 在本机后端收到 403，没有真实 OAuth/模型。当前 LOCAL_SYNTHETIC_VALIDATED / REAL_ACCEPTANCE_PENDING，Gate 未通过，无部署或发布。详见 [阶段检查点](phase2-03-02-checkpoint.md)。
+原 13 失败在完整 f274/af288 同 Windows/cp936/重建 argv 下逐条同现象，未观察到本次产品回归；三份测试最小适配后定向 10 PASS/6 SKIP，Windows DACL/file-symlink/macOS 未覆盖说明保留。实际合成 wire 的原五场景和新增并发/stop/epoch/冷重启/跨租户五组通过，SDK 仍为 MockTransport；历史 session.create 未完成的 UNAVAILABLE 尚未归因，旧回执不足以直接认定 10 秒 timer。标准客户端本地构建通过，原生入口及真实用户验收待完成；官方 JWKS 公共 GET 在本机后端收到 403，没有真实 OAuth/模型。当前 LOCAL_SYNTHETIC_VALIDATED / REAL_ACCEPTANCE_PENDING，Gate 未通过，无部署或发布。详见 [阶段检查点](phase2-03-02-checkpoint.md)。
 
 ## 2026-10-22 P2-03-02R3 GitHub 进度快照（当前）
 
