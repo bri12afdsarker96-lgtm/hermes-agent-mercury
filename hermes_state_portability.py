@@ -497,6 +497,9 @@ class SessionPortabilityMixin:
                 clean_session["parent_session_id"] = self._import_text_or_none(
                     clean_session.get("parent_session_id"), "parent_session_id"
                 )
+                from hermes_cli.enterprise_text import is_reserved_session
+                if is_reserved_session(clean_session):
+                    raise ValueError("Owned runtime state cannot be imported")
                 for field in session_text_fields:
                     clean_session[field] = self._import_text_or_none(
                         clean_session.get(field), field
@@ -554,6 +557,12 @@ class SessionPortabilityMixin:
 
             for item in normalized:
                 raw = item["session"]
+                from hermes_cli.enterprise_text import is_reserved_session
+                parent_id = raw.get("parent_session_id")
+                if parent_id:
+                    parent = conn.execute("SELECT id,source,model_config FROM sessions WHERE id=?", (parent_id,)).fetchone()
+                    if parent and is_reserved_session(dict(zip(("id", "source", "model_config"), parent))):
+                        raise ValueError("Owned runtime parent cannot be imported")
                 messages = item["messages"]
                 session_id = str(raw.get("id") or "").strip()
                 exists = conn.execute(

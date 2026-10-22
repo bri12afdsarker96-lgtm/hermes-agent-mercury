@@ -220,6 +220,7 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     // bearer itself; the renderer passes NO url/token and gets back only
     // { ok, sessionId, baseUrl } (or { ok:false, code, message }).
     autoConnect: () => ipcRenderer.invoke('hermes:enterprise:auto-connect'),
+    localText: payload => ipcRenderer.invoke('hermes:enterprise:local-text', payload),
     disconnect: sessionId => ipcRenderer.invoke('hermes:enterprise:disconnect', { sessionId }),
     request: req => ipcRenderer.invoke('hermes:enterprise:request', req),
     upload: req => ipcRenderer.invoke('hermes:enterprise:upload', req),

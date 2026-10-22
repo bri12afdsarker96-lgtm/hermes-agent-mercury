@@ -22,8 +22,12 @@
 import crypto from 'node:crypto'
 
 import { normalizeRemoteBaseUrl } from './connection-config'
+import type { EnterpriseLocalTextState } from './enterprise-local-text'
 
 export interface EnterpriseSession {
+  localText?: EnterpriseLocalTextState
+  localTextStops?: Set<string>
+  localTextEpoch?: number
   /** Keeps native bearer renewal away from explicit password sessions. */
   authSource: 'native' | 'password'
   baseUrl: string
@@ -256,6 +260,7 @@ export class EnterpriseSessionStore {
     }
 
     const sessionId = crypto.randomUUID()
+    this.#bySender.get(senderId)?.localText?.dispose()
     this.#bySender.set(senderId, { authSource, baseUrl: normalized, sessionId, token: bearer })
 
     return sessionId
@@ -367,6 +372,7 @@ export class EnterpriseSessionStore {
       return false
     }
 
+    session.localText?.dispose()
     this.#bySender.delete(senderId)
 
     return true
@@ -375,6 +381,7 @@ export class EnterpriseSessionStore {
   /** Drop a renderer's session outright (on WebContents destruction) — no
    *  orphan bearer survives a closed window. */
   destroySender(senderId: number): void {
+    this.#bySender.get(senderId)?.localText?.dispose()
     this.#bySender.delete(senderId)
   }
 

@@ -10,6 +10,14 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+
+def resolve_owned_text_runtime(profile: str, registration_id: str, generation: int) -> dict:
+    """Explicit registered SIWC identity only; never resolve global defaults."""
+    from hermes_cli.auth import resolve_siwc_runtime_credentials
+    credentials = resolve_siwc_runtime_credentials(profile, registration_id, generation)
+    return {**credentials, "model": "gpt-6-luna", "reasoning_effort": "medium",
+            "runtime_protocol": "codex_responses"}
+
 from hermes_cli import auth as auth_mod
 from agent.credential_pool import (
     CredentialPool,

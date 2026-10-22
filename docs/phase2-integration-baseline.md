@@ -1,6 +1,14 @@
 # Mercury 二期企业集成基线（P2-00B）
 
-## 2026-10-22 P2-03-02R 阶段检查点与暂停
+## 2026-10-22 P2-03-02R2 接线进度提交并暂停（当前）
+
+按用户要求保存并推送当前进度后暂停。相对 `ccd84022f`，M 已增加 owned web 登录生命周期、严格 resolver、SessionDB UNKNOWN 单次保护、reserved namespace 防护及 gateway/main/preload/UI 摘要接线；使用者自行连接账号，固定 gpt-6-luna / medium，个人模型身份不替代 S 企业权限。
+
+当前复测 Python 75、桌面端 45 通过，三组 TypeScript 检查通过；没有真实 OAuth 或模型调用。**仍存在主进程授权证明缺口**：普通 gateway token 和自报 owner 无法保证新增 text/owned-auth 调用经过 main。完整独立审查、namespace/UI 集成及真实新身份/新请求验证尚未完成，不能将本检查点用于功能验收或发布。S 代码保持前次 `d4d6e7b`，本轮只同步进度文档。
+
+状态 **PAUSED_BY_USER / PARTIAL_CHECKPOINT**，P2-03-02R2 **NOT_COMPLETE**，Qualification/Product Gates **NOT_PASSED**。不进入 03-03、不部署、不再发布。恢复顺序和证据见 [阶段检查点](phase2-03-02-checkpoint.md)；以下均为历史时点记录。
+
+## 2026-10-22 P2-03-02R 基础检查点与暂停（历史）
 
 按用户本次“将进度提交到 GitHub”及阶段收尾指令，保存当前代码与可恢复的进度后暂停。状态为 **PAUSED_BY_USER / PARTIAL_CHECKPOINT**，P2-03-02R **NOT_COMPLETE**，Qualification/Product Gates **NOT_PASSED**；不进入 03-03，不部署或再发布。
 

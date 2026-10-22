@@ -27,6 +27,7 @@ export interface ConversationMessage {
 }
 
 export interface AssistantConversation {
+  lastLocalRequest: WritableAtom<string | null>
   backendChoice: WritableAtom<(EnterpriseAssistantBackendChoice & { persona_id?: string }) | null>
   outcomeUnknown: WritableAtom<boolean>
   id: string
@@ -73,6 +74,7 @@ const MODE_TITLES: Record<Exclude<AssistantMode, 'chat'>, string> = {
 }
 
 interface StoredAssistantConversation {
+  lastLocalRequest?: string
   outcomeUnknown?: boolean
   backendChoice?: EnterpriseAssistantBackendChoice & { persona_id?: string }
   id: string
@@ -81,6 +83,7 @@ interface StoredAssistantConversation {
 }
 
 interface StoredAssistantChatState {
+  summarize?: StoredAssistantConversation
   customerBindings?: Array<{ id: string; backendChoice: CustomerReplyBackendChoice; outcomeUnknown: boolean }>
   activeThreadId: string | null
   threads: StoredAssistantConversation[]
@@ -181,7 +184,7 @@ function loadStoredChatState(scope: string): StoredAssistantChatState {
       return { activeThreadId: null, threads: [] }
     }
 
-    const candidate = parsed as { activeThreadId?: unknown; threads?: unknown; customerBindings?: unknown }
+    const candidate = parsed as { activeThreadId?: unknown; threads?: unknown; customerBindings?: unknown; summarize?: StoredAssistantConversation }
     const threads = Array.isArray(candidate.threads) ? candidate.threads.slice(0, MAX_STORED_CHAT_THREADS).flatMap(raw => {
       if (!raw || typeof raw !== 'object') {
         return []
@@ -198,10 +201,18 @@ function loadStoredChatState(scope: string): StoredAssistantChatState {
           .filter((message): message is ConversationMessage => message !== null)
         : []
       const backendChoice = normalizeBackendChoice((raw as StoredAssistantConversation).backendChoice)
-      return [{ id: thread.id.slice(0, 128), messages, title: thread.title.slice(0, 64) || '新对话', outcomeUnknown: (raw as StoredAssistantConversation).outcomeUnknown === true, ...(backendChoice ? { backendChoice } : {}) }]
+      const request = (raw as StoredAssistantConversation).lastLocalRequest
+      return [{ id: thread.id.slice(0, 128), messages, title: thread.title.slice(0, 64) || '新对话', outcomeUnknown: (raw as StoredAssistantConversation).outcomeUnknown === true,
+        ...(typeof request === 'string' && /^[A-Za-z0-9_-]{1,96}$/.test(request) ? { lastLocalRequest: request } : {}), ...(backendChoice ? { backendChoice } : {}) }]
     }) : []
 
     return {
+      ...(candidate.summarize && typeof candidate.summarize.id === 'string' && typeof candidate.summarize.title === 'string' ? {
+        summarize: { id: candidate.summarize.id.slice(0, 96), title: candidate.summarize.title.slice(0, 64),
+          messages: Array.isArray(candidate.summarize.messages) ? candidate.summarize.messages.slice(-MAX_STORED_CHAT_MESSAGES).map(normalizeStoredMessage).filter((message): message is ConversationMessage => message !== null) : [],
+          backendChoice: normalizeBackendChoice(candidate.summarize.backendChoice), outcomeUnknown: candidate.summarize.outcomeUnknown === true,
+          ...(typeof candidate.summarize.lastLocalRequest === 'string' && /^[A-Za-z0-9_-]{1,96}$/.test(candidate.summarize.lastLocalRequest) ? { lastLocalRequest: candidate.summarize.lastLocalRequest } : {}) }
+      } : {}),
       activeThreadId: typeof candidate.activeThreadId === 'string' ? candidate.activeThreadId : null,
       customerBindings: Array.isArray(candidate.customerBindings) ? candidate.customerBindings.slice(0, 200).flatMap(item => {
         const choice = normalizeBackendChoice(item?.backendChoice)
@@ -221,6 +232,11 @@ function persistChatState(session: AssistantSession, retainedCustomers: StoredAs
   }
 
   const state: StoredAssistantChatState = {
+    summarize: { id: session.conversations.summarize.id, title: session.conversations.summarize.title,
+      messages: session.conversations.summarize.messages.get().slice(-MAX_STORED_CHAT_MESSAGES),
+      backendChoice: session.conversations.summarize.backendChoice.get() ?? undefined,
+      outcomeUnknown: session.conversations.summarize.outcomeUnknown.get(),
+      lastLocalRequest: session.conversations.summarize.lastLocalRequest.get() ?? undefined },
     customerBindings: [...retainedCustomers!.filter(item => !session.customerReply.get().customers.some(customer => customer.id === item.id)),
       ...session.customerReply.get().customers.flatMap(customer => {
         const reply = customer.reply.get()
@@ -228,6 +244,7 @@ function persistChatState(session: AssistantSession, retainedCustomers: StoredAs
       })].slice(-200),
     activeThreadId: session.activeChatThreadId.get(),
     threads: session.chatThreads.get().slice(0, MAX_STORED_CHAT_THREADS).map(thread => ({
+      ...(thread.lastLocalRequest.get() ? { lastLocalRequest: thread.lastLocalRequest.get()! } : {}),
       ...(thread.backendChoice.get() ? { backendChoice: thread.backendChoice.get()! } : {}),
       outcomeUnknown: thread.outcomeUnknown.get(),
       id: thread.id,
@@ -268,7 +285,7 @@ function bindChatPersistence(session: AssistantSession, restoredCustomers: Store
   syncCustomers()
   const unlistenMessages = new Map<AssistantConversation, () => void>()
   const sync = () => {
-    const current = new Set(session.chatThreads.get())
+    const current = new Set([...session.chatThreads.get(), session.conversations.summarize])
     for (const [thread, dispose] of unlistenMessages) {
       if (!current.has(thread)) {
         dispose()
@@ -277,7 +294,7 @@ function bindChatPersistence(session: AssistantSession, restoredCustomers: Store
     }
     for (const thread of current) {
       if (!unlistenMessages.has(thread)) {
-        const dispose = [thread.messages, thread.backendChoice, thread.outcomeUnknown].map(store => store.listen(persist))
+        const dispose = [thread.messages, thread.backendChoice, thread.outcomeUnknown, thread.lastLocalRequest].map(store => store.listen(persist))
         unlistenMessages.set(thread, () => dispose.forEach(unlisten => unlisten()))
       }
     }
@@ -307,9 +324,10 @@ function updateConversationCounter(id: string): void {
 }
 
 function createConversation(title = '新对话', restored?: StoredAssistantConversation): AssistantConversation {
-  const id = restored?.id || `conversation-${++nextConversationId}`
+  const id = restored?.id || `conversation-${++nextConversationId}-${crypto.randomUUID()}`
   updateConversationCounter(id)
   return {
+    lastLocalRequest: atom(restored?.lastLocalRequest ?? null),
     backendChoice: atom(restored?.backendChoice ?? null),
     outcomeUnknown: atom(restored?.outcomeUnknown === true),
     id,
@@ -330,12 +348,15 @@ export function restartAssistantMode(session: AssistantSession, mode: Exclude<As
   const current = session.conversations[mode]
   if (current.work.get().submitting) {return}
   if (current.messages.get().length || current.backendChoice.get()) {
-    const archived = createConversation(`${MODE_TITLES[mode]} · 上次处理`)
+    const archived = createConversation(`${MODE_TITLES[mode]} · 上次处理`, { id: current.id, title: `${MODE_TITLES[mode]} · 上次处理`, messages: [] })
     archived.messages.set(current.messages.get())
     archived.backendChoice.set(current.backendChoice.get())
     archived.outcomeUnknown.set(current.outcomeUnknown.get())
+    archived.lastLocalRequest.set(current.lastLocalRequest.get())
     session.chatThreads.set([...session.chatThreads.get(), archived])
   }
+  current.id = `conversation-${++nextConversationId}-${crypto.randomUUID()}`
+  current.lastLocalRequest.set(null)
   current.messages.set([])
   current.backendChoice.set(null)
   current.outcomeUnknown.set(false)
@@ -451,7 +472,7 @@ export function assistantSessionFor(
     ? restoredChatState.activeThreadId as string
     : chat.id
   const conversations = Object.fromEntries(
-    (['customer_reply', 'summarize', 'rewrite', 'extract_action_items', 'knowledge_question'] as const).map(mode => [mode, createConversation(MODE_TITLES[mode])])
+    (['customer_reply', 'summarize', 'rewrite', 'extract_action_items', 'knowledge_question'] as const).map(mode => [mode, createConversation(MODE_TITLES[mode], mode === 'summarize' ? restoredChatState.summarize : undefined)])
   ) as Omit<AssistantSession['conversations'], 'chat'>
   const session: AssistantSession = {
     activeChatThreadId: atom(activeChatThreadId),

@@ -966,6 +966,10 @@ def _extract_member_atomically(
     # ``_preserve_file_mode`` returns None when the target does not exist (or
     # cannot be stat'd), in which case the umask-derived create-mode applies —
     # the same shape as ``atomic_yaml_write``'s ``create_mode`` fallback.
+    if any(part.lower().startswith("enterprise-text-") for part in target.resolve().parts):
+        raise OSError("Owned runtime state cannot be restored")
+    if target.name in {"state.db-wal", "state.db-shm", "state.db-journal"}:
+        raise OSError("Live SQLite sidecars cannot be restored")
     mode = _preserve_file_mode(target)
     owner = _preserve_file_owner(target)
     if mode is None:
@@ -1005,6 +1009,12 @@ def _extract_member_atomically(
                 shutil.copyfileobj(src, dst)
             dst.flush()
             os.fsync(dst.fileno())
+        if target.name == "state.db":
+            from hermes_cli.enterprise_text import assert_importable_database
+            try:
+                assert_importable_database(Path(tmp_name))
+            except ValueError:
+                raise OSError("Owned runtime state cannot be restored") from None
         real_path = Path(atomic_replace(tmp_name, target))
         # Owner first, mode second — the ordering ``atomic_yaml_write`` uses,
         # because chown drops setuid/setgid and a mode restore that ran first

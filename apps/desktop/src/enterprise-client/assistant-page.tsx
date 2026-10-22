@@ -26,6 +26,8 @@ import {
   type EnterpriseClientRuntime
 } from './runtime'
 import { enterpriseClientErrorForStatus } from './runtime-errors'
+import { useLocalTextConnection } from './local-text-connection'
+import type { LocalTextChoice } from '../../electron/enterprise-local-text-types'
 
 interface TenantModel {
   backend_id?: EnterpriseAssistantBackendId
@@ -150,6 +152,7 @@ function AssistantSessionPage({
   session: AssistantSession
 }) {
   const web = useWebPresentation()
+  const local = useLocalTextConnection(runtime)
   const mode = useStore(session.mode)
   const chatThreads = useStore(session.chatThreads)
   const activeChatThreadId = useStore(session.activeChatThreadId)
@@ -159,6 +162,7 @@ function AssistantSessionPage({
   foregroundConversation.current = activeConversation
   const conversationChoice = useStore(activeConversation.backendChoice)
   const conversationUnknown = useStore(activeConversation.outcomeUnknown)
+  const localRequestId = useStore(activeConversation.lastLocalRequest)
   const customerWorkspace = useStore(session.customerReply)
   const activeCustomer = customerWorkspace.customers.find(item => item.id === customerWorkspace.activeId) ?? customerWorkspace.customers[0]!
   const customerState = useStore(activeCustomer.reply)
@@ -179,6 +183,7 @@ function AssistantSessionPage({
   const setFileName = useCallback((fileName: string | null) => $localWork.set({ ...$localWork.get(), fileName }), [$localWork])
   const setSubmitting = useCallback((submitting: boolean) => $localWork.set({ ...$localWork.get(), submitting }), [$localWork])
   const [error, setError] = useState<string | null>(null)
+  const [modelError, setModelError] = useState<string | null>(null)
   const [loadingModels, setLoadingModels] = useState(true)
   const [modelLoadFailed, setModelLoadFailed] = useState(false)
   const [modelReloadVersion, setModelReloadVersion] = useState(0)
@@ -244,7 +249,7 @@ function AssistantSessionPage({
       setLoadingModels(false)
       setModelLoadFailed(false)
       setModels([])
-      setError('企业服务连接恢复后即可加载本企业 AI 模型。')
+      setModelError('企业服务连接恢复后即可加载本企业 AI 模型。')
 
       return () => {
         active = false
@@ -253,7 +258,7 @@ function AssistantSessionPage({
 
     setLoadingModels(true)
     setModelLoadFailed(false)
-    setError(null)
+    setModelError(null)
     void runtime
       .get<TenantModelPool>('/api/tenant-ai-models')
       .then(pool => {
@@ -271,14 +276,14 @@ function AssistantSessionPage({
         setChoiceProtocolSupported(Array.isArray(pool.backends))
 
         if (!pool.configured || nextModels.length === 0) {
-          setError('企业管理员尚未配置可用的 AI 模型。')
+          setModelError('企业管理员尚未配置可用的 AI 模型。')
         }
       })
       .catch(reason => {
         if (active) {
           setModels([])
           setModelLoadFailed(true)
-          setError(messageForError(reason))
+          setModelError(messageForError(reason))
           // Network hiccups used to leave the composer permanently disabled
           // until the member manually reconnected. A model read is safe to
           // retry and is scoped to the already authenticated enterprise.
@@ -338,11 +343,18 @@ function AssistantSessionPage({
   }, [setFileName, setFileText])
 
   const backendId = fixedChoice?.backend_id ?? selectedBackend
-  const backendModels = models.filter(model => model.backend_id === backendId)
+  const visibleError = error ?? (backendId === 'tenant_model' ? modelError : null)
+  const modelBusy = backendId === 'tenant_model' && loadingModels
+  const visibleBackends: EnterpriseAssistantBackendOption[] = runtime?.localText
+    ? [...(backends.some(item => item.backend_id === 'tenant_model') ? backends.filter(item => item.backend_id !== 'codex') : [{ backend_id: 'tenant_model' as const, label: '企业模型' }]), { backend_id: 'codex', label: '本机 ChatGPT · 自行连接' }]
+    : backends
+  const backendModels: TenantModel[] = backendId === 'codex' && local.state.choice
+    ? [{ ...local.state.choice, provider: '本机 ChatGPT', is_default: false }]
+    : models.filter(model => model.backend_id === backendId)
   const defaultModel = backendModels.find(item => item.is_default)
   const chosenModel = backendModels.find(item => item.configuration_id === (fixedChoice?.configuration_id ?? selectedConfigurationId))
     ?? (!fixedChoice && !selectedConfigurationId ? defaultModel ?? backendModels[0] : undefined)
-  const catalogChoice: EnterpriseAssistantBackendChoice | null = chosenModel ? {
+  const catalogChoice: EnterpriseAssistantBackendChoice | null = backendId === 'codex' ? local.state.choice ?? null : chosenModel ? {
     backend_id: backendId, configuration_id: chosenModel.configuration_id,
     ...(chosenModel.configuration_version !== undefined ? { configuration_version: chosenModel.configuration_version } : {}),
     model: chosenModel.model, runtime_protocol: chosenModel.runtime_protocol!, reasoning_effort: chosenModel.reasoning_effort ?? null,
@@ -350,12 +362,14 @@ function AssistantSessionPage({
   } : null
   const backendOption = backends.find(backend => backend.backend_id === backendId)
   const choiceChanged = Boolean(fixedChoice && catalogChoice && !assistantChoicesMatch(fixedChoice, catalogChoice))
-  const backendReady = Boolean(backendId === 'tenant_model' && catalogChoice?.availability === 'available' && !choiceChanged && !outcomeUnknown)
+  const backendReady = Boolean((backendId === 'tenant_model' || (mode === 'summarize' && runtime?.localText)) && catalogChoice?.availability === 'available' && !choiceChanged && !outcomeUnknown)
   const unavailableReason = outcomeUnknown ? new EnterpriseAssistantRequestUnknown().message : choiceChanged
     ? assistantBackendReason('CONFIGURATION_CHANGED') : fixedChoice && !catalogChoice
-      ? assistantBackendReason('CONFIGURATION_UNAVAILABLE') : assistantBackendReason(backendId === 'codex' ? 'CODEX_LOCAL_RUNTIME_REQUIRED' : catalogChoice?.reason ?? backendOption?.reason)
+      ? assistantBackendReason('CONFIGURATION_UNAVAILABLE') : backendId === 'codex' && mode !== 'summarize'
+        ? '本机账号当前支持文本摘要，请选择“文本摘要”；其它处理仍可使用企业模型。'
+        : assistantBackendReason(backendId === 'codex' ? local.state.reason ?? 'LOCAL_TEXT_CONNECT_REQUIRED' : catalogChoice?.reason ?? backendOption?.reason)
   const personaId = fixedChoice?.persona_id ?? selectedPersonaId
-  const choiceValue = fixedChoice?.configuration_id ?? selectedConfigurationId
+  const choiceValue = fixedChoice?.configuration_id ?? (backendId === 'codex' ? local.state.choice?.configuration_id ?? '' : selectedConfigurationId)
   const selectedPersona = personas.find(item => item.persona_id === personaId)
   const personaReady = !personaId || Boolean(selectedPersona)
   const changeBackend = (value: EnterpriseAssistantBackendId) => {setSelectedBackend(value); setSelectedConfigurationId('')}
@@ -434,7 +448,7 @@ function AssistantSessionPage({
 
       const content = mode === 'chat' && !selectedText ? transcriptForChat(messages, rawContent) : rawContent
 
-      if (!runtime?.post || !rawContent || submitting || loadingModels || !backendReady || !catalogChoice || !personaReady) {
+      if (!runtime || (backendId === 'tenant_model' ? !runtime.post : !runtime.localText) || !rawContent || submitting || modelBusy || !backendReady || !catalogChoice || !personaReady) {
         return
       }
       if ((mode === 'chat' || mode === 'knowledge_question') && !selectedText && onRemind && /(?:提醒我|提醒一下|到时提醒|定时提醒|帮我.*提醒|创建.{0,6}(?:任务|提醒)|\/提醒)/.test(instruction)) {
@@ -469,13 +483,18 @@ function AssistantSessionPage({
       }
 
       try {
-        const result = await runtime.post<AssistantResponse>('/api/tenant-ai-assist', {
+        const localId = requestChoice.backend_id === 'codex' ? crypto.randomUUID() : null
+        if (localId) {activeConversation.lastLocalRequest.set(localId)}
+        const localResult = localId ? await runtime.localText!({ action: 'submit', conversationId: activeConversation.id,
+          requestId: localId, content, personaId: requestChoice.persona_id || undefined, choice: requestChoice as LocalTextChoice }) : null
+        if (localResult && localResult.state !== 'completed') {throw new EnterpriseAssistantRequestUnknown(localResult.reason)}
+        const result = (localResult ?? await runtime.post!<AssistantResponse>('/api/tenant-ai-assist', {
           ...(choiceProtocolSupported ? assistantChoiceRequest(requestChoice) : { configuration_id: requestChoice.configuration_id }),
           persona_id: requestChoice.persona_id || undefined,
           content,
           mode: mode === 'knowledge_question' ? 'knowledge_answer' : mode === 'chat' ? 'enterprise_question' : mode,
           ...(mode === 'chat' ? { knowledge_query: rawContent.slice(0, 1000) } : {})
-        })
+        })) as AssistantResponse
 
         if (activeRequest.current[mode] !== requestVersion) {
           return
@@ -520,6 +539,7 @@ function AssistantSessionPage({
       $messages,
       activeConversation,
       backendReady,
+      backendId,
       catalogChoice,
       choiceProtocolSupported,
       fixedChoice,
@@ -531,6 +551,7 @@ function AssistantSessionPage({
       fileName,
       fileText,
       loadingModels,
+      modelBusy,
       messages,
       mode,
       runtime,
@@ -642,11 +663,11 @@ function AssistantSessionPage({
           <header className="hesc-page-header">
             <div>
               <h1>{mode === 'knowledge_question' ? '知识库问答' : mode === 'customer_reply' ? '客户接待' : '企业 AI 助手'}</h1>
-              <p>直接提问或上传文本，AI 结合企业知识给出答案；也可安排个人提醒。</p>
+              <p>{backendId === 'codex' ? '使用你自己的账号生成文本摘要。' : '直接提问或上传文本，AI 结合企业知识给出答案；也可安排个人提醒。'}</p>
             </div>
             {onRemind ? <button className="hesc-action" type="button" onClick={() => onRemind(composer)}>定时提醒</button> : null}
             <span className="hesc-status" data-tone={backendReady ? 'success' : error ? 'error' : 'warning'}>
-              {loadingModels ? '正在加载模型' : backendReady ? '企业模型已就绪' : modelLoadFailed ? '正在恢复模型连接' : '当前后端不可用'}
+              {modelBusy ? '正在加载模型' : backendReady ? backendId === 'codex' ? '本机账号已连接' : '企业模型已就绪' : '当前后端不可用'}
             </span>
           </header>
         )}
@@ -654,15 +675,34 @@ function AssistantSessionPage({
         <main className={separatedNavigation ? 'hesc-ai-chat-column' : undefined}>
           <div className="hesc-card">
             <label className="hesc-ai-select-label" htmlFor="enterprise-assistant-backend">运行后端
-              <select id="enterprise-assistant-backend" value={backendId} disabled={frozen || submitting || loadingModels || Boolean(fixedChoice)}
+              <select id="enterprise-assistant-backend" value={backendId} disabled={frozen || submitting || Boolean(fixedChoice)}
                 onChange={event => changeBackend(event.target.value as EnterpriseAssistantBackendId)}>
-                {backends.map(backend => <option key={backend.backend_id} value={backend.backend_id}>{backend.label}</option>)}
+                {visibleBackends.map(backend => <option key={backend.backend_id} value={backend.backend_id}>{backend.label}</option>)}
               </select>
             </label>
             <p className="hesc-muted-copy">配置：{fixedChoice?.configuration_id ?? catalogChoice?.configuration_id ?? '待选择'} · 模型：{fixedChoice?.model ?? catalogChoice?.model ?? backendOption?.model ?? (backendId === 'codex' ? CODEX_SOFTWARE_DEFAULTS.model : '待选择')}
               {' · '}调用方式：{fixedChoice?.runtime_protocol ?? catalogChoice?.runtime_protocol ?? backendOption?.runtime_protocol ?? '待选择'}
               {' · '}推理强度：{fixedChoice?.reasoning_effort ?? catalogChoice?.reasoning_effort ?? backendOption?.reasoning_effort ?? (backendId === 'codex' ? CODEX_SOFTWARE_DEFAULTS.reasoning_effort : '默认')}</p>
-            {!loadingModels && !backendReady ? <p role="status">{unavailableReason}</p> : null}
+            {!modelBusy && !backendReady ? <p role="status">{unavailableReason}</p> : null}
+            {backendId === 'codex' && runtime?.localText ? <div className="hesc-toolbar">
+              <button type="button" className="hesc-action" disabled={frozen || submitting || local.state.state === 'connecting'} onClick={() => void local.command('connect')}>连接自己的 ChatGPT 账号</button>
+              <button type="button" className="hesc-action" disabled={frozen} onClick={() => void local.refresh()}>检查本机连接</button>
+              {local.state.state === 'connecting' ? <button type="button" className="hesc-action" onClick={() => void local.command('cancelLogin')}>取消登录</button> : null}
+              {local.state.state === 'ready' ? <button type="button" className="hesc-action" onClick={() => void local.command('logout')}>断开本机账号</button> : null}
+              {local.authUrl ? <div><input aria-label="ChatGPT 官方登录链接" readOnly value={local.authUrl} /><button type="button" className="hesc-action" onClick={() => void (window.hermesDesktop?.writeClipboard ? window.hermesDesktop.writeClipboard(local.authUrl) : navigator.clipboard.writeText(local.authUrl))}>复制登录链接</button></div> : null}
+              {localRequestId && submitting ? <button type="button" className="hesc-action" onClick={() => void runtime.localText!({ action: 'stop', conversationId: activeConversation.id, requestId: localRequestId }).then(() => setError(assistantBackendReason('LOCAL_TEXT_OBSERVATION_STOPPED')))}>停止观察</button> : null}
+              {localRequestId && outcomeUnknown && !submitting ? <button type="button" className="hesc-action" onClick={() => {
+                setSubmitting(true)
+                void runtime.localText!({ action: 'requestStatus', conversationId: activeConversation.id, requestId: localRequestId }).then(reply => {
+                  if (reply.state === 'completed' && reply.text && reply.backend_choice && fixedChoice && assistantChoicesMatch(reply.backend_choice, fixedChoice)) {
+                    const answerId = `local-answer-${localRequestId}`
+                    $messages.set([...$messages.get().filter(item => item.id !== answerId), { id: answerId, role: 'assistant', text: reply.text }])
+                    activeConversation.outcomeUnknown.set(false)
+                    if (foregroundConversation.current === activeConversation) {setError(null); setComposer('')}
+                  } else if (foregroundConversation.current === activeConversation) {setError(assistantBackendReason(reply.reason ?? 'LOCAL_TEXT_RESULT_UNKNOWN'))}
+                }).catch(() => {if (foregroundConversation.current === activeConversation) {setError(assistantBackendReason('LOCAL_TEXT_RESULT_UNKNOWN'))}}).finally(() => setSubmitting(false))
+              }}>查询原请求</button> : null}
+            </div> : null}
             {fixedChoice ? <p className="hesc-muted-copy">此对话已固定后端、配置和人设；更换时请新建对话。</p> : null}
             {mode !== 'chat' && mode !== 'customer_reply' ? <button className="hesc-action" type="button" disabled={frozen || submitting}
               onClick={() => {restartAssistantMode(session, mode); setError(null)}}>新建处理</button> : null}
@@ -670,7 +710,7 @@ function AssistantSessionPage({
           {separatedNavigation ? (
             <div className="hesc-ai-chat-toolbar">
               <label className="hesc-ai-select-label" htmlFor="assistant-active-model">当前模型
-                <select id="assistant-active-model" disabled={frozen || submitting || loadingModels || backendModels.length === 0 || Boolean(fixedChoice)} value={choiceValue} onChange={event => setSelectedConfigurationId(event.target.value)}>
+                <select id="assistant-active-model" disabled={backendId === 'codex' || frozen || submitting || modelBusy || backendModels.length === 0 || Boolean(fixedChoice)} value={choiceValue} onChange={event => setSelectedConfigurationId(event.target.value)}>
                   {defaultModel ? <option value="">企业默认 · {defaultModel.model}</option> : null}
                   {backendModels.map(model => <option key={model.configuration_id} value={model.configuration_id}>{modelLabel(model)}</option>)}
                 </select>
@@ -681,7 +721,7 @@ function AssistantSessionPage({
                 </select>
               </label>
               <span className="hesc-status" data-tone={backendReady ? 'success' : error ? 'error' : 'warning'}>
-                {loadingModels ? '正在加载模型' : backendReady ? '企业模型已就绪' : modelLoadFailed ? '正在恢复模型连接' : '当前后端不可用'}
+                {modelBusy ? '正在加载模型' : backendReady ? backendId === 'codex' ? '本机账号已连接' : '企业模型已就绪' : '当前后端不可用'}
               </span>
               {onRemind ? <button className="hesc-action" type="button" onClick={() => onRemind(composer)}>定时提醒</button> : null}
             </div>
@@ -713,7 +753,7 @@ function AssistantSessionPage({
                     ? '客户上下文＋企业知识，人工发送'
                     : item === 'knowledge_question'
                       ? '仅检索本企业已入库知识'
-                      : '由企业选定模型完成'}
+                      : item === 'summarize' && runtime?.localText ? '可使用本机账号或企业模型' : '由企业选定模型完成'}
                 </span>
               </button>
             ))}
@@ -722,7 +762,7 @@ function AssistantSessionPage({
           <label className="hesc-ai-select-label" htmlFor="tenant-ai-model">
             当前使用模型
             <select
-              disabled={frozen || submitting || loadingModels || backendModels.length === 0 || Boolean(fixedChoice)}
+              disabled={backendId === 'codex' || frozen || submitting || modelBusy || backendModels.length === 0 || Boolean(fixedChoice)}
               id="tenant-ai-model"
               onChange={event => setSelectedConfigurationId(event.target.value)}
               value={choiceValue}
@@ -740,7 +780,7 @@ function AssistantSessionPage({
             </select>
           </label>
           <p className="hesc-muted-copy">
-            {fixedChoice ? '此对话继续使用已确认的企业配置。' : '首次提交时确认并固定当前企业配置。'}
+            {fixedChoice ? '此处理继续使用已确认的账号、模型和人设。' : '首次提交时确认并固定当前账号、模型和人设。'}
           </p>
 
           <label className="hesc-ai-select-label" htmlFor="tenant-ai-persona">
@@ -772,7 +812,7 @@ function AssistantSessionPage({
             backendChoice={fixedChoice ?? (catalogChoice ? { ...catalogChoice, persona_id: personaId } : undefined)}
             choiceProtocolSupported={choiceProtocolSupported}
             configurationId={catalogChoice?.configuration_id}
-            ready={!loadingModels && backendReady}
+            ready={!modelBusy && backendReady}
             runtime={runtime}
             workspace={session.customerReply}
           />
@@ -820,7 +860,7 @@ function AssistantSessionPage({
             <form className="hesc-agent-composer" onSubmit={event => void submit(event)}>
               <label htmlFor="enterprise-ai-composer">{fileText ? '可补充处理要求' : '输入内容'}</label>
               <textarea
-                disabled={frozen || submitting || loadingModels || !backendReady || !personaReady}
+                disabled={frozen || submitting || modelBusy || !backendReady || !personaReady}
                 id="enterprise-ai-composer"
                 onChange={event => { if (!$enterprisePackageInstallFrozen.get()) {setComposer(event.target.value)} }}
                 onKeyDown={submitComposerOnEnter}
@@ -843,7 +883,7 @@ function AssistantSessionPage({
                 >
                   选择本地文本文件
                 </button>
-                {fileName ? <span>已选择：{fileName}</span> : <span>选择后在本机读取，提交后交由企业 AI 处理。</span>}
+                {fileName ? <span>已选择：{fileName}</span> : <span>选择后在本机读取，提交后交由所选模型处理。</span>}
                 {fileName ? (
                   <button className="hesc-text-action" onClick={clearAttachment} type="button">
                     移除
@@ -851,11 +891,11 @@ function AssistantSessionPage({
                 ) : null}
               </div>
               <div>
-                <span>{web.enabled ? 'DOC、DOCX、PDF 请先上传企业知识库。' : 'DOC、DOCX、PDF 请先上传企业知识库；模型密钥不会写入客户端或日志。'}</span>
+                <span>{backendId === 'codex' ? '仅处理你提交的文本，本机登录信息由系统保护。' : web.enabled ? 'DOC、DOCX、PDF 请先上传企业知识库。' : 'DOC、DOCX、PDF 请先上传企业知识库；模型密钥不会写入客户端或日志。'}</span>
                 <button
                   className="hesc-action"
                   disabled={
-                    submitting || loadingModels || !backendReady || !personaReady || (!composer.trim() && !fileText)
+                    submitting || modelBusy || !backendReady || !personaReady || (!composer.trim() && !fileText)
                   }
                   type="submit"
                 >
@@ -869,11 +909,11 @@ function AssistantSessionPage({
         </main>
       </div>
 
-      {error ? (
+      {visibleError ? (
         <div className="hesc-error" role="status">
           <div>
             <strong>企业 AI 助理暂不可用</strong>
-            <span>{error}</span>
+            <span>{visibleError}</span>
           </div>
         </div>
       ) : null}

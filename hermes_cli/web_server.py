@@ -10837,6 +10837,7 @@ def _gc_oauth_sessions() -> None:
     with _oauth_sessions_lock:
         stale = [sid for sid, sess in _oauth_sessions.items() if sess["created_at"] < cutoff]
         for sid in stale:
+            _oauth_sessions[sid]["cancelled"] = True
             _oauth_sessions.pop(sid, None)
 
 
@@ -11672,6 +11673,102 @@ def _codex_full_login_worker(session_id: str) -> None:
                 s["error_message"] = str(e)
 
 
+def _siwc_owned_request(request, profile):
+    from hermes_cli.auth import siwc_auth_path
+    _require_token(request)
+    try:
+        siwc_auth_path(profile)
+        owner = request.headers.get("x-hermes-text-owner", "")
+        if not re.fullmatch(r"[a-f0-9]{64}", owner):
+            raise ValueError()
+        return owner
+    except Exception:
+        raise HTTPException(status_code=400, detail="SIWC_OWNER_INVALID") from None
+
+
+async def _start_siwc_owned(request, profile):
+    from hermes_cli import auth
+    owner = _siwc_owned_request(request, profile)
+    try:
+        # This is the user's explicit connect action, allowing the official
+        # browser to select a new identity. Old records remain isolated.
+        attempt = auth.siwc_prepare_login(profile, new_account=True)
+    except Exception:
+        raise HTTPException(status_code=503, detail="SIWC_RECORD_UNAVAILABLE") from None
+    sid, sess = _new_oauth_session("openai-siwc", "pkce", profile)
+    ready = threading.Event()
+    with _oauth_sessions_lock:
+        for other in _oauth_sessions.values():
+            if other is not sess and other.get("provider") == "openai-siwc" and other.get("profile") == profile:
+                other["cancelled"] = True
+        sess.update(owner=owner, expires_at=time.time() + 180)
+
+    def cancelled():
+        with _oauth_sessions_lock:
+            return (sess.get("cancelled", False) or _oauth_sessions.get(sid) is not sess
+                    or time.time() >= sess["expires_at"])
+
+    def listening(uri):
+        with _oauth_sessions_lock:
+            if not sess.get("cancelled"):
+                sess["auth_url"] = auth.siwc_authorize_url(attempt, uri)
+                sess["redirect_uri"] = uri
+        ready.set()
+
+    def worker():
+        try:
+            callback = auth._oauth_wait_for_callback("http://127.0.0.1:0/auth/callback",
+                expected_state=attempt["state"], on_ready=listening, cancel_check=cancelled,
+                timeout_seconds=180, product_name="Hermes", provider=auth.SIWC_PROVIDER, ephemeral_port=True)
+            if cancelled():
+                return
+            record = auth.siwc_exchange_login(attempt, callback, sess["redirect_uri"])
+            with _oauth_sessions_lock:
+                if (not sess.get("cancelled") and _oauth_sessions.get(sid) is sess
+                        and time.time() < sess["expires_at"]):
+                    # Token exchange/JWKS network has finished. Cancellation and
+                    # store activation serialize here; auth adds generation CAS.
+                    auth.siwc_commit_login(attempt, record)
+                    sess["status"] = "approved"
+        except Exception:
+            with _oauth_sessions_lock:
+                if not sess.get("cancelled"):
+                    sess.update(status="error", error_message="SIWC_LOGIN_UNCONFIRMED")
+        finally:
+            ready.set()
+    threading.Thread(target=worker, daemon=True).start()
+    await asyncio.get_running_loop().run_in_executor(None, ready.wait, 10)
+    with _oauth_sessions_lock:
+        if not sess.get("auth_url") or sess.get("cancelled"):
+            sess["cancelled"] = True
+            raise HTTPException(status_code=503, detail="SIWC_LOGIN_UNAVAILABLE")
+        return {"session_id": sid, "auth_url": sess["auth_url"], "expires_at": sess["expires_at"]}
+
+
+@app.get("/api/providers/siwc/status")
+async def siwc_owned_status(request: Request, profile: str):
+    from hermes_cli.auth import siwc_status
+    _siwc_owned_request(request, profile)
+    try:
+        return siwc_status(profile)
+    except Exception:
+        return {"state": "unavailable", "reason": "SIWC_RECORD_UNAVAILABLE"}
+
+
+@app.post("/api/providers/siwc/logout")
+async def siwc_owned_logout(request: Request, profile: str):
+    from hermes_cli.auth import siwc_logout
+    owner = _siwc_owned_request(request, profile)
+    with _oauth_sessions_lock:
+        for sess in _oauth_sessions.values():
+            if sess.get("provider") == "openai-siwc" and sess.get("profile") == profile and sess.get("owner") == owner:
+                sess["cancelled"] = True
+    try:
+        return await asyncio.get_running_loop().run_in_executor(None, siwc_logout, profile)
+    except Exception:
+        raise HTTPException(status_code=503, detail="SIWC_LOGOUT_UNCONFIRMED") from None
+
+
 @app.post("/api/providers/oauth/{provider_id}/start")
 async def start_oauth_login(
     provider_id: str,
@@ -11681,6 +11778,8 @@ async def start_oauth_login(
     """Initiate an OAuth login flow. Token-protected."""
     _require_token(request)
     _gc_oauth_sessions()
+    if provider_id == "openai-siwc":
+        return await _start_siwc_owned(request, profile)
     _validate_oauth_profile(profile)
     valid = {p["id"] for p in _OAUTH_PROVIDER_CATALOG}
     if provider_id not in valid:
@@ -11730,6 +11829,7 @@ async def submit_oauth_code(
 async def poll_oauth_session(
     provider_id: str,
     session_id: str,
+    request: Request = None,
     profile: Optional[str] = None,
 ):
     """Poll a session's status (no auth — read-only state).
@@ -11744,6 +11844,12 @@ async def poll_oauth_session(
         raise HTTPException(status_code=404, detail="Session not found or expired")
     if sess["provider"] != provider_id:
         raise HTTPException(status_code=400, detail="Provider mismatch for session")
+    if provider_id == "openai-siwc":
+        owner = _siwc_owned_request(request, profile)
+        if sess.get("owner") != owner or sess.get("profile") != profile:
+            raise HTTPException(status_code=404, detail="SIWC_SESSION_UNAVAILABLE")
+        if sess.get("cancelled") or time.time() >= sess["expires_at"]:
+            return {"session_id": session_id, "status": "expired", "error_message": "SIWC_LOGIN_EXPIRED"}
     return {
         "session_id": session_id,
         "status": sess["status"],
@@ -11769,6 +11875,10 @@ async def cancel_oauth_session(
     _require_token(request)
     with _oauth_sessions_lock:
         sess = _oauth_sessions.get(session_id)
+        if sess is not None and sess.get("provider") == "openai-siwc":
+            owner = _siwc_owned_request(request, profile)
+            if sess.get("owner") != owner or sess.get("profile") != profile:
+                raise HTTPException(status_code=404, detail="SIWC_SESSION_UNAVAILABLE")
         if sess is not None:
             sess["cancelled"] = True
         _oauth_sessions.pop(session_id, None)
@@ -14521,7 +14631,7 @@ def _fallback_profile_dicts(profiles_mod) -> List[Dict[str, Any]]:
             entries = sorted(scan, key=lambda e: e.name)
         for entry in entries:
             entry_path = Path(entry.path)
-            if not entry.is_dir() or not profiles_mod._PROFILE_ID_RE.match(entry.name):
+            if entry.name.lower().startswith("enterprise-text-") or not entry.is_dir() or not profiles_mod._PROFILE_ID_RE.match(entry.name):
                 continue
             model, provider = _safe(lambda entry=entry_path: profiles_mod._read_config_model(entry), (None, None))
             profiles.append({

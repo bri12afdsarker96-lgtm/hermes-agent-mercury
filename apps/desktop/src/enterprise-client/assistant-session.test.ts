@@ -12,6 +12,27 @@ import {
 const choice = { backend_id: 'tenant_model' as const, configuration_id: 'owned', configuration_version: 4,
   model: 'model', runtime_protocol: 'openai_chat_completions', reasoning_effort: null, availability: 'available' as const }
 
+it('retains a summary unknown request across reload and gives a fresh operation a new durable identity', () => {
+  const runtime = { get: vi.fn(), disconnect: vi.fn() }
+  const first = assistantSessionFor(runtime, 'local-tenant', 'local-seat', true)
+  const summary = first.conversations.summarize
+  const originalId = summary.id
+  summary.backendChoice.set(choice)
+  summary.lastLocalRequest.set('owned-request')
+  summary.outcomeUnknown.set(true)
+  preserveAssistantSessionForPageReload(runtime)
+  const replacement = { get: vi.fn(), disconnect: vi.fn() }
+  const restored = assistantSessionFor(replacement, 'local-tenant', 'local-seat', true)
+  expect(restored.conversations.summarize.id).toBe(originalId)
+  expect(restored.conversations.summarize.lastLocalRequest.get()).toBe('owned-request')
+  expect(restored.conversations.summarize.outcomeUnknown.get()).toBe(true)
+  restartAssistantMode(restored, 'summarize')
+  expect(restored.conversations.summarize.id).not.toBe(originalId)
+  expect(restored.chatThreads.get().at(-1)?.id).toBe(originalId)
+  expect(restored.chatThreads.get().at(-1)?.lastLocalRequest.get()).toBe('owned-request')
+  releaseAssistantSession(replacement)
+})
+
 it('retains an in-flight choice and uncertainty across reload without restoring submitting state', () => {
   const runtime = { get: vi.fn(), disconnect: vi.fn() }
   const first = assistantSessionFor(runtime, 'pending-tenant', 'pending-seat', true)

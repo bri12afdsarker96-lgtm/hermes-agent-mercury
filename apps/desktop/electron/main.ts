@@ -1,5 +1,6 @@
 import { execFile, execFileSync, spawn } from 'node:child_process'
 import crypto from 'node:crypto'
+import { operateEnterpriseLocalText, type LocalTextRequest, type LocalTextDependencies } from './enterprise-local-text'
 import fs from 'node:fs'
 import http from 'node:http'
 import https from 'node:https'
@@ -13562,6 +13563,42 @@ ipcMain.handle('hermes:api', async (_event, request) => {
 // `fetchJson` engine (no browser Origin — the server's strict-Origin / no-CORS
 // posture stays intact). Consumed by the independent client's runtime adapter.
 const enterpriseSessions = new EnterpriseSessionStore()
+
+ipcMain.handle('hermes:enterprise:local-text', async (event, payload: LocalTextRequest) => {
+  if (!isEnterpriseUpdateSender(event)) {return { state: 'unavailable', reason: 'LOCAL_TEXT_OWNER_CHANGED' }}
+  const original = enterpriseSessions.resolve(event.sender.id, payload?.sessionId)
+  if (!original) {return { state: 'unavailable', reason: 'LOCAL_TEXT_OWNER_CHANGED' }}
+  const assertCurrent = () => {
+    if (!isEnterpriseUpdateSender(event) || enterpriseSessions.resolve(event.sender.id, payload.sessionId) !== original) {
+      throw new Error('LOCAL_TEXT_OWNER_CHANGED')
+    }
+  }
+  return operateEnterpriseLocalText(original, payload, {
+    assertCurrent,
+    async context(body) {
+      const active = await refreshedEnterpriseSession(event.sender.id, payload.sessionId)
+      assertCurrent()
+      if (!active) {throw new Error('LOCAL_TEXT_AUTHORITY_UNAVAILABLE')}
+      const data = await fetchJson(resolveEnterpriseUrl(active.baseUrl, '/api/tenant-ai-assist/context'), '', {
+        bearer: active.token, headers: { Origin: new URL(active.baseUrl).origin }, body, method: 'POST', timeoutMs: 15000
+      })
+      assertCurrent()
+      return data as Awaited<ReturnType<LocalTextDependencies['context']>>
+    },
+    async localConnection() {
+      const local = readDesktopConnectionsRegistry().connections.find(connection => connection.kind === 'local')
+      if (!local) {throw new Error('LOCAL_TEXT_LOCAL_RUNTIME_REQUIRED')}
+      const descriptor = await ensureRegistryBackend(local.id, 'default')
+      assertCurrent()
+      return descriptor as Awaited<ReturnType<LocalTextDependencies['localConnection']>>
+    },
+    async localApi(connection, apiPath, owner, method) {
+      return fetchJson(`${connection.baseUrl.replace(/\/$/, '')}${apiPath}`, connection.token, {
+        headers: { 'X-Hermes-Text-Owner': owner }, method, timeoutMs: 25000
+      })
+    }
+  })
+})
 const enterpriseSpeech = new EnterpriseSpeech()
 const enterpriseSpeechSenders = new WeakSet<WebContents>()
 app.on('before-quit', () => enterpriseSpeech.stopAll())

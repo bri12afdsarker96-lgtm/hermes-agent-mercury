@@ -13,6 +13,15 @@ _profile_scoped = _registry.profile_scoped
 
 @method("session.create")
 def _(rid, params: dict) -> dict:
+    if params.get("text_only") is True:
+        from hermes_cli import enterprise_text
+        try:
+            sid, entry = enterprise_text.create(params, current_transport())
+            with _sessions_lock:
+                _sessions[sid] = entry
+            return _ok(rid, {"session_id": sid, "text_only": True})
+        except Exception:
+            return _err(rid, 403, "LOCAL_TEXT_SESSION_UNAVAILABLE")
     sid = uuid.uuid4().hex[:8]
     key = _new_session_key()
     cols = int(params.get("cols", 80))
@@ -385,6 +394,13 @@ def _(rid, params: dict) -> dict:
             if tip and tip != target:
                 target = tip
                 found = db.get_session(target) or found
+
+        from hermes_cli.enterprise_text import is_reserved_session
+        try:
+            if is_reserved_session({**found, "id": target}):
+                return _err(rid, 403, "LOCAL_TEXT_GENERIC_METHOD_FORBIDDEN")
+        except Exception:
+            return _err(rid, 403, "LOCAL_TEXT_GENERIC_METHOD_FORBIDDEN")
 
         # Every interactive resume path materializes the model history, even when
         # omit_messages suppresses the response copy. Count the complete lineage

@@ -16,6 +16,6 @@
     "rootDir": "..",
     "outDir": "build/electron-types"
   },
-  "include": ["electron", "assets/*.json", "../shared/src/translucency.ts"],
+  "include": ["electron", "assets/*.json", "../shared/src/translucency.ts", "../shared/src/json-rpc-gateway.ts"],
   "exclude": ["src"]
 }

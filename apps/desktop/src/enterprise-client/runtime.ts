@@ -42,6 +42,20 @@ export const CODEX_SOFTWARE_DEFAULTS = { model: 'gpt-6-luna', reasoning_effort: 
 export function assistantBackendReason(reason: string | null | undefined): string {
   const messages: Readonly<Record<string, string>> = {
     CODEX_LOCAL_RUNTIME_REQUIRED: '当前企业助手尚未接通本机 Codex。接通后由你使用自己的账号登录。',
+    LOCAL_TEXT_CONNECT_REQUIRED: '请连接你自己的 ChatGPT 账号；实际模型权限以请求结果为准。',
+    LOCAL_TEXT_AUTHORIZATION_REQUIRED: '本机账号授权需要重新连接，原请求不会自动重发。',
+    LOCAL_TEXT_MODEL_UNAVAILABLE: '所连接账号的 gpt-6-luna / medium 请求不可用；未切换模型或账号。',
+    LOCAL_TEXT_RATE_LIMITED: '本机账号当前请求受限；请先核实原请求结果。',
+    LOCAL_TEXT_RUNTIME_UPDATE_REQUIRED: '本机运行环境需要更新后才能使用文本摘要。',
+    LOCAL_TEXT_RUNTIME_UNAVAILABLE: '本机运行环境暂未就绪，请检查本机连接后重试。',
+    LOCAL_TEXT_LOCAL_RUNTIME_REQUIRED: '当前没有可用的本机运行环境。',
+    LOCAL_TEXT_LOGIN_UNCONFIRMED: '本次登录未确认，请重新连接自己的账号。',
+    LOCAL_TEXT_OWNER_CHANGED: '当前登录或窗口已变化，请重新打开本机连接。',
+    LOCAL_TEXT_ACCOUNT_CHANGED: '本机模型账号已变化，请新建处理后重新选择。',
+    LOCAL_TEXT_CONTEXT_CHANGED: '权限、人设或请求内容已变化，请新建处理后重试。',
+    LOCAL_TEXT_RESULT_UNKNOWN: '结果尚未确认，未自动重发。可查询原请求，或保留记录并新建处理。',
+    LOCAL_TEXT_OBSERVATION_STOPPED: '已停止本地观察，结果未确认；这不表示远端已取消或没有产生费用。',
+    LOCAL_TEXT_UNAVAILABLE: '本机摘要暂不可用，请检查企业权限与本机连接。',
     // Older servers used a deployment-wide reason for this unimplemented local path.
     CODEX_QUALIFICATION_REQUIRED: '当前企业助手尚未接通本机 Codex。接通后由你使用自己的账号登录。',
     CONFIGURATION_CHANGED: '此对话的模型配置已变化，请新建对话后重新选择。',
@@ -51,14 +65,15 @@ export function assistantBackendReason(reason: string | null | undefined): strin
 }
 
 export class EnterpriseAssistantRequestUnknown extends Error {
-  constructor() {
-    super('本次 AI 请求结果未确认，未自动重发。请先核实结果，再发起新请求。')
+  constructor(reason?: string) {
+    super(reason ? `${assistantBackendReason(reason)} 本次未自动重发。` : '本次 AI 请求结果未确认，未自动重发。请先核实结果，再发起新请求。')
     this.name = 'EnterpriseAssistantRequestUnknown'
   }
 }
 
 /** Only a definitive HTTP rejection can safely remain editable for another submission. */
 export function assistantRequestError(reason: unknown): Error {
+  if (reason instanceof EnterpriseAssistantRequestUnknown) {return reason}
   if (reason instanceof EnterpriseClientError && [400, 401, 403, 404, 409, 413, 422, 429].includes(reason.status)) {
     return enterpriseClientErrorForStatus(reason.status)
   }
@@ -143,6 +158,7 @@ export interface EnterpriseMultipartUpload {
 }
 
 export interface EnterpriseClientRuntime {
+  localText?: (payload: Omit<import('../../electron/enterprise-local-text-types').LocalTextRequest, 'sessionId'>) => Promise<import('../../electron/enterprise-local-text-types').LocalTextReply>
   /** Non-secret scope for this device's per-seat presentation preferences. */
   serverOrigin?: string
   speech?: {
@@ -331,6 +347,10 @@ function enterpriseRuntimeFromSession(
 
   return {
     serverOrigin: new URL(connected.baseUrl).origin,
+    localText: enterpriseBridge.localText ? async payload => {
+      if (disconnected) {return { state: 'unavailable', reason: 'LOCAL_TEXT_OWNER_CHANGED' }}
+      return enterpriseBridge.localText!({ ...payload, sessionId })
+    } : undefined,
     speech: enterpriseBridge.speech ? {
       async status() {
         if (disconnected) {return { available: false }}

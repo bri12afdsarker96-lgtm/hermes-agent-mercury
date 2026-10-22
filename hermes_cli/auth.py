@@ -3147,7 +3147,13 @@ def _oauth_wait_for_callback(
 
 
 def _spotify_wait_for_callback(redirect_uri: str, *, timeout_seconds: float = 180.0) -> dict[str, Any]:
-    return _oauth_wait_for_callback(redirect_uri, timeout_seconds=timeout_seconds)
+    try:
+        return _oauth_wait_for_callback(redirect_uri, timeout_seconds=timeout_seconds)
+    except AuthError as error:
+        if error.code in {"callback_bind_failed", "callback_timeout"}:
+            raise AuthError("Spotify authorization callback unavailable", provider="spotify",
+                            code="spotify_" + error.code) from None
+        raise
 
 
 def _spotify_token_payload_to_state(
@@ -9420,6 +9426,11 @@ SIWC_JWKS_ENDPOINT = SIWC_ISSUER + "/.well-known/jwks.json"
 SIWC_REVOKE_ENDPOINT = SIWC_ISSUER + "/api/accounts/oauth/revoke"
 SIWC_SCOPES = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct"
 
+# This machine-owned namespace must not follow a request's profile ContextVar
+# or a later environment mutation. The trusted local backend fixes its home.
+from hermes_constants import get_process_hermes_home as _siwc_process_home
+_SIWC_LAUNCH_HOME = _siwc_process_home().expanduser().resolve()
+
 
 def _siwc_error(code: str) -> AuthError:
     return AuthError("Local ChatGPT connection unavailable", provider=SIWC_PROVIDER,
@@ -9430,7 +9441,10 @@ def siwc_auth_path(profile: str) -> Path:
     import re
     if not isinstance(profile, str) or not re.fullmatch(r"enterprise-text-[a-f0-9]{32}", profile):
         raise _siwc_error("siwc_owner_invalid")
-    return get_hermes_home() / "profiles" / profile / "auth.json"
+    path = _SIWC_LAUNCH_HOME / "profiles" / profile / "auth.json"
+    if os.path.normcase(str(path.parent.resolve())) != os.path.normcase(str(path.parent)):
+        raise _siwc_error("siwc_storage_unavailable")
+    return path
 
 
 def _siwc_dpapi(data: bytes, entropy: bytes, *, decrypt: bool = False) -> bytes:
@@ -9486,6 +9500,8 @@ def _siwc_unseal(profile: str, registration: str, stored: dict) -> dict:
                 or not record["subject"] or not record["client_id"] or record["client_id"] == "dynamic_agent_client"
                 or not isinstance(record.get("scopes"), list)
                 or not all(isinstance(value, str) for value in record["scopes"])
+                or not {"resource.invoke", "chatgpt.tokens.use.direct"}.issubset(record["scopes"])
+                or hashlib.sha256((record["client_id"] + ":" + record["subject"]).encode()).hexdigest()[:32] != registration
                 or type(record.get("expires_at")) not in (int, float)
                 or not math.isfinite(record["expires_at"])):
             raise ValueError("credential shape")
@@ -9495,13 +9511,33 @@ def _siwc_unseal(profile: str, registration: str, stored: dict) -> dict:
 
 
 def _siwc_state(store: dict) -> dict:
-    value = store.get("providers", {}).get(SIWC_PROVIDER)
-    if value is None:
-        return {"schema": 1, "host_id": "urn:uuid:" + str(uuid.uuid4()),
-                "generation": 0, "selected": None, "accounts": {}}
-    if not isinstance(value, dict) or value.get("schema") != 1 or not isinstance(value.get("accounts"), dict):
-        raise _siwc_error("siwc_storage_unavailable")
-    return dict(value)
+    try:
+        providers = store.get("providers", {})
+        if not isinstance(providers, dict):
+            raise ValueError()
+        value = providers.get(SIWC_PROVIDER)
+        if value is None:
+            return {"schema": 1, "host_id": "urn:uuid:" + str(uuid.uuid4()),
+                    "generation": 0, "selected": None, "accounts": {}}
+        if (not isinstance(value, dict) or value.get("schema") != 1
+                or type(value.get("generation")) is not int or value["generation"] < 0
+                or not isinstance(value.get("host_id"), str)
+                or not value["host_id"].startswith("urn:uuid:")
+                or not isinstance(value.get("accounts"), dict)):
+            raise ValueError()
+        uuid.UUID(value["host_id"][9:])
+        import re
+        for key, account in value["accounts"].items():
+            if (not isinstance(key, str) or not re.fullmatch(r"[a-f0-9]{32}", key)
+                    or not isinstance(account, dict) or not isinstance(account.get("credential"), dict)
+                    or type(account.get("revision")) is not int or account["revision"] < 1
+                    or type(account.get("refresh_pending", False)) is not bool):
+                raise ValueError()
+        if value.get("selected") is not None and value["selected"] not in value["accounts"]:
+            raise ValueError()
+        return dict(value)
+    except Exception:
+        raise _siwc_error("siwc_storage_unavailable") from None
 
 
 def _siwc_write(store: dict, state: dict, path: Path) -> None:

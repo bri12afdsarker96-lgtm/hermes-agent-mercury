@@ -340,6 +340,8 @@ def validate_profile_name(name: str) -> None:
     at alias-creation time anyway. ``default`` is a special pass-through —
     it's a valid alias for the built-in root profile.
     """
+    if normalize_profile_name(name).startswith("enterprise-text-"):
+        raise ValueError("Owned runtime profiles are private")
     if name == "default":
         return  # special alias for ~/.hermes
     if not _PROFILE_ID_RE.match(name):
@@ -374,6 +376,8 @@ def validate_alias_name(name: str) -> None:
 def get_profile_dir(name: str) -> Path:
     """Resolve a profile name to its HERMES_HOME directory."""
     canon = normalize_profile_name(name)
+    if canon.startswith("enterprise-text-"):
+        raise ValueError("Owned runtime profiles are private")
     if canon == "default":
         return _get_default_hermes_home()
     return _get_profiles_root() / canon
@@ -924,6 +928,8 @@ def list_profiles() -> List[ProfileInfo]:
             if not entry.is_dir():
                 continue
             name = entry.name
+            if name.lower().startswith("enterprise-text-"):
+                continue
             if name == "default":
                 continue  # already added as the built-in default above
             if not _PROFILE_ID_RE.match(name):
@@ -1008,6 +1014,8 @@ def profiles_to_serve(
             if not entry.is_dir():
                 continue
             name = entry.name
+            if name.lower().startswith("enterprise-text-"):
+                continue
             if name == "default":
                 continue  # default is the built-in entry already added above
             if not _PROFILE_ID_RE.match(name):
@@ -2228,6 +2236,8 @@ def import_profile(archive_path: str, name: Optional[str] = None) -> Path:
 
     top_dirs = _inspect_profile_archive_roots(archive)
     archive_root = top_dirs.pop() if len(top_dirs) == 1 else None
+    if archive_root and normalize_profile_name(archive_root).startswith("enterprise-text-"):
+        raise ValueError("Owned runtime profiles cannot be imported")
     inferred_name = name or archive_root
     if not inferred_name:
         raise ValueError(
@@ -2268,6 +2278,14 @@ def import_profile(archive_path: str, name: Optional[str] = None) -> Path:
             )
 
         final_source = extracted
+        from hermes_cli.enterprise_text import assert_importable_database
+        for staged_file in extracted.rglob("*"):
+            if any(part.lower().startswith("enterprise-text-") for part in staged_file.relative_to(extracted).parts):
+                raise ValueError("Owned runtime profiles cannot be imported")
+            if staged_file.name in {"state.db-wal", "state.db-shm", "state.db-journal"}:
+                raise ValueError("Live SQLite sidecars cannot be imported")
+            if staged_file.is_file() and staged_file.name == "state.db":
+                assert_importable_database(staged_file)
         if archive_root != canon:
             final_source = staging_root / canon
             extracted.rename(final_source)

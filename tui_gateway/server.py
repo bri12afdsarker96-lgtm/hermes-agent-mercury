@@ -193,6 +193,7 @@ _DETAIL_MODES = frozenset({"hidden", "collapsed", "expanded"})
 # response writes are safe.
 _LONG_HANDLERS = frozenset(
     {
+        "enterprise_text.submit",
         # Billing/usage reads each do a blocking portal HTTP fetch (state + usage
         # is two serial round-trips); keep them off the main stdin loop so a slow
         # portal can't stall approval.respond / session.interrupt / other RPCs.
@@ -921,6 +922,17 @@ def _teardown_session(session: dict | None, *, end_reason: str = "tui_close") ->
     make repeat calls harmless.
     """
     if not session:
+        return
+    if session.get("text_only"):
+        # No generic finalize/memory/plugin/agent lifecycle for pure text.
+        session["text_stop"].set()
+        stream = session.get("text_stream")
+        if stream is not None:
+            try:
+                stream.close()
+            except Exception:
+                pass
+        session["text_draft"] = None
         return
     _finalize_session(session, end_reason=end_reason)
     _announce_session_reclaimed(session, end_reason)
@@ -2065,6 +2077,20 @@ def handle_request(req: dict) -> dict | None:
         return normalized
 
     rid, method, params = normalized
+    if not method.startswith("enterprise_text.") and not (method == "session.create" and params.get("text_only") is True):
+        # Reserved profile/IDs cannot be interpreted by generic agent methods.
+        # The text store lives in its private explicit profile, never default DB.
+        def reserved(value):
+            if isinstance(value, str):
+                return value.strip().lower().startswith("enterprise-text-") or value == "enterprise_text"
+            if isinstance(value, dict):
+                return "_enterprise_text" in value or any(reserved(item) for item in value.values())
+            if isinstance(value, list):
+                return any(reserved(item) for item in value)
+            return False
+        entry = _sessions.get(params.get("session_id"))
+        if (entry and entry.get("text_only")) or reserved(params):
+            return _err(rid, 403, "LOCAL_TEXT_GENERIC_METHOD_FORBIDDEN")
     fn = _methods.get(method)
     if not fn:
         return _err(rid, -32601, f"unknown method: {method}")
@@ -15326,10 +15352,12 @@ from . import (  # noqa: E402
     methods_profiles as _methods_profiles,
     methods_prompt as _methods_prompt,
     methods_session as _methods_session,
+    methods_enterprise_text as _methods_enterprise_text,
     methods_tools as _methods_tools,
 )
 
 for _m in (
+    _methods_enterprise_text,
     _methods_session,
     _methods_prompt,
     _methods_config,

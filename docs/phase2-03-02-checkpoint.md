@@ -1,6 +1,31 @@
 # P2-03-02 暂停检查点
 
-## 2026-10-22 当前检查点
+## 2026-10-22 接线进度检查点（当前，提交后暂停）
+
+按用户“将进度提交到 GitHub”及收尾暂停指令，保存当前未完成实施。状态为 **PAUSED_BY_USER / PARTIAL_CHECKPOINT**；P2-03-02R2 **NOT_COMPLETE**，Qualification/Product Gates **NOT_PASSED**。本检查点用于恢复开发，不是可发布功能；不继续开发、登录、真实推理或 03-03。
+
+### 相对前次提交 `ccd84022f` 的进度
+
+- Owned 登录接线：在既有 web OAuth session、PKCE、loopback listener 和 auth store 上接入 SIWC start/poll/cancel/status/logout；固定私有存储根，校验损坏记录、scope、registration 和 generation，保留现有 Spotify 回调错误码。
+- 摘要后端接线：`runtime_provider.py` 只解析明确选择的 owned 记录；新增 `enterprise_text.py` 和窄 gateway handlers，复用既有 SessionDB、HandlerRegistry、线程池和 SDK 消费者。物理调用前在事务中提交 UNKNOWN，重复 request 查询原事实，原始草稿只在内存缓冲，停止只表示本地观察停止。
+- 通用入口隔离：profile 扫描/导入、canonical session resume、会话导入和 whole-backup restore 增加 reserved namespace 检查。相关必要依赖经两份独立预审登记；完整边界回归与实现复核尚未完成。
+- 桌面接线：新增 main 薄 adapter 与独立 public types，复用现有 EnterpriseSession 和 JsonRpcGatewayClient；接入 preload、固定本机连接、S prepare/revalidate/accept、账号 generation/TTL 检查。UI 增加用户自行连接、复制当次官方链接、取消、退出、停止观察和查询原请求，摘要 UNKNOWN 可恢复，固定 gpt-6-luna / medium。
+
+### 必须优先处理的未完成边界
+
+**主进程授权边界尚未闭合。** 独立 Source 预审确认，renderer 可取得普通本机 gateway token；新增 text RPC 与 owned SIWC HTTP 当前仍接受调用者自报 owner。普通 token 与 owner 格式不能证明请求来自 main，因此不能宣称所有登录或摘要请求均经过 main 持有的 fresh S 校权。
+
+待恢复时先完成该问题的第二份独立预审与最小修订：沿已有 local spawn/HTTP/RPC 接缝传递 main 私有证明，禁止进入 renderer descriptor、URL、日志或可继承子进程环境，缺失/错误时失败关闭。不能仅新增一个长期留在环境中的 secret；也不能把此修订宣称为同用户任意本机代码执行的隔离。完整 namespace 实现审查、UI 操作集成、当前 owned 登录与一次全新真实请求也仍待完成。
+
+### 本次收尾验证
+
+当前源码复测 **75 passed**：auth 27、owned web flow 3、既有 Spotify 3、strict Responses 27、既有消费者 2、SessionDB/gateway 13；桌面端 **45 passed**：main adapter 13、runtime 24、assistant session 8。Electron、renderer、e2e 三组 TypeScript 检查均 exit 0。测试为本地 fixture、真实临时 DB/loopback/DPAPI 与 MockTransport；不代表真实 OAuth、模型访问、完整 UI 或企业端到端通过。保留两条依赖弃用警告与既有失败证据。
+
+本次 JUnit：`.cache/audits/p2-03-02-wiring-20261022/checkpoint-python.xml` 与 `checkpoint-desktop.xml`。S context 代码保持前次 `d4d6e7b`，其 12 项 HTTP 测试是前次证据，本轮未重跑。原 UNKNOWN、旧 OAuth URL 均未重放，没有新登录、模型调用、部署或在线更新发布。
+
+仅保存当前源码、测试和正式进度文档；审计原件、临时依赖、本地学习记录、日志、发布包和无关 dirty 内容留在本地。推送检查点后暂停，等待用户指令。
+
+## 2026-10-22 前次基础检查点（历史）
 
 用户要求将进度提交到 GitHub，并在阶段收尾后暂停开发。当前为 **PAUSED_BY_USER / PARTIAL_CHECKPOINT**；P2-03-02R **NOT_COMPLETE**，Qualification/Product Gates **NOT_PASSED**。下方 2026-10-05 记录保持原时点含义，本节覆盖当前实施状态，不覆盖旧证据。
 

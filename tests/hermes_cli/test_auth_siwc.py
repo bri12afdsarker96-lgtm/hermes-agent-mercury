@@ -19,7 +19,7 @@ PROFILE = "enterprise-text-" + "a" * 32
 
 @pytest.fixture
 def owned(tmp_path, monkeypatch):
-    monkeypatch.setattr(auth, "get_hermes_home", lambda: tmp_path)
+    monkeypatch.setattr(auth, "_SIWC_LAUNCH_HOME", tmp_path.resolve())
     for name in ("_read_codex_tokens", "_pool_codex_access_token", "_recover_codex_tokens_from_cli", "_load_provider_state"):
         def forbidden(*args, **kwargs):
             pytest.fail("default credential fallback called")

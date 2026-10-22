@@ -185,6 +185,7 @@ declare global {
        * `{ path, method, body }`. Optional: absent outside the desktop shell.
        */
       enterprise?: {
+        localText?: (payload: import('../electron/enterprise-local-text-types').LocalTextRequest) => Promise<import('../electron/enterprise-local-text-types').LocalTextReply>
         /** Local package updates are available independently of login and role. */
         packageUpdate?: {
           status(): Promise<EnterprisePackageUpdateState>
