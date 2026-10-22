@@ -2225,6 +2225,11 @@
     overflow: hidden;
   }
 
+  .hesc-assistant-page[data-layout='conversation-workspace']:not([data-mode='customer_reply']) .hesc-tenant-ai-layout {
+    height: auto;
+    min-height: 0;
+  }
+
   .hesc-assistant-page[data-layout='conversation-workspace'] .hesc-agent-messages {
     min-height: 0;
     overflow-y: auto;

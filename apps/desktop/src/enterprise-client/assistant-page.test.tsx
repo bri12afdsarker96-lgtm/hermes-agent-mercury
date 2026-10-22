@@ -6,6 +6,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { AssistantPage } from './assistant-page'
 import { assistantSessionFor, createAssistantChatThread, preserveAssistantSessionForPageReload, releaseAssistantSession } from './assistant-session'
 import type { EnterpriseClientRuntime } from './runtime'
+import { WebPresentationContext } from './web-presentation'
+import { $enterprisePackageInstallFrozen } from './enterprise-install-readiness'
 
 function render(ui: ReactNode) {
   return renderView(ui, { wrapper: ({ children }) => <I18nProvider initialLocale="zh" configClient={null}>{children}</I18nProvider> })
@@ -56,6 +58,73 @@ describe('AssistantPage', () => {
       get: vi.fn(async (path: string) => path === '/api/tenant-ai-personas' ? personaPool : { configured: false, models: [], backends: [] }) as EnterpriseClientRuntime['get'] }
   }
 
+  it('opens an owned text summary from the actual separated workspace without tenant model configuration', async () => {
+    const localText = vi.fn(async (payload: { action: string }) => payload.action === 'submit'
+      ? { state: 'completed', text: '分栏工作台摘要已接受', backend_choice: ownedChoice }
+      : { state: 'ready', choice: ownedChoice })
+    const runtime = localRuntime(localText)
+    render(<WebPresentationContext.Provider value><AssistantPage separatedNavigation runtime={runtime} principalId="workspace-owned-summary" /></WebPresentationContext.Provider>)
+    const summary = screen.getByRole('button', { name: '文本摘要' })
+    fireEvent.click(summary)
+    expect(screen.getByTestId('enterprise-client-assistant').dataset.mode).toBe('summarize')
+    expect(localText.mock.calls.every(([payload]) => payload.action === 'status')).toBe(true)
+    expect(runtime.post).not.toHaveBeenCalled()
+    fireEvent.change(await screen.findByLabelText('运行后端'), { target: { value: 'codex' } })
+    await waitFor(() => expect((screen.getByLabelText('输入内容') as HTMLTextAreaElement).disabled).toBe(false))
+    fireEvent.change(screen.getByLabelText('输入内容'), { target: { value: '直接粘贴的摘要材料' } })
+    fireEvent.click(screen.getByRole('button', { name: '提交处理' }))
+    await screen.findByText('分栏工作台摘要已接受')
+    expect(localText.mock.calls.filter(([payload]) => payload.action === 'submit')).toHaveLength(1)
+    expect(localText).toHaveBeenCalledWith(expect.objectContaining({ action: 'submit', content: '直接粘贴的摘要材料', choice: expect.objectContaining(ownedChoice) }))
+    expect(runtime.post).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '＋ 新建对话' }))
+    expect(screen.getByTestId('enterprise-client-assistant').dataset.mode).toBe('chat')
+  })
+
+  it.each([
+    { local: false, mode: 'chat' as const },
+    { local: true, mode: 'customer_reply' as const },
+    { local: true, mode: 'knowledge_question' as const }
+  ])('keeps the owned summary entry out of unrelated workspace surfaces ($local/$mode)', async ({ local, mode }) => {
+    const localText = vi.fn(async () => ({ state: 'ready', choice: ownedChoice }))
+    const runtime = local ? localRuntime(localText) : runtimeFor()
+    const principalId = `workspace-no-summary-${local}-${mode}`
+    assistantSessionFor(runtime, undefined, principalId).mode.set(mode)
+    render(<WebPresentationContext.Provider value><AssistantPage separatedNavigation runtime={runtime} principalId={principalId} /></WebPresentationContext.Provider>)
+    await screen.findByLabelText('运行后端')
+    expect(screen.queryByRole('button', { name: '文本摘要' })).toBeNull()
+    expect(screen.getByTestId('enterprise-client-assistant').dataset.mode).toBe(mode)
+    expect(runtime.post).not.toHaveBeenCalled()
+  })
+
+  it('blocks the workspace summary mode switch while installation is frozen or a request is pending', async () => {
+    let resolve!: (value: { state: 'unknown'; reason: string }) => void
+    const held = new Promise<{ state: 'unknown'; reason: string }>(done => { resolve = done })
+    const localText = vi.fn(async (payload: { action: string }) => payload.action === 'submit'
+      ? held : { state: 'ready', choice: ownedChoice })
+    const runtime = localRuntime(localText)
+    render(<WebPresentationContext.Provider value><AssistantPage separatedNavigation runtime={runtime} principalId="workspace-summary-guard" /></WebPresentationContext.Provider>)
+    const summary = screen.getByRole('button', { name: '文本摘要' }) as HTMLButtonElement
+    try {
+      act(() => $enterprisePackageInstallFrozen.set(true))
+      expect(summary.disabled).toBe(true)
+      fireEvent.click(summary)
+      expect(screen.getByTestId('enterprise-client-assistant').dataset.mode).toBe('chat')
+      act(() => $enterprisePackageInstallFrozen.set(false))
+      fireEvent.click(summary)
+      fireEvent.change(await screen.findByLabelText('运行后端'), { target: { value: 'codex' } })
+      await waitFor(() => expect((screen.getByLabelText('输入内容') as HTMLTextAreaElement).disabled).toBe(false))
+      fireEvent.change(screen.getByLabelText('输入内容'), { target: { value: '在途摘要' } })
+      fireEvent.click(screen.getByRole('button', { name: '提交处理' }))
+      await waitFor(() => expect(summary.disabled).toBe(true))
+      fireEvent.click(summary)
+      expect(localText.mock.calls.filter(([payload]) => payload.action === 'submit')).toHaveLength(1)
+      expect(screen.getByTestId('enterprise-client-assistant').dataset.mode).toBe('summarize')
+      await act(async () => { resolve({ state: 'unknown', reason: 'LOCAL_TEXT_RESULT_UNKNOWN' }); await held })
+      await screen.findByRole('button', { name: '查询原请求' })
+    } finally { act(() => $enterprisePackageInstallFrozen.set(false)) }
+  })
+
   it('submits a fixed owned summary with no configured tenant model or tenant write', async () => {
     const localText = vi.fn(async (payload: { action: string }) => payload.action === 'submit'
       ? { state: 'completed', text: '本机摘要已接受', backend_choice: ownedChoice }
@@ -78,12 +147,15 @@ describe('AssistantPage', () => {
       : payload.action === 'requestStatus' ? { state: 'completed', text: '原请求的已接受摘要', backend_choice: ownedChoice }
         : { state: 'ready', choice: ownedChoice })
     const runtime = localRuntime(localText)
-    render(<AssistantPage runtime={runtime} principalId="owned-query-once" />)
+    render(<WebPresentationContext.Provider value><AssistantPage separatedNavigation runtime={runtime} principalId="owned-query-once" /></WebPresentationContext.Provider>)
     fireEvent.change(await screen.findByLabelText('运行后端'), { target: { value: 'codex' } })
     fireEvent.click(screen.getByRole('button', { name: /文本摘要/ }))
     fireEvent.change(screen.getByLabelText('输入内容'), { target: { value: '只发一次' } })
     await waitFor(() => expect((screen.getByRole('button', { name: '提交处理' }) as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(screen.getByRole('button', { name: '提交处理' }))
+    await screen.findByRole('button', { name: '查询原请求' })
+    fireEvent.click(screen.getByRole('button', { name: '文本摘要' }))
+    expect((screen.getByRole('button', { name: '提交处理' }) as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(await screen.findByRole('button', { name: '查询原请求' }))
     await screen.findByText('原请求的已接受摘要')
     const requests = localText.mock.calls.map(([payload]) => payload as { action: string; requestId?: string; conversationId?: string })

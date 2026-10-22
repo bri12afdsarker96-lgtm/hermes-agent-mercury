@@ -617,6 +617,12 @@ function AssistantSessionPage({
             <button className="hesc-action hesc-ai-new-chat" disabled={frozen || submitting} onClick={startNewConversation} type="button">
               ＋ 新建对话
             </button>
+            {runtime?.localText && (mode === 'chat' || mode === 'summarize') ? (
+              <button aria-pressed={mode === 'summarize'} className="hesc-action" disabled={frozen || submitting}
+                onClick={() => {if (!$enterprisePackageInstallFrozen.get() && !submitting) {setMode('summarize')}}} type="button">
+                文本摘要
+              </button>
+            ) : null}
             <div className="hesc-ai-history-heading">
               <strong>对话记录</strong>
               <span>当前登录会话 · 刷新保持</span>

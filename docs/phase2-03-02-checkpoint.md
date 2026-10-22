@@ -1,5 +1,25 @@
 # P2-03-02 阶段检查点
 
+## 2026-10-23 P2-03-02R3 原页面输入与生命周期合成验证（最新）
+
+当前唯一项仍为 **P2-03-02R3 / PRIMARY_UI_AND_LIFECYCLE_SYNTHETIC_CLOSURE**，结果 **PARTIAL_SYNTHETIC_UI_VALIDATED_STOP_PENDING**。本轮只修复三个 M 文件：`assistant-page.tsx` 在现有分栏布局加入本机能力可用时的“文本摘要”入口，沿用原模式切换与冻结/在途保护；`assistant-page.test.tsx` 补实际布局及原请求不重发回归；`enterprise-client.css` 仅覆盖宽屏、非客户回复分栏的固定高度与 540px 最小高度冲突，使输入及提交区域可达。没有改变模型、企业权限、main/preload 或请求超时。S 运行代码未改。
+
+组件文件 23/23 通过及 renderer 类型检查 exit0 来自 Builder 的原实际工具执行回执，不是 root 或 Source 重新独立运行的结果；本轮 CSS 以实际原生布局检查验证，没有新增镜像 CSS 测试或重复运行组件/类型检查。真实 Vite 构建从已审源码生成 renderer，未补丁修改编译后的 JavaScript；main/preload 继续使用原冻结产品字节。
+
+attempt-4、5、6 的首个失败与退出证据保留：4 的真实导航探针成功，但原布局没有可见粘贴摘要入口；5 的后端选择驱动失败没有留下足以确定原因的子步骤，不能追认缩放或按键为已证唯一原因；6 已用实际 zoom 与逐步焦点/选择值证明摘要及 codex 选择，但输入/提交被裁切，滚动未使其可达，且当时未直接采集祖先计算样式。以上三轮均无 SDK 发送。测试驱动后续按真实 zoom 转换坐标，保持默认窗口及缩放，没有强显隐藏控件或用业务 IPC 替代页面输入。
+
+attempt-7 使用原页面 Chromium 输入事件，观察到默认 contentSize 1220×800 DIP、zoom0.9 下摘要/后端选择、输入及提交区域可命中，布局 min-height 为0。此前一次 idle 期间模式从摘要变回聊天、焦点从后端移至原 AI 导航的现象原因未知；原失败保留，没有据此修改产品或称周期刷新必然重建 session。随后按原页面完成以下有限场景：
+
+- **摘要成功**：原摘要按钮、后端选择框、输入框和提交按钮实际触发 React→preload→main→S。SDK MockTransport 发送1次，发送前 DB 已持久 UNKNOWN；S prepare/revalidate/净化 accept 均完成，backend accept 后持久 completed，main 返回 completed。原页有对应合成 marker、净化 canary 缺失及视口/祖先裁切交集中心命中，但答案仅部分可见，不能称完整展示。DOM `textContent` hash（`d525…`）与 S/main 净化文本 hash（`689cc75e…`）不同，未声称两者字节相同。
+- **在途 reload 与新会话隔离**：第二个原 UI 请求发送1次并持久 UNKNOWN 后实际 reload，先观察到隔离登录页，没有自动重发。随后单独执行显式测试准备的第二次 reload，经原 password handler 与 S 正常登录建立 sameTenantOther 新 session；这不是 UI 登录、自动恢复或同 owner 查询成功。旧有效 SID 的只读程序化 IPC 查询拒绝 OWNER_CHANGED。释放原合成响应后，旧请求保留 UNKNOWN，新员工页没有旧 marker；SDK 累计仍2、S accept 累计仍1。此 SID 查询是 IPC 旁证，不冒充页面按钮动作。
+- **停止场景未闭合**：sameTenantOther 的第三个原 UI 请求到 S prepare 后，在本机文本 runtime 的 session.create 至 revalidate 区间返回 unavailable/LOCAL_TEXT_UNAVAILABLE。只读 SQLite 回执确认该 owner 的 DB 已有1行 enterprise_text 会话，owner_scope/Luna/medium/generation1 匹配，但 request facts 为空；不能说 create 未执行。没有第三次 SDK 发送、持有响应或原“停止观察”动作，不能记在途 stop/第三请求迟到隔离通过。实际原因尚未知，约10秒的返回区间与现有 trace 不足以细分具体 timer、DB、RPC 错误或 WS 原因；没有放宽超时或重发。随后原账户安全/企业退出登录按钮实际完成注销，旧有效 SID 查询拒绝且原页回到登录页；这是注销失效验证，不是上述在途竞态验证。
+
+实际计数仅为 SDK MockTransport2、发送前 UNKNOWN2、S accept1、tenant model0；primary 两行 DB 请求事实分别为 success completed、reload unknown。没有真实 OAuth、模型网络、企业工具或设备副作用。合成 S 为 strict SQLite / capability-policy-off，不构成 PG/RLS/动态 EffectivePermissions 资格；Chromium 应用输入也不等于 OS 鼠标或截图覆盖。旧14项 IPC admission 的限定接受保留，不扩展为未运行的 owner/connection/account-generation 全矩阵。正常收尾 controller OS0、M/S 各 exit0，13个已记录 PID/CreationDate 无剩余；不扩大为全部未观察历史进程证明。
+
+最终 attempt-7 结果回执为既有审计 `p2-03-02-main-authority-20261022/.agent_tmp/native-ui-synthetic-1/attempt-7/native-results-1.json`，SHA256 `2340e1f6ca4c10f189d429aae823d3ccf663b9ed162257fca29d7bde56ad5ff8`；50个文件绑定及3个当前产品源码绑定已由 Source 实际核验一致，仅支持上述有限结论，不代表三场景全部通过。
+
+用户此前已确认窗口可见；本轮核对原待验入口的旧进程身份已消失，目录保留，不能称其持续存活或把 PID 复用对象当 owned 进程。上次官方公开 JWKS 复测为2026-10-22 11:30 UTC的单次403/Cloudflare HTML，本轮没有新增网络探针，也不推断全部网络、账号或地区原因。停止、完整结果可见性及其余技术闭合仍待完成；P2-03-02、Qualification/Product Gates 与二期均未完成，无下一 Gate、部署或发布。进度提交和推送不自动暂停持续研发。
+
 ## 2026-10-22 P2-03-02R3 原生 IPC 有限验证与界面工具缺口（最新）
 
 本轮基于 M `71781278a` / S `26e471b`，产品源码与正式测试未变；仅本地隔离夹具和进度文档更新。标准 real-main、preload、renderer 原字节复用，没有把测试注入写入产品。当前 **PARTIAL_NATIVE_IPC_ADMISSION_VALIDATED / UI_ACCEPTANCE_PENDING**，下方记录保留其历史时点。

@@ -1,5 +1,13 @@
 # Mercury 二期企业集成基线（P2-00B）
 
+## 2026-10-23 P2-03-02R3 原页面合成验证与剩余停止场景（最新）
+
+当前仍为 **PARTIAL_SYNTHETIC_UI_VALIDATED_STOP_PENDING / P2-03-02R3**。M 仅修复当前分栏的本机文本摘要入口、相关实际布局/UNKNOWN 组件回归及宽屏最小高度冲突；S 运行代码未改。组件23/23及 renderer 类型检查通过依据 Builder 原实际工具执行回执，不冒称 root/Source 独立重跑。新 renderer 经原 Vite 配置真实构建；main/preload、权限及原超时不变。attempt-4/5/6 的首个失败原件保留，没有用新成功抹去失败或认定旧驱动失败唯一原因。
+
+attempt-7 原页面输入实际完成摘要 prepare→revalidate→SDK MockTransport1/发送前持久 UNKNOWN→S净化 accept→backend/main completed。原页 marker、净化 canary 缺失及裁切交集命中已观测，但答案部分可见；DOM textContent hash 与 S/main 文本 hash 不同，不称字节一致。第二个在途请求实际 reload 后先隔离为登录页，没有重发；单独显式测试准备建立另一员工 session 后，旧有效 SID 的只读 IPC 拒绝，释放旧响应不在新页发布，原请求保留 UNKNOWN，累计 SDK2/S accept1。该准备不是 UI 登录、自动恢复或同 owner 原请求恢复成功。
+
+第三个原 UI 请求在 S prepare 后、本机 runtime session.create 至 revalidate 区间返回 LOCAL_TEXT_UNAVAILABLE，原因未知。只读 DB 已见该 owner 的匹配 enterprise_text 会话行、request facts 为空，不能说 create 未执行；未到 SDK/持有响应/停止观察，不能记 stop 或第三请求迟到场景通过。其后原企业注销按钮及旧 SID 拒绝/登录页有限验证成立。没有放宽超时或重发。正常收尾 controller/M/S 各 exit0，13个已记录 PID/CreationDate 无剩余，不证明全部未观察历史进程。SDK 全为模拟；没有真实 OAuth/模型、PG/RLS 或 OS 点击/截图资格。原入口旧进程身份已消失而目录保留，上次2026-10-22 11:30 UTC公开 JWKS 单次403仍为历史事实，本轮无新探针。最终回执与完整限界见 [阶段检查点](phase2-03-02-checkpoint.md)；attempt-7 `native-results-1.json` SHA256 为 `2340e1f6ca4c10f189d429aae823d3ccf663b9ed162257fca29d7bde56ad5ff8`，Source 已实际核验50个文件绑定与3个产品源码绑定一致。P2-03-02/Gates及二期未完成，不进入03-03、部署或发布，推送不自动暂停。
+
 ## 2026-10-22 P2-03-02R3 原生 IPC 有限结果（最新）
 
 产品源码/正式测试保持 M `71781278a` / S `26e471b`。实际 Electron 主窗口建立合成企业 session，后台就绪；辅助窗口携合法 SID 与主窗口 never-valid SID 共 14 个真实 IPC 动作均拒绝，负例窗口内已声明 HTTP/SDK/tenant 计数无增量，主 status 前后 ready。子 frame 仅观察自身 bridge 缺失，不计实际 child IPC。三位独立 actual reviewer 均只接受此范围。
