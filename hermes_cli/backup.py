@@ -966,9 +966,13 @@ def _extract_member_atomically(
     # ``_preserve_file_mode`` returns None when the target does not exist (or
     # cannot be stat'd), in which case the umask-derived create-mode applies —
     # the same shape as ``atomic_yaml_write``'s ``create_mode`` fallback.
-    if any(part.lower().startswith("enterprise-text-") for part in target.resolve().parts):
-        raise OSError("Owned runtime state cannot be restored")
-    if target.name in {"state.db-wal", "state.db-shm", "state.db-journal"}:
+    from hermes_cli.enterprise_text import assert_generic_runtime_path, sqlite_runtime_filename
+    try:
+        assert_generic_runtime_path(target)
+    except ValueError:
+        raise OSError("Owned runtime state cannot be restored") from None
+    filenames = {sqlite_runtime_filename(target), sqlite_runtime_filename(target.resolve())}
+    if filenames & {"state.db-wal", "state.db-shm", "state.db-journal"}:
         raise OSError("Live SQLite sidecars cannot be restored")
     mode = _preserve_file_mode(target)
     owner = _preserve_file_owner(target)
@@ -1009,7 +1013,7 @@ def _extract_member_atomically(
                 shutil.copyfileobj(src, dst)
             dst.flush()
             os.fsync(dst.fileno())
-        if target.name == "state.db":
+        if "state.db" in filenames:
             from hermes_cli.enterprise_text import assert_importable_database
             try:
                 assert_importable_database(Path(tmp_name))

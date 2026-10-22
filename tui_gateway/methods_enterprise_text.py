@@ -6,7 +6,10 @@ _registry = HandlerRegistry()
 
 @_registry.method("enterprise_text.capabilities")
 def capabilities(rid, params):
-    return _ok(rid, {"protocol_version": 1, "model": "gpt-6-luna", "reasoning_effort": "medium"})
+    # Public per-socket challenge only. Never read auth/store/model state here.
+    from hermes_cli.enterprise_text import proof_runtime_id
+    return _ok(rid, {"protocol_version": 2, "runtime_id": proof_runtime_id(),
+                     "channel_id": getattr(current_transport(), "enterprise_text_channel", "")})
 
 
 @_registry.method("enterprise_text.submit")

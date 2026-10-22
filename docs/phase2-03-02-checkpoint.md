@@ -1,4 +1,26 @@
-# P2-03-02 暂停检查点
+# P2-03-02 阶段检查点
+
+## 2026-10-22 P2-03-02R3 GitHub 进度快照（当前）
+
+按本次用户“将进度提交到 GitHub”保存当前源码、正式测试和进度文档。状态 **PARTIAL_CHECKPOINT / NOT_ACCEPTED**，P2-03-02 尚未完成，Qualification/Product Gates 尚未通过；本次提交不表示发布、验收通过或自动暂停。后续范围仍依当前人类指令与监督派发判定，不能从下方历史暂停记录推断。
+
+相对 M `f27403243`：两份独立预审后，在既有 Python spawn、HTTP 和 JSON-RPC 接缝加入 main 私有证明，绑定 runtime、当前连接、操作、完整参数、有效期和单次 nonce。bootstrap 在启动早期移除私有环境值，子进程最终环境合并与 env writer 拒绝传播；证明不进入 renderer descriptor、URL 或日志。复用现有 auth store、OAuth sessions、SessionDB 和 SDK 消费者，不建立第二套通用管理器。独立安全复核仅在所读代码和合成验证范围内通过，不等于完整产品验收。
+
+namespace 修订包含实际路径/junction、默认与显式 profile、Windows 文件名别名、导入/备份及 SQLite 连接关闭；普通业务文本中的保留词不作为权限判断。UI 增加迟到回复隔离，清除失效登录链接，明确复制失败与停止观察错误。用户自行连接账号，固定 gpt-6-luna / medium，个人模型身份仍不能替代 S 企业权限。
+
+验证证据：当前 Python 组合 **105 passed**（`python-final-first.xml`）；桌面相关 **92 passed**（`desktop-combined.xml`），三组 TypeScript 检查通过。独立安全复核另有 Python proof 30、独立关联边界 9、Node proof/lifecycle 42 通过，存在重叠，不能相加为总测试数。namespace 最新独立完整复跑 **34 passed**（`ns-upstream-frozen-final.xml`），保留此前 33 通过/1 子进程超时与单项复跑证据，未改原 fixture 或 35 秒阈值；父解释器以 UTF-8 模式启动。补充边界 **20 passed / 4 skipped**，其中 5 个真实 Windows junction 用例通过，4 跳过为 symlink 权限限制。所有首次失败和旧证据保留于本地 `p2-03-02-main-authority-20261022` 审计。
+
+未完成项：旧 profile/backup/env 回归 **193 passed / 13 failed / 9 skipped**，失败涉及 Windows 权限/编码/脚本后缀/路径与换行等现象，尚未完成逐项基线归因，不能声称整套通过。实际 Node adapter → Python serve → 临时 S 合成验证仅完成 capabilities/status；首次 submit 返回 `LOCAL_TEXT_UNAVAILABLE`，尚未到 S prepare 或 SDK send，端到端未通过。未启动真实 Electron 原生入口验收，没有真实 OAuth、模型请求、部署或在线更新。原 UNKNOWN 不重放，停止观察不证明远端取消或未计费。
+
+S 本轮仅同步正式进度文档，运行代码保持既有 context 实现。审计日志、临时依赖、构建/安装包、本地学习记录和无关 dirty 文件不纳入提交。
+
+## 2026-10-22 P2-03-02R3 持续开发（当前）
+
+已通过实际消息记录确认恢复授权：监督对话 `01a10694-60c4-7202-b4c9-fd94855797fa` 的人类消息 `01a161c8-cde6-7853-ab9f-17868f0aee10`（所在 turn 起始 2026-10-22T04:05:11Z）要求“继续推进二期项目开发。执行窗口还用 二期基线0.20.9”；随后 `01a161fc-8b0f-7fe0-84aa-726cf0eda018`（turn 起始 05:01:42Z）再次要求“继续推进”。两条均晚于本对话历史暂停/提交指令。此前将旧暂停套用于当前研发属于执行状态错误，已纠正。
+
+当前 **ACTIVE_IMPLEMENTATION / P2-03-02R3**，基线 M `f27403243`、S `c32741b`。本项先完成第二独立预审，再闭合 main 私有证明与所有 owned auth/text 入口，复核 namespace/once、既有安全反例、产品入口与实际用户接入。新控制与证据在 `.cache/audits/p2-03-02-main-authority-20261022/`；恢复时先核其 `control.json` 及更新的人类消息，不能依据历史 checkpoint 文字自动暂停。
+
+本项尚未完成或验收；不进入下一 Gate、不部署或再发布。交付检查点不等于停止研发。以下暂停段落只保留历史时点含义。
 
 ## 2026-10-22 接线进度检查点（当前，提交后暂停）
 

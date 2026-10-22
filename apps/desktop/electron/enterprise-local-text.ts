@@ -43,6 +43,7 @@ export interface LocalTextDependencies {
   context(body: Record<string, unknown>): Promise<Context>
   localConnection(): Promise<{ baseUrl: string; wsUrl: string; token: string; mode?: string; source?: string }>
   localApi(connection: { baseUrl: string; token: string }, path: string, owner: string, method: string): Promise<any>
+  proof(connection: { baseUrl: string; token: string }, operation: string, payload: unknown, channel: string, runtimeId?: string): string
   now?(): number
   createClient?(): Pick<JsonRpcGatewayClient, 'connect' | 'request' | 'close'>
 }
@@ -59,6 +60,7 @@ export interface EnterpriseLocalTextState {
   conversations: Record<string, { id: string; binding: string }>
   init: Promise<void>
   client: Pick<JsonRpcGatewayClient, 'connect' | 'request' | 'close'>
+  request<T = any>(method: string, params: Record<string, unknown>, timeout?: number): Promise<T>
   api(path: string, method?: string): Promise<any>
   dispose(): void
 }
@@ -66,6 +68,60 @@ export interface EnterpriseLocalTextState {
 const hash = (value: string) => crypto.createHash('sha256').update(value).digest('hex')
 const id = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,96}$/.test(value)
 const finite = (reason: string) => new Error(reason)
+
+export function canonicalTextProofPayload(value: unknown): string {
+  const visit = (item: unknown, depth = 0): string => {
+    if (depth > 16) {throw finite('LOCAL_TEXT_REQUEST_INVALID')}
+    if (item === null || typeof item === 'boolean') {return JSON.stringify(item)}
+    if (typeof item === 'number' && Number.isSafeInteger(item)) {return JSON.stringify(item)}
+    if (typeof item === 'string') {
+      if (Buffer.from(item, 'utf8').toString('utf8') !== item) {throw finite('LOCAL_TEXT_REQUEST_INVALID')}
+      return JSON.stringify(item)
+    }
+    if (Array.isArray(item)) {
+      if (Object.keys(item).length !== item.length) {throw finite('LOCAL_TEXT_REQUEST_INVALID')}
+      for (let index = 0; index < item.length; index += 1) {
+        if (!Object.hasOwn(item, index)) {throw finite('LOCAL_TEXT_REQUEST_INVALID')}
+      }
+      return `[${item.map(child => visit(child, depth + 1)).join(',')}]`
+    }
+    if (item && typeof item === 'object' && Object.getPrototypeOf(item) === Object.prototype) {
+      return `{${Object.keys(item).sort().map(key => {
+        if (!/^[A-Za-z0-9_]+$/.test(key)) {throw finite('LOCAL_TEXT_REQUEST_INVALID')}
+        return `${JSON.stringify(key)}:${visit((item as Record<string, unknown>)[key], depth + 1)}`
+      }).join(',')}}`
+    }
+    throw finite('LOCAL_TEXT_REQUEST_INVALID')
+  }
+  const encoded = visit(value)
+  if (Buffer.byteLength(encoded, 'utf8') > 262144) {throw finite('LOCAL_TEXT_REQUEST_INVALID')}
+  return encoded
+}
+
+/** One spawned runtime's private closure, never a renderer descriptor. */
+export function createEnterpriseTextAuthority(backend: { kind?: string; shell?: boolean; args?: string[] }, isCurrent: () => boolean, clock = Date.now) {
+  if (backend.kind !== 'python' || backend.shell !== false || backend.args?.[0] !== '-m' || backend.args[1] !== 'hermes_cli.main') {return null}
+  const key = crypto.randomBytes(32)
+  const runtimeId = crypto.randomBytes(16).toString('hex')
+  let endpoint: { baseUrl: string; token: string } | undefined
+  return {
+    bootstrapEnv: () => ({ HERMES_ENTERPRISE_TEXT_BOOTSTRAP_KEY: key.toString('hex'), HERMES_ENTERPRISE_TEXT_RUNTIME_ID: runtimeId }),
+    bind(connection: { baseUrl: string; token: string }) {
+      if (endpoint || !isCurrent()) {throw finite('LOCAL_TEXT_RUNTIME_UNAVAILABLE')}
+      endpoint = { baseUrl: connection.baseUrl, token: connection.token }
+    },
+    prove(connection: { baseUrl: string; token: string }, operation: string, payload: unknown, channel: string, claimedRuntime = runtimeId) {
+      if (!endpoint || !isCurrent() || endpoint.baseUrl !== connection.baseUrl || endpoint.token !== connection.token ||
+          claimedRuntime !== runtimeId || !/^(?:[a-f0-9]{32}|http)$/.test(channel)) {throw finite('LOCAL_TEXT_RUNTIME_UNAVAILABLE')}
+      const issued = String(clock())
+      const nonce = crypto.randomBytes(16).toString('hex')
+      const bodyHash = hash(canonicalTextProofPayload(payload))
+      const fields = ['v1', runtimeId, issued, nonce, channel]
+      const mac = crypto.createHmac('sha256', key).update([...fields, operation, bodyHash].join('\n')).digest('hex')
+      return [...fields, mac].join('.')
+    }
+  }
+}
 
 function assertPayload(payload: LocalTextRequest) {
   const allowed = new Set(['sessionId', 'action', 'conversationId', 'requestId', 'content', 'personaId', 'choice'])
@@ -86,9 +142,15 @@ async function binding(session: EnterpriseSession, deps: LocalTextDependencies, 
     const profile = `enterprise-text-${hash(`${new URL(session.baseUrl).origin}:${ownerScope}`).slice(0, 32)}`
     const client = deps.createClient?.() ?? new JsonRpcGatewayClient({ requestTimeoutMs: 100_000 })
     let connection: Awaited<ReturnType<LocalTextDependencies['localConnection']>>
+    let channel = ''
+    let runtimeId = ''
     const state: EnterpriseLocalTextState = {
       ownerScope, profile, owner, closed: false, epoch: 0, loginStarting: false, requests: Object.create(null), conversations: Object.create(null), client,
       init: Promise.resolve(),
+      request<T>(method: string, params: Record<string, unknown>, timeout?: number): Promise<T> {
+        const proof = deps.proof(connection, `rpc:${method}`, params, channel, runtimeId)
+        return client.request<T>(method, { ...params, _main_proof: proof }, timeout)
+      },
       async api(path, method = 'GET') {
         if (!connection) {throw finite('LOCAL_TEXT_RUNTIME_UNAVAILABLE')}
         return deps.localApi(connection, `${path}${path.includes('?') ? '&' : '?'}profile=${profile}`, owner, method)
@@ -104,7 +166,7 @@ async function binding(session: EnterpriseSession, deps: LocalTextDependencies, 
         for (const pending of Object.values(state.requests)) {
           pending.stopped = true
           if (pending.attempted && !pending.completed) {
-            cleanup.push(client.request('enterprise_text.stop', { owner, session_id: pending.gatewaySessionId, request_id: pending.requestId }, 5000).catch(() => undefined))
+          cleanup.push(state.request('enterprise_text.stop', { owner, session_id: pending.gatewaySessionId, request_id: pending.requestId }, 5000).catch(() => undefined))
           }
         }
         void Promise.allSettled(cleanup).finally(() => client.close())
@@ -125,9 +187,14 @@ async function binding(session: EnterpriseSession, deps: LocalTextDependencies, 
       await client.connect(connection.wsUrl)
       deps.assertCurrent()
       if (state.closed) {throw finite('LOCAL_TEXT_OWNER_CHANGED')}
-      const capabilities = await client.request<{ protocol_version: number }>('enterprise_text.capabilities', {}, 5000)
+      const capabilities = await client.request<{ protocol_version: number; runtime_id: string; channel_id: string }>('enterprise_text.capabilities', {}, 5000)
         .catch(() => {throw finite('LOCAL_TEXT_RUNTIME_UPDATE_REQUIRED')})
-      if (capabilities.protocol_version !== 1) {throw finite('LOCAL_TEXT_RUNTIME_UPDATE_REQUIRED')}
+      if (capabilities.protocol_version !== 2 || !/^[a-f0-9]{32}$/.test(capabilities.runtime_id) || !/^[a-f0-9]{32}$/.test(capabilities.channel_id)) {throw finite('LOCAL_TEXT_RUNTIME_UPDATE_REQUIRED')}
+      runtimeId = capabilities.runtime_id
+      channel = capabilities.channel_id
+      // Match public challenge to the actual private spawned runtime before
+      // any account lookup. This unused proof has no backend side effects.
+      deps.proof(connection, 'rpc:enterprise_text.capabilities', {}, channel, runtimeId)
     })().catch(error => {
       state.dispose()
       client.close()
@@ -143,7 +210,7 @@ async function binding(session: EnterpriseSession, deps: LocalTextDependencies, 
 }
 
 function choiceFrom(status: any): LocalTextChoice {
-  if (status.state !== 'ready' || !/^[a-f0-9]{32}$/.test(status.registration_id) || !Number.isInteger(status.generation)) {
+  if (status.state !== 'ready' || !/^[a-f0-9]{32}$/.test(status.registration_id) || !Number.isSafeInteger(status.generation) || status.generation < 0) {
     throw finite('LOCAL_TEXT_CONNECT_REQUIRED')
   }
   return { backend_id: 'codex', configuration_id: status.registration_id, configuration_version: status.generation,
@@ -177,7 +244,7 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
       if (request) {
         request.stopped = true
         if (request.attempted) {
-          await state!.client.request('enterprise_text.stop', { owner: state!.owner, session_id: request.gatewaySessionId, request_id: request.requestId }, 5000)
+          await state!.request('enterprise_text.stop', { owner: state!.owner, session_id: request.gatewaySessionId, request_id: request.requestId }, 5000)
         }
       }
       deps.assertCurrent()
@@ -196,7 +263,7 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
         for (const request of Object.values(state.requests)) {
           request.stopped = true
           if (request.attempted && !request.completed) {
-            void state.client.request('enterprise_text.stop', { session_id: request.gatewaySessionId, owner: state.owner, request_id: request.requestId }, 5000).catch(() => undefined)
+            void state.request('enterprise_text.stop', { session_id: request.gatewaySessionId, owner: state.owner, request_id: request.requestId }, 5000).catch(() => undefined)
           }
         }
         await state.api('/api/providers/siwc/logout', 'POST')
@@ -220,6 +287,7 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
       return choiceFrom(status)
     }
     if (payload.action === 'status') {
+      if (state.loginStarting) {return { state: 'connecting' }}
       if (state.loginId) {
         const login = await state.api(`/api/providers/oauth/openai-siwc/poll/${state.loginId}`)
         current()
@@ -277,7 +345,7 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
       let conversation = state.conversations[payload.conversationId]
       if (conversation && conversation.binding !== key) {throw finite('LOCAL_TEXT_CONTEXT_CHANGED')}
       if (!conversation) {
-        const created = await state.client.request<{ session_id: string }>('session.create', {
+        const created = await state.request<{ session_id: string }>('session.create', {
           text_only: true, owner: state.owner, profile: state.profile, owner_scope: state.ownerScope,
           registration_id: selected.configuration_id, generation: selected.configuration_version,
           conversation_id: payload.conversationId, prompt_hash: prepared.prompt_hash
@@ -302,7 +370,7 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
       if (session.localTextStops?.has(requestId)) {throw finite('LOCAL_TEXT_OBSERVATION_STOPPED')}
       pending.attempted = true
       pending.inFlight = true
-      const observed = await state.client.request<any>('enterprise_text.submit', { owner: state.owner,
+      const observed = await state.request<any>('enterprise_text.submit', { owner: state.owner,
         session_id: pending.gatewaySessionId, request_id: requestId, instructions: prepared.instructions, input: prepared.input })
       current()
       pending.inFlight = false
@@ -310,7 +378,7 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
     }
     if (!pending || !sameChoice(pending.choice, selected)) {throw finite('LOCAL_TEXT_RESULT_UNKNOWN')}
     if (pending.completed) {return pending.completed}
-    const observed = await state.client.request<any>('enterprise_text.status', {
+    const observed = await state.request<any>('enterprise_text.status', {
       owner: state.owner, session_id: pending.gatewaySessionId, request_id: requestId }, 5000)
     current()
     return await finish(observed, true)
@@ -334,7 +402,7 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
           !sameChoice(await account(), pending.choice)) {throw finite('LOCAL_TEXT_CONTEXT_CHANGED')}
       current()
       pending.accepted = { state: 'completed', text: accepted.text, requestId, backend_choice: pending.choice }
-      await state.client.request('enterprise_text.accept', { owner: state.owner, session_id: pending.gatewaySessionId, request_id: requestId }, 5000)
+      await state.request('enterprise_text.accept', { owner: state.owner, session_id: pending.gatewaySessionId, request_id: requestId }, 5000)
       current()
       if (!sameChoice(await account(), pending.choice)) {throw finite('LOCAL_TEXT_ACCOUNT_CHANGED')}
       current()

@@ -223,6 +223,8 @@ def _reject_denylisted_env_var(key: str) -> None:
     Centralised so both the regular and "secure" env writers share the
     same gate, and so the message is consistent for callers.
     """
+    if key.upper().endswith(("HERMES_ENTERPRISE_TEXT_BOOTSTRAP_KEY", "HERMES_ENTERPRISE_TEXT_RUNTIME_ID")):
+        raise ValueError("Internal bootstrap authority cannot be persisted")
     if key in _ENV_VAR_NAME_DENYLIST:
         raise ValueError(
             f"Environment variable {key!r} is on the writer denylist. "

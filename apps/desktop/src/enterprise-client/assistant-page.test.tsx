@@ -49,6 +49,71 @@ describe('AssistantPage', () => {
     return runtime
   }
 
+  const ownedChoice = { backend_id: 'codex' as const, configuration_id: 'b'.repeat(32), configuration_version: 1,
+    model: 'gpt-6-luna' as const, runtime_protocol: 'codex_responses' as const, reasoning_effort: 'medium' as const, availability: 'available' as const }
+  function localRuntime(localText: EnterpriseClientRuntime['localText']): EnterpriseClientRuntime {
+    return { ...runtimeFor(), localText,
+      get: vi.fn(async (path: string) => path === '/api/tenant-ai-personas' ? personaPool : { configured: false, models: [], backends: [] }) as EnterpriseClientRuntime['get'] }
+  }
+
+  it('submits a fixed owned summary with no configured tenant model or tenant write', async () => {
+    const localText = vi.fn(async (payload: { action: string }) => payload.action === 'submit'
+      ? { state: 'completed', text: '本机摘要已接受', backend_choice: ownedChoice }
+      : { state: 'ready', choice: ownedChoice })
+    const runtime = localRuntime(localText)
+    render(<AssistantPage runtime={runtime} principalId="owned-no-tenant-key" />)
+    fireEvent.change(await screen.findByLabelText('运行后端'), { target: { value: 'codex' } })
+    fireEvent.click(screen.getByRole('button', { name: /文本摘要/ }))
+    fireEvent.change(screen.getByLabelText('输入内容'), { target: { value: '用户主动提交的合成摘要材料' } })
+    await waitFor(() => expect((screen.getByRole('button', { name: '提交处理' }) as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(screen.getByRole('button', { name: '提交处理' }))
+    await screen.findByText('本机摘要已接受')
+    expect(localText).toHaveBeenCalledWith(expect.objectContaining({ action: 'submit', choice: expect.objectContaining(ownedChoice), content: '用户主动提交的合成摘要材料' }))
+    expect(runtime.post).not.toHaveBeenCalled()
+  })
+
+  it('keeps an owned unknown request and queries its association without resubmitting', async () => {
+    const localText = vi.fn(async (payload: { action: string }) => payload.action === 'submit'
+      ? { state: 'unknown', reason: 'LOCAL_TEXT_RESULT_UNKNOWN' }
+      : payload.action === 'requestStatus' ? { state: 'completed', text: '原请求的已接受摘要', backend_choice: ownedChoice }
+        : { state: 'ready', choice: ownedChoice })
+    const runtime = localRuntime(localText)
+    render(<AssistantPage runtime={runtime} principalId="owned-query-once" />)
+    fireEvent.change(await screen.findByLabelText('运行后端'), { target: { value: 'codex' } })
+    fireEvent.click(screen.getByRole('button', { name: /文本摘要/ }))
+    fireEvent.change(screen.getByLabelText('输入内容'), { target: { value: '只发一次' } })
+    await waitFor(() => expect((screen.getByRole('button', { name: '提交处理' }) as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(screen.getByRole('button', { name: '提交处理' }))
+    fireEvent.click(await screen.findByRole('button', { name: '查询原请求' }))
+    await screen.findByText('原请求的已接受摘要')
+    const requests = localText.mock.calls.map(([payload]) => payload as { action: string; requestId?: string; conversationId?: string })
+    expect(requests.filter(payload => payload.action === 'submit')).toHaveLength(1)
+    const original = requests.find(payload => payload.action === 'submit')!
+    expect(requests.find(payload => payload.action === 'requestStatus')).toMatchObject({ requestId: original.requestId, conversationId: original.conversationId })
+    expect(runtime.post).not.toHaveBeenCalled()
+  })
+
+  it('only starts owned login on click and presents a copyable link that cancellation clears', async () => {
+    const authUrl = 'https://auth.openai.com/api/accounts/authorize?state=synthetic-current'
+    const localText = vi.fn(async (payload: { action: string }) => payload.action === 'connect'
+      ? { state: 'connecting', authUrl } : { state: 'disconnected' })
+    const prior = window.hermesDesktop
+    const writeClipboard = vi.fn(async () => undefined)
+    window.hermesDesktop = { writeClipboard } as unknown as typeof prior
+    try {
+      render(<AssistantPage runtime={localRuntime(localText)} principalId="owned-copy-login" />)
+      fireEvent.change(await screen.findByLabelText('运行后端'), { target: { value: 'codex' } })
+      expect(localText.mock.calls.every(([payload]) => payload.action === 'status')).toBe(true)
+      fireEvent.click(screen.getByRole('button', { name: '连接自己的 ChatGPT 账号' }))
+      expect((await screen.findByLabelText('ChatGPT 官方登录链接') as HTMLInputElement).value).toBe(authUrl)
+      fireEvent.click(screen.getByRole('button', { name: '复制登录链接' }))
+      await waitFor(() => expect(writeClipboard).toHaveBeenCalledWith(authUrl))
+      fireEvent.click(screen.getByRole('button', { name: '取消登录' }))
+      await waitFor(() => expect(screen.queryByLabelText('ChatGPT 官方登录链接')).toBeNull())
+      expect(localText.mock.calls.filter(([payload]) => payload.action === 'connect')).toHaveLength(1)
+    } finally {window.hermesDesktop = prior}
+  })
+
   it('shows Codex settings but cannot enable it through a forged available catalog', async () => {
     const post = vi.fn()
     render(<AssistantPage runtime={catalogRuntime(post)} principalId="codex-catalog" />)

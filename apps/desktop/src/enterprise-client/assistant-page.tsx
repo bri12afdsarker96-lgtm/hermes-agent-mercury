@@ -365,9 +365,9 @@ function AssistantSessionPage({
   const backendReady = Boolean((backendId === 'tenant_model' || (mode === 'summarize' && runtime?.localText)) && catalogChoice?.availability === 'available' && !choiceChanged && !outcomeUnknown)
   const unavailableReason = outcomeUnknown ? new EnterpriseAssistantRequestUnknown().message : choiceChanged
     ? assistantBackendReason('CONFIGURATION_CHANGED') : fixedChoice && !catalogChoice
-      ? assistantBackendReason('CONFIGURATION_UNAVAILABLE') : backendId === 'codex' && mode !== 'summarize'
+      ? assistantBackendReason('CONFIGURATION_UNAVAILABLE') : backendId === 'codex' && runtime?.localText && mode !== 'summarize'
         ? '本机账号当前支持文本摘要，请选择“文本摘要”；其它处理仍可使用企业模型。'
-        : assistantBackendReason(backendId === 'codex' ? local.state.reason ?? 'LOCAL_TEXT_CONNECT_REQUIRED' : catalogChoice?.reason ?? backendOption?.reason)
+        : assistantBackendReason(backendId === 'codex' ? runtime?.localText ? local.state.reason ?? 'LOCAL_TEXT_CONNECT_REQUIRED' : 'CODEX_LOCAL_RUNTIME_REQUIRED' : catalogChoice?.reason ?? backendOption?.reason)
   const personaId = fixedChoice?.persona_id ?? selectedPersonaId
   const choiceValue = fixedChoice?.configuration_id ?? (backendId === 'codex' ? local.state.choice?.configuration_id ?? '' : selectedConfigurationId)
   const selectedPersona = personas.find(item => item.persona_id === personaId)
@@ -689,8 +689,8 @@ function AssistantSessionPage({
               <button type="button" className="hesc-action" disabled={frozen} onClick={() => void local.refresh()}>检查本机连接</button>
               {local.state.state === 'connecting' ? <button type="button" className="hesc-action" onClick={() => void local.command('cancelLogin')}>取消登录</button> : null}
               {local.state.state === 'ready' ? <button type="button" className="hesc-action" onClick={() => void local.command('logout')}>断开本机账号</button> : null}
-              {local.authUrl ? <div><input aria-label="ChatGPT 官方登录链接" readOnly value={local.authUrl} /><button type="button" className="hesc-action" onClick={() => void (window.hermesDesktop?.writeClipboard ? window.hermesDesktop.writeClipboard(local.authUrl) : navigator.clipboard.writeText(local.authUrl))}>复制登录链接</button></div> : null}
-              {localRequestId && submitting ? <button type="button" className="hesc-action" onClick={() => void runtime.localText!({ action: 'stop', conversationId: activeConversation.id, requestId: localRequestId }).then(() => setError(assistantBackendReason('LOCAL_TEXT_OBSERVATION_STOPPED')))}>停止观察</button> : null}
+              {local.authUrl ? <div><input aria-label="ChatGPT 官方登录链接" readOnly value={local.authUrl} /><button type="button" className="hesc-action" onClick={() => void Promise.resolve().then(async () => {const copied = window.hermesDesktop?.writeClipboard ? await window.hermesDesktop.writeClipboard(local.authUrl) : await navigator.clipboard.writeText(local.authUrl); if (copied === false) {throw new Error('clipboard unavailable')}}).catch(() => setError('复制未完成，请手动选择登录链接后复制。'))}>复制登录链接</button></div> : null}
+              {localRequestId && submitting ? <button type="button" className="hesc-action" onClick={() => void runtime.localText!({ action: 'stop', conversationId: activeConversation.id, requestId: localRequestId }).then(() => {if (foregroundConversation.current === activeConversation) {setError(assistantBackendReason('LOCAL_TEXT_OBSERVATION_STOPPED'))}}).catch(() => {if (foregroundConversation.current === activeConversation) {setError(assistantBackendReason('LOCAL_TEXT_RESULT_UNKNOWN'))}})}>停止观察</button> : null}
               {localRequestId && outcomeUnknown && !submitting ? <button type="button" className="hesc-action" onClick={() => {
                 setSubmitting(true)
                 void runtime.localText!({ action: 'requestStatus', conversationId: activeConversation.id, requestId: localRequestId }).then(reply => {

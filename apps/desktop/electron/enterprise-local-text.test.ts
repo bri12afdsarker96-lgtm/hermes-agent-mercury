@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { expect, it, vi } from 'vitest'
 
-import { operateEnterpriseLocalText, type LocalTextDependencies } from './enterprise-local-text'
+import { canonicalTextProofPayload, createEnterpriseTextAuthority, operateEnterpriseLocalText, type LocalTextDependencies } from './enterprise-local-text'
 import type { LocalTextChoice, LocalTextRequest } from './enterprise-local-text-types'
 import type { EnterpriseSession } from './enterprise-transport'
 
@@ -29,7 +29,7 @@ function harness() {
   const client = {
     connect: vi.fn(async () => undefined), close: vi.fn(),
     request: vi.fn(async (method: string) => {
-      if (method === 'enterprise_text.capabilities') {return { protocol_version: 1 }}
+      if (method === 'enterprise_text.capabilities') {return { protocol_version: 2, runtime_id: 'd'.repeat(32), channel_id: 'e'.repeat(32) }}
       if (method === 'session.create') {return { session_id: 'enterprise-text-runtime-fixture' }}
       if (method === 'enterprise_text.submit' || method === 'enterprise_text.status') {return observed}
       if (method === 'enterprise_text.accept') {return { state: 'completed' }}
@@ -38,6 +38,7 @@ function harness() {
     })
   }
   const deps: LocalTextDependencies = {
+    proof: vi.fn(() => 'synthetic-request-proof'),
     assertCurrent: () => {if (!current) {throw new Error('LOCAL_TEXT_OWNER_CHANGED')}},
     now: () => clock,
     localConnection: vi.fn(async () => ({ baseUrl: 'http://127.0.0.1:1234', wsUrl: 'ws://127.0.0.1:1234/api/ws?token=fixture', mode: 'local', token: 'fixture' })),

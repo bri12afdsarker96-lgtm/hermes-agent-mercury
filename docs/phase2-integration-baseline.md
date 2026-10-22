@@ -1,5 +1,13 @@
 # Mercury 二期企业集成基线（P2-00B）
 
+## 2026-10-22 P2-03-02R3 GitHub 进度快照（当前）
+
+按用户要求保存 main 私有证明、owned auth/text HTTP/RPC 防护、namespace 路径隔离与 UI 错误/迟到回复处理，以及正式测试。当前 Python 105、桌面相关 92 通过；独立复核仅在限定合成范围内通过。旧回归仍有 13 失败/9 跳过，完整合成 submit 尚未通过；无真实 OAuth/模型、Electron 原生入口验收、部署或发布。状态 **PARTIAL_CHECKPOINT / NOT_ACCEPTED**，Gate 未通过；提交不自动改变开发授权。详见 [阶段检查点](phase2-03-02-checkpoint.md)，下方均保留历史时点含义。
+
+## 2026-10-22 P2-03-02R3 恢复并持续开发（当前）
+
+监督对话两条实际人类消息 `01a161c8-cde6-7853-ab9f-17868f0aee10`、`01a161fc-8b0f-7fe0-84aa-726cf0eda018` 明确恢复本执行窗口二期研发，晚于历史暂停。当前基线 M `f27403243` / S `c32741b`，状态 **ACTIVE_IMPLEMENTATION**；以 [当前阶段记录](phase2-03-02-checkpoint.md) 和新审计 `p2-03-02-main-authority-20261022/control.json` 绑定授权。先闭合 main 私有证明并验证已有本机摘要路径，不把普通 token/owner 当 main 权限，不把 commit/push 当完成或自动暂停。Gate 尚未通过，无部署或再发布；以下为历史状态。
+
 ## 2026-10-22 P2-03-02R2 接线进度提交并暂停（当前）
 
 按用户要求保存并推送当前进度后暂停。相对 `ccd84022f`，M 已增加 owned web 登录生命周期、严格 resolver、SessionDB UNKNOWN 单次保护、reserved namespace 防护及 gateway/main/preload/UI 摘要接线；使用者自行连接账号，固定 gpt-6-luna / medium，个人模型身份不替代 S 企业权限。

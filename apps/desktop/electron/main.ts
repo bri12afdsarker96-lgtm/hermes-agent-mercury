@@ -1,6 +1,6 @@
 import { execFile, execFileSync, spawn } from 'node:child_process'
 import crypto from 'node:crypto'
-import { operateEnterpriseLocalText, type LocalTextRequest, type LocalTextDependencies } from './enterprise-local-text'
+import { createEnterpriseTextAuthority, operateEnterpriseLocalText, type LocalTextRequest, type LocalTextDependencies } from './enterprise-local-text'
 import fs from 'node:fs'
 import http from 'node:http'
 import https from 'node:https'
@@ -1309,6 +1309,20 @@ let softRehomeInProgress = false
 // with no named profiles never populates this map, so their experience is
 // byte-for-byte the single-backend behavior.
 const backendPool = new Map() // profile -> { process, port, token, connectionPromise, lastActiveAt }
+let primaryTextAuthority = null
+
+function localTextProof(connection, operation, payload, channel, runtimeId?) {
+  const primary = primaryTextAuthority
+  if (primary && backendConnectionState.getProcess() === primary.process) {
+    try {return primary.authority.prove(connection, operation, payload, channel, runtimeId)} catch {}
+  }
+  for (const entry of backendPool.values()) {
+    if (entry.textAuthority) {
+      try {return entry.textAuthority.prove(connection, operation, payload, channel, runtimeId)} catch {}
+    }
+  }
+  throw new Error('LOCAL_TEXT_RUNTIME_UNAVAILABLE')
+}
 const profileDeletionGate = new ProfileDeletionGate()
 // Keep the pool light: cap concurrent profile backends (LRU eviction) and reap
 // idle ones. A user idles at exactly the primary backend; pool backends only
@@ -10068,6 +10082,8 @@ async function spawnPoolBackend(profile, entry, opts: { forceLocal?: boolean; po
   const backendNonce = crypto.randomBytes(16).toString('hex')
   const parentIdentityEnv = parentWatchdogEnv(process.pid, parentStartMarker, backendNonce)
 
+  const textAuthority = createEnterpriseTextAuthority(backend, () =>
+    backendPool.get(poolKey) === entry && entry.process === child && child.exitCode === null && !child.killed)
   const child = spawn(
     backend.command,
     backend.args,
@@ -10090,7 +10106,10 @@ async function spawnPoolBackend(profile, entry, opts: { forceLocal?: boolean; po
         // optional marker probe fails, retain legacy PID-only tracking.
         ...parentIdentityEnv,
         HERMES_WEB_DIST: webDist,
-        ...(readyFile ? { HERMES_DESKTOP_READY_FILE: readyFile } : {})
+        ...(readyFile ? { HERMES_DESKTOP_READY_FILE: readyFile } : {}),
+        HERMES_ENTERPRISE_TEXT_BOOTSTRAP_KEY: undefined,
+        HERMES_ENTERPRISE_TEXT_RUNTIME_ID: undefined,
+        ...textAuthority?.bootstrapEnv()
       },
       shell: backend.shell,
       stdio: ['ignore', 'pipe', 'pipe']
@@ -10098,6 +10117,7 @@ async function spawnPoolBackend(profile, entry, opts: { forceLocal?: boolean; po
   )
 
   entry.process = child
+  entry.textAuthority = textAuthority
   entry.token = token
   await claimBackendChild(child, `${backend.command} ${backend.args.join(' ')}`, profile, backendNonce)
 
@@ -10161,17 +10181,10 @@ async function spawnPoolBackend(profile, entry, opts: { forceLocal?: boolean; po
     )
   }
 
-  return {
-    baseUrl,
-    mode: 'local',
-    source: 'local',
-    authMode: 'token',
-    token: authToken,
-    profile,
-    wsUrl,
-    logs: hermesLog.slice(-80),
-    ...getWindowState()
-  }
+  const connection = { baseUrl, mode: 'local', source: 'local', authMode: 'token', token: authToken,
+    profile, wsUrl, logs: hermesLog.slice(-80), ...getWindowState() }
+  textAuthority?.bind(connection)
+  return connection
 }
 
 // Bounded, deduplicated pool teardown (see pool-stop.ts): every stop path —
@@ -10427,6 +10440,8 @@ async function startHermes() {
     const backendNonce = crypto.randomBytes(16).toString('hex')
     const parentIdentityEnv = parentWatchdogEnv(process.pid, parentStartMarker, backendNonce)
 
+    const textAuthority = createEnterpriseTextAuthority(backend, () =>
+      backendConnectionState.isCurrentAttempt(connectionAttempt) && backendConnectionState.getProcess() === hermesProcess && hermesProcess.exitCode === null && !hermesProcess.killed)
     const hermesProcess = spawn(
       backend.command,
       backend.args,
@@ -10454,7 +10469,10 @@ async function startHermes() {
           // optional marker probe fails, retain legacy PID-only tracking.
           ...parentIdentityEnv,
           HERMES_WEB_DIST: webDist,
-          ...(readyFile ? { HERMES_DESKTOP_READY_FILE: readyFile } : {})
+          ...(readyFile ? { HERMES_DESKTOP_READY_FILE: readyFile } : {}),
+          HERMES_ENTERPRISE_TEXT_BOOTSTRAP_KEY: undefined,
+          HERMES_ENTERPRISE_TEXT_RUNTIME_ID: undefined,
+          ...textAuthority?.bootstrapEnv()
         },
         shell: backend.shell,
         stdio: ['ignore', 'pipe', 'pipe']
@@ -10470,6 +10488,7 @@ async function startHermes() {
       releaseBackendChild(hermesProcess)
       throw new Error('Hermes backend start was superseded by a newer connection attempt.')
     }
+    primaryTextAuthority = textAuthority ? { process: hermesProcess, authority: textAuthority } : null
 
     hermesProcess.stdout.on('data', rememberLog)
     hermesProcess.stderr.on('data', rememberLog)
@@ -10586,16 +10605,10 @@ async function startHermes() {
     // accumulated count of the resolved episode.
     bootstrapRepairAttempt = 0
 
-    return {
-      baseUrl,
-      mode: 'local',
-      source: 'local',
-      authMode: 'token',
-      token: authToken,
-      wsUrl,
-      logs: hermesLog.slice(-80),
-      ...getWindowState()
-    }
+    const connection = { baseUrl, mode: 'local', source: 'local', authMode: 'token', token: authToken,
+      wsUrl, logs: hermesLog.slice(-80), ...getWindowState() }
+    textAuthority?.bind(connection)
+    return connection
   })().catch(async error => {
     if (!backendConnectionState.clearPromiseForAttempt(connectionAttempt)) {
       throw error
@@ -13593,10 +13606,15 @@ ipcMain.handle('hermes:enterprise:local-text', async (event, payload: LocalTextR
       return descriptor as Awaited<ReturnType<LocalTextDependencies['localConnection']>>
     },
     async localApi(connection, apiPath, owner, method) {
-      return fetchJson(`${connection.baseUrl.replace(/\/$/, '')}${apiPath}`, connection.token, {
-        headers: { 'X-Hermes-Text-Owner': owner }, method, timeoutMs: 25000
+      const url = new URL(apiPath, connection.baseUrl)
+      const query = [...url.searchParams.entries()].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      if (new Set(query.map(([key]) => key)).size !== query.length) {throw new Error('LOCAL_TEXT_REQUEST_INVALID')}
+      const proof = localTextProof(connection, `http:${method.toUpperCase()}`, { path: url.pathname, query, owner, body: '' }, 'http')
+      return fetchJson(url.toString(), connection.token, {
+        headers: { 'X-Hermes-Text-Owner': owner, 'X-Hermes-Text-Proof': proof }, method, timeoutMs: 25000
       })
-    }
+    },
+    proof: localTextProof
   })
 })
 const enterpriseSpeech = new EnterpriseSpeech()

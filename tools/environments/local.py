@@ -397,6 +397,8 @@ def _is_hermes_internal_secret(key: str) -> bool:
     a model-driving CLI legitimately needs matches these patterns.
     """
     upper = key.upper()
+    if upper.endswith(("HERMES_ENTERPRISE_TEXT_BOOTSTRAP_KEY", "HERMES_ENTERPRISE_TEXT_RUNTIME_ID")):
+        return True
     if upper.startswith("AUXILIARY_") and (
         upper.endswith("_API_KEY") or upper.endswith("_BASE_URL")
     ):
@@ -527,6 +529,8 @@ def _sanitize_subprocess_env(base_env: dict | None, extra_env: dict | None = Non
 
     sanitized = _scrub_delegated_child_kanban_env(sanitized)
 
+    from hermes_bootstrap import strip_enterprise_text_bootstrap_env
+    strip_enterprise_text_bootstrap_env(sanitized)
     return sanitized
 
 
@@ -668,6 +672,8 @@ def hermes_subprocess_env(*, inherit_credentials: bool = False) -> dict[str, str
     # still see the parent's HERMES_HOME but lose the DB mutation guard.
     env = _scrub_delegated_child_kanban_env(env)
 
+    from hermes_bootstrap import strip_enterprise_text_bootstrap_env
+    strip_enterprise_text_bootstrap_env(env)
     return env
 
 
@@ -731,6 +737,8 @@ def build_subprocess_env(
         apply_subprocess_home_env(env)
     if extra:
         env.update(extra)
+    from hermes_bootstrap import strip_enterprise_text_bootstrap_env
+    strip_enterprise_text_bootstrap_env(env)
     return env
 
 
@@ -1339,6 +1347,8 @@ def _make_run_env(env: dict) -> dict:
 
     run_env = _scrub_delegated_child_kanban_env(run_env)
 
+    from hermes_bootstrap import strip_enterprise_text_bootstrap_env
+    strip_enterprise_text_bootstrap_env(run_env)
     return run_env
 
 

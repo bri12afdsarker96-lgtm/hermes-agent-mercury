@@ -9,6 +9,7 @@ Usage:
     python -m hermes_cli.main web --port 8080
 """
 
+import hermes_bootstrap  # capture main bootstrap before configuration/plugins
 import contextlib
 from contextlib import asynccontextmanager, contextmanager
 
@@ -11673,12 +11674,24 @@ def _codex_full_login_worker(session_id: str) -> None:
                 s["error_message"] = str(e)
 
 
-def _siwc_owned_request(request, profile):
-    from hermes_cli.auth import siwc_auth_path
+async def _siwc_owned_request(request, profile):
+    from hermes_cli.enterprise_text import verify_main_proof
     _require_token(request)
+    owner = request.headers.get("x-hermes-text-owner", "")
+    try:
+        query = sorted([[key, value] for key, value in request.query_params.multi_items()])
+        if len({key for key, _ in query}) != len(query):
+            raise ValueError()
+        verify_main_proof(request.headers.get("x-hermes-text-proof"), "http:" + request.method.upper(),
+                          {"path": request.url.path, "query": query, "owner": owner, "body": ""}, "http")
+        async for chunk in request.stream():
+            if chunk:
+                raise ValueError()
+    except Exception:
+        raise HTTPException(status_code=403, detail="LOCAL_TEXT_MAIN_AUTH_REQUIRED") from None
+    from hermes_cli.auth import siwc_auth_path
     try:
         siwc_auth_path(profile)
-        owner = request.headers.get("x-hermes-text-owner", "")
         if not re.fullmatch(r"[a-f0-9]{64}", owner):
             raise ValueError()
         return owner
@@ -11688,7 +11701,8 @@ def _siwc_owned_request(request, profile):
 
 async def _start_siwc_owned(request, profile):
     from hermes_cli import auth
-    owner = _siwc_owned_request(request, profile)
+    owner = await _siwc_owned_request(request, profile)
+    _gc_oauth_sessions()
     try:
         # This is the user's explicit connect action, allowing the official
         # browser to select a new identity. Old records remain isolated.
@@ -11748,7 +11762,7 @@ async def _start_siwc_owned(request, profile):
 @app.get("/api/providers/siwc/status")
 async def siwc_owned_status(request: Request, profile: str):
     from hermes_cli.auth import siwc_status
-    _siwc_owned_request(request, profile)
+    await _siwc_owned_request(request, profile)
     try:
         return siwc_status(profile)
     except Exception:
@@ -11758,7 +11772,7 @@ async def siwc_owned_status(request: Request, profile: str):
 @app.post("/api/providers/siwc/logout")
 async def siwc_owned_logout(request: Request, profile: str):
     from hermes_cli.auth import siwc_logout
-    owner = _siwc_owned_request(request, profile)
+    owner = await _siwc_owned_request(request, profile)
     with _oauth_sessions_lock:
         for sess in _oauth_sessions.values():
             if sess.get("provider") == "openai-siwc" and sess.get("profile") == profile and sess.get("owner") == owner:
@@ -11777,9 +11791,9 @@ async def start_oauth_login(
 ):
     """Initiate an OAuth login flow. Token-protected."""
     _require_token(request)
-    _gc_oauth_sessions()
     if provider_id == "openai-siwc":
         return await _start_siwc_owned(request, profile)
+    _gc_oauth_sessions()
     _validate_oauth_profile(profile)
     valid = {p["id"] for p in _OAUTH_PROVIDER_CATALOG}
     if provider_id not in valid:
@@ -11838,6 +11852,7 @@ async def poll_oauth_session(
     Each surfaces progress through the same background-worker-updated
     ``status`` field, so a single poll endpoint serves them all.
     """
+    owner = await _siwc_owned_request(request, profile) if provider_id == "openai-siwc" else None
     with _oauth_sessions_lock:
         sess = _oauth_sessions.get(session_id)
     if not sess:
@@ -11845,7 +11860,6 @@ async def poll_oauth_session(
     if sess["provider"] != provider_id:
         raise HTTPException(status_code=400, detail="Provider mismatch for session")
     if provider_id == "openai-siwc":
-        owner = _siwc_owned_request(request, profile)
         if sess.get("owner") != owner or sess.get("profile") != profile:
             raise HTTPException(status_code=404, detail="SIWC_SESSION_UNAVAILABLE")
         if sess.get("cancelled") or time.time() >= sess["expires_at"]:
@@ -11875,10 +11889,15 @@ async def cancel_oauth_session(
     _require_token(request)
     with _oauth_sessions_lock:
         sess = _oauth_sessions.get(session_id)
-        if sess is not None and sess.get("provider") == "openai-siwc":
-            owner = _siwc_owned_request(request, profile)
+    owned = (sess is not None and sess.get("provider") == "openai-siwc") or str(profile or "").lower().startswith("enterprise-text-")
+    if owned:
+        owner = await _siwc_owned_request(request, profile)
+        if sess is not None:
             if sess.get("owner") != owner or sess.get("profile") != profile:
                 raise HTTPException(status_code=404, detail="SIWC_SESSION_UNAVAILABLE")
+    with _oauth_sessions_lock:
+        if _oauth_sessions.get(session_id) is not sess:
+            raise HTTPException(status_code=404, detail="SIWC_SESSION_UNAVAILABLE")
         if sess is not None:
             sess["cancelled"] = True
         _oauth_sessions.pop(session_id, None)
@@ -12164,6 +12183,11 @@ def _open_session_db_for_profile(profile: Optional[str], *, read_only: bool):
         db_path = Path(home) / "state.db"
     else:
         db_path = Path(_default_db_path())
+    from hermes_cli.enterprise_text import assert_generic_runtime_path
+    try:
+        assert_generic_runtime_path(db_path)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="LOCAL_TEXT_GENERIC_METHOD_FORBIDDEN") from None
     return _open_session_db_at_path(db_path, read_only=read_only)
 
 
@@ -14601,8 +14625,8 @@ def _fallback_profile_dicts(profiles_mod) -> List[Dict[str, Any]]:
             return default
 
     profiles: List[Dict[str, Any]] = []
-    default_home = profiles_mod._get_default_hermes_home()
-    if default_home.is_dir():
+    default_home = _safe(lambda: profiles_mod.get_profile_dir("default"), None)
+    if default_home is not None and default_home.is_dir():
         model, provider = _safe(lambda: profiles_mod._read_config_model(default_home), (None, None))
         profiles.append({
             "name": "default",
@@ -14632,6 +14656,10 @@ def _fallback_profile_dicts(profiles_mod) -> List[Dict[str, Any]]:
         for entry in entries:
             entry_path = Path(entry.path)
             if entry.name.lower().startswith("enterprise-text-") or not entry.is_dir() or not profiles_mod._PROFILE_ID_RE.match(entry.name):
+                continue
+            try:
+                entry_path = profiles_mod.get_profile_dir(entry.name)
+            except ValueError:
                 continue
             model, provider = _safe(lambda entry=entry_path: profiles_mod._read_config_model(entry), (None, None))
             profiles.append({

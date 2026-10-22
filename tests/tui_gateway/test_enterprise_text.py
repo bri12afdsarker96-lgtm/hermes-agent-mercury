@@ -1,7 +1,9 @@
 """Real private SessionDB boundaries, single-attempt contention and imports."""
 import hashlib
+import hmac
 import json
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
@@ -21,7 +23,7 @@ def owned(tmp_path, monkeypatch):
               "conversation_id": "conversation", "prompt_hash": hashlib.sha256(b"instructions").hexdigest()}
     import hermes_cli.runtime_provider as runtime
     monkeypatch.setattr(runtime, "resolve_owned_text_runtime", lambda *args: {"source": "owned-siwc"})
-    transport = object()
+    transport = SimpleNamespace(enterprise_text_channel="e" * 32)
     _, entry = text.create(params, transport)
     return params, transport, entry
 
@@ -142,6 +144,12 @@ def test_fixed_anchor_ignores_request_profile_contexts(owned):
 def test_real_gateway_registry_creates_text_before_agent_setup_and_fences_generic(owned, monkeypatch):
     from tui_gateway import server
     params, transport, _ = owned
+    monkeypatch.setattr(text, "_PROOF_KEY", "1" * 64)
+    monkeypatch.setattr(text, "_PROOF_RUNTIME", "2" * 32)
+    fields = ["v1", text._PROOF_RUNTIME, str(int(time.time() * 1000)), "f" * 32, transport.enterprise_text_channel]
+    message = "\n".join(fields + ["rpc:session.create", hashlib.sha256(text.canonical_proof_payload(params)).hexdigest()])
+    mac = hmac.new(bytes.fromhex(text._PROOF_KEY), message.encode(), hashlib.sha256).hexdigest()
+    params = {**params, "_main_proof": ".".join(fields + [mac])}
     monkeypatch.setattr(server, "_schedule_agent_build", lambda *args, **kwargs: pytest.fail("agent build"))
     monkeypatch.setattr(server, "_enable_gateway_prompts", lambda: pytest.fail("generic setup"))
     response = server.dispatch({"id": "create", "method": "session.create", "params": params}, transport=transport)

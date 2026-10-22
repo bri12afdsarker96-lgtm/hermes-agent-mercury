@@ -94,6 +94,8 @@ class WSTransport:
         self._loop = loop
         self._peer = peer
         self._closed = False
+        import secrets
+        self.enterprise_text_channel = secrets.token_hex(16)
         # Token-coalescing buffer (CF-2). Streamed token frames land here and a
         # short timer flushes the batch. The lock guards the buffer + the
         # "armed" flag against the worker threads that call write(); the timer
@@ -361,11 +363,11 @@ async def handle_ws(ws: Any) -> None:
             except json.JSONDecodeError as exc:
                 parse_errors += 1
                 _log.warning(
-                    "ws parse error peer=%s index=%d error=%s payload=%r",
+                    "ws parse error peer=%s index=%d error=%s length=%d",
                     peer,
                     messages,
                     exc,
-                    line[:_WS_LOG_PAYLOAD_PREVIEW],
+                    len(line),
                 )
                 ok = await transport.write_async(
                     {

@@ -376,11 +376,11 @@ def validate_alias_name(name: str) -> None:
 def get_profile_dir(name: str) -> Path:
     """Resolve a profile name to its HERMES_HOME directory."""
     canon = normalize_profile_name(name)
-    if canon.startswith("enterprise-text-"):
-        raise ValueError("Owned runtime profiles are private")
-    if canon == "default":
-        return _get_default_hermes_home()
-    return _get_profiles_root() / canon
+    validate_profile_name(canon)
+    home = _get_default_hermes_home() if canon == "default" else _get_profiles_root() / canon
+    from hermes_cli.enterprise_text import assert_generic_runtime_path
+    assert_generic_runtime_path(home)
+    return home
 
 
 def profile_exists(name: str) -> bool:
@@ -896,8 +896,11 @@ def list_profiles() -> List[ProfileInfo]:
     wrapper_dir = _get_wrapper_dir()
 
     # Default profile
-    default_home = _get_default_hermes_home()
-    if default_home.is_dir():
+    try:
+        default_home = get_profile_dir("default")
+    except ValueError:
+        default_home = None
+    if default_home is not None and default_home.is_dir():
         model, provider = _read_config_model(default_home)
         dist_name, dist_version, dist_source = _read_distribution_meta(default_home)
         meta = read_profile_meta(default_home)
@@ -933,6 +936,10 @@ def list_profiles() -> List[ProfileInfo]:
             if name == "default":
                 continue  # already added as the built-in default above
             if not _PROFILE_ID_RE.match(name):
+                continue
+            try:
+                entry = get_profile_dir(name)
+            except ValueError:
                 continue
             model, provider = _read_config_model(entry)
             alias_name = alias_map.get(normalize_profile_name(name))
@@ -993,7 +1000,10 @@ def profiles_to_serve(
     if not multiplex:
         return [(active, get_profile_dir(active))]
 
-    serve: List[Tuple[str, Path]] = [("default", _get_default_hermes_home())]
+    try:
+        serve: List[Tuple[str, Path]] = [("default", get_profile_dir("default"))]
+    except ValueError:
+        serve = []
     allowed: Optional[set[str]] = None
     if profile_allowlist is not None:
         allowed = set()
@@ -1022,7 +1032,11 @@ def profiles_to_serve(
                 continue
             if allowed is not None and name not in allowed:
                 continue
-            serve.append((name, entry))
+            try:
+                home = get_profile_dir(name)
+            except ValueError:
+                continue
+            serve.append((name, home))
 
     if allowed is not None:
         missing = tuple(sorted(allowed - {name for name, _ in serve}))
@@ -2278,13 +2292,14 @@ def import_profile(archive_path: str, name: Optional[str] = None) -> Path:
             )
 
         final_source = extracted
-        from hermes_cli.enterprise_text import assert_importable_database
+        from hermes_cli.enterprise_text import assert_importable_database, is_reserved_profile_layout, sqlite_runtime_filename
         for staged_file in extracted.rglob("*"):
-            if any(part.lower().startswith("enterprise-text-") for part in staged_file.relative_to(extracted).parts):
+            if is_reserved_profile_layout(staged_file.relative_to(extracted).parts):
                 raise ValueError("Owned runtime profiles cannot be imported")
-            if staged_file.name in {"state.db-wal", "state.db-shm", "state.db-journal"}:
+            filename = sqlite_runtime_filename(staged_file)
+            if filename in {"state.db-wal", "state.db-shm", "state.db-journal"}:
                 raise ValueError("Live SQLite sidecars cannot be imported")
-            if staged_file.is_file() and staged_file.name == "state.db":
+            if staged_file.is_file() and filename == "state.db":
                 assert_importable_database(staged_file)
         if archive_root != canon:
             final_source = staging_root / canon

@@ -10,11 +10,89 @@ import re
 import threading
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
+from pathlib import Path
+import hermes_bootstrap
 
 PREFIX = "enterprise-text-"
 NAMESPACE = "_enterprise_text"
 MAX_OBSERVATION_SECONDS = 70
+_PROOF_KEY, _PROOF_RUNTIME = getattr(hermes_bootstrap, "_enterprise_text_bootstrap", ("", ""))
+_PROOF_NONCES = {}
+_PROOF_LOCK = threading.Lock()
+_PROOF_NONCE_LIMIT = 8192
+
+
+def proof_runtime_id():
+    if (isinstance(_PROOF_KEY, str) and isinstance(_PROOF_RUNTIME, str)
+            and re.fullmatch(r"[a-f0-9]{64}", _PROOF_KEY) and re.fullmatch(r"[a-f0-9]{32}", _PROOF_RUNTIME)):
+        return _PROOF_RUNTIME
+    return ""
+
+
+def canonical_proof_payload(value):
+    """The same restricted wire JSON is canonicalized by main and Python."""
+    def validate(item, depth=0):
+        if depth > 16:
+            raise ValueError()
+        if item is None or type(item) is bool:
+            return
+        if type(item) is int and abs(item) <= 9007199254740991:
+            return
+        if isinstance(item, str):
+            item.encode("utf-8", errors="strict")
+            return
+        if isinstance(item, list):
+            for child in item:
+                validate(child, depth + 1)
+            return
+        if isinstance(item, dict):
+            for key, child in item.items():
+                if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9_]+", key):
+                    raise ValueError()
+                validate(child, depth + 1)
+            return
+        raise ValueError()
+    validate(value)
+    encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    if len(encoded) > 262144:
+        raise ValueError()
+    return encoded
+
+
+def verify_main_proof(proof, operation, payload, channel):
+    """Validate and consume a narrow main request before any business effect."""
+    try:
+        if not proof_runtime_id() or not isinstance(proof, str) or len(proof) > 320:
+            raise ValueError()
+        version, runtime, issued, nonce, proof_channel, mac = proof.split(".")
+        if (version != "v1" or runtime != _PROOF_RUNTIME
+                or not re.fullmatch(r"[0-9]{13}", issued)
+                or not re.fullmatch(r"[a-f0-9]{32}", nonce)
+                or not re.fullmatch(r"[a-f0-9]{64}", mac)
+                or not re.fullmatch(r"[a-f0-9]{32}|http", proof_channel)
+                or channel != proof_channel):
+            raise ValueError()
+        now = int(time.time() * 1000)
+        issued_ms = int(issued)
+        expires = issued_ms + 30000
+        if issued_ms > now + 2000 or now >= expires:
+            raise ValueError()
+        body_hash = hashlib.sha256(canonical_proof_payload(payload)).hexdigest()
+        message = "\n".join((version, runtime, issued, nonce, channel, operation, body_hash))
+        expected = hmac.new(bytes.fromhex(_PROOF_KEY), message.encode("utf-8"), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, mac):
+            raise ValueError()
+        with _PROOF_LOCK:
+            for old, deadline in list(_PROOF_NONCES.items()):
+                if deadline <= now:
+                    del _PROOF_NONCES[old]
+            identity = (runtime, nonce)
+            if identity in _PROOF_NONCES or len(_PROOF_NONCES) >= _PROOF_NONCE_LIMIT:
+                raise ValueError()
+            _PROOF_NONCES[identity] = expires
+    except Exception:
+        raise TextBoundaryError("LOCAL_TEXT_MAIN_AUTH_REQUIRED") from None
 
 
 def is_reserved_session(row):
@@ -30,12 +108,35 @@ def is_reserved_session(row):
             or isinstance(config, dict) and NAMESPACE in config)
 
 
+def sqlite_runtime_filename(path):
+    # Win32 opens trailing dots/spaces and mixed case as the same filename.
+    return Path(path).name.rstrip(" .").casefold()
+
+
+def assert_generic_runtime_path(path):
+    """Reject the actual owned subtree; ordinary project names stay ordinary."""
+    from hermes_cli.auth import _SIWC_LAUNCH_HOME
+    candidate = Path(path).expanduser().resolve()
+    private_root = (_SIWC_LAUNCH_HOME / "profiles").resolve()
+    try:
+        relative = candidate.relative_to(private_root)
+    except ValueError:
+        return
+    if relative.parts and relative.parts[0].rstrip(" .").casefold().startswith(PREFIX):
+        raise ValueError("Owned runtime profiles are private")
+
+
+def is_reserved_profile_layout(parts):
+    normalized = [part.rstrip(" .").casefold() for part in parts]
+    return len(normalized) >= 2 and normalized[0] == "profiles" and normalized[1].startswith(PREFIX)
+
+
 def assert_importable_database(path):
     """Inspect staged SQLite before generic archive publication; no mutation."""
     import sqlite3
     deadline = time.monotonic() + 5
     try:
-        with sqlite3.connect(path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True) as conn:
+        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True)) as conn:
             conn.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
             columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
             if not columns:

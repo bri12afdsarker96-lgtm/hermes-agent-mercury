@@ -1,5 +1,8 @@
 """Actual ASGI routing, loopback and owned-session lifecycle; synthetic grant."""
 import threading
+import hashlib
+import hmac
+import secrets
 import time
 import urllib.parse
 import urllib.request
@@ -8,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from hermes_cli import auth, web_server as web
+from hermes_cli import enterprise_text as text
 
 PROFILE = "enterprise-text-" + "a" * 32
 OWNER = "b" * 64
@@ -15,6 +19,8 @@ OWNER = "b" * 64
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    monkeypatch.setattr(text, "_PROOF_KEY", "1" * 64)
+    monkeypatch.setattr(text, "_PROOF_RUNTIME", "2" * 32)
     monkeypatch.setattr(auth, "_SIWC_LAUNCH_HOME", tmp_path.resolve())
     monkeypatch.setattr(web, "_SESSION_TOKEN", "fixture-web-token")
     monkeypatch.setattr(web.app.state, "auth_required", False, raising=False)
@@ -22,6 +28,14 @@ def client(tmp_path, monkeypatch):
         web._oauth_sessions.clear()
     client = TestClient(web.app, base_url="http://127.0.0.1", headers={
         "X-Hermes-Session-Token": "fixture-web-token", "X-Hermes-Text-Owner": OWNER})
+    def sign(request):
+        payload = {"path": request.url.path, "query": sorted([list(pair) for pair in request.url.params.multi_items()]),
+                   "owner": request.headers.get("x-hermes-text-owner", ""), "body": ""}
+        fields = ["v1", text._PROOF_RUNTIME, str(int(time.time() * 1000)), secrets.token_hex(16), "http"]
+        message = "\n".join(fields + ["http:" + request.method, hashlib.sha256(text.canonical_proof_payload(payload)).hexdigest()])
+        mac = hmac.new(bytes.fromhex(text._PROOF_KEY), message.encode(), hashlib.sha256).hexdigest()
+        request.headers["X-Hermes-Text-Proof"] = ".".join(fields + [mac])
+    client.event_hooks["request"] = [sign]
     yield client
     with web._oauth_sessions_lock:
         for session in web._oauth_sessions.values():

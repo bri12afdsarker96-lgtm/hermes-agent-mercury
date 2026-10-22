@@ -1438,6 +1438,8 @@ def _db_for_profile(profile: str | None = None):
     """
     profile_home = _profile_home(profile)
     if profile_home is None:
+        from hermes_cli.enterprise_text import assert_generic_runtime_path
+        assert_generic_runtime_path(get_hermes_home())
         return _get_db(), False
     try:
         from hermes_state import SessionDB
@@ -1529,12 +1531,8 @@ def _profile_home(profile: str | None) -> Path | None:
     name = (profile or "").strip()
     if not name:
         return None
-    try:
-        from hermes_cli import profiles as profiles_mod
-
-        home = Path(profiles_mod.get_profile_dir(name))
-    except Exception:
-        return None
+    from hermes_cli import profiles as profiles_mod
+    home = Path(profiles_mod.get_profile_dir(name))
     # Already the launch profile? No override needed.
     if home.resolve() == Path(_hermes_home).resolve():
         return None
@@ -2077,20 +2075,53 @@ def handle_request(req: dict) -> dict | None:
         return normalized
 
     rid, method, params = normalized
+    if ((method.startswith("enterprise_text.") and method != "enterprise_text.capabilities")
+            or (method == "session.create" and params.get("text_only") is True)):
+        from hermes_cli.enterprise_text import verify_main_proof
+        params = dict(params)
+        proof = params.pop("_main_proof", None)
+        try:
+            verify_main_proof(proof, "rpc:" + method, params,
+                              getattr(current_transport(), "enterprise_text_channel", None))
+        except Exception:
+            return _err(rid, 403, "LOCAL_TEXT_MAIN_AUTH_REQUIRED")
     if not method.startswith("enterprise_text.") and not (method == "session.create" and params.get("text_only") is True):
         # Reserved profile/IDs cannot be interpreted by generic agent methods.
         # The text store lives in its private explicit profile, never default DB.
-        def reserved(value):
+        selectors = {"profile", "profile_name", "profile_id", "session_id", "session_ids",
+                     "parent_session_id", "source_session_id", "target_session_id"}
+        opaque_fields = {"prompt", "text", "content", "input", "instructions", "note",
+                         "messages", "history", "conversation_history", "message"}
+        def reserved(value, key=None):
+            if key in opaque_fields:
+                return False
             if isinstance(value, str):
-                return value.strip().lower().startswith("enterprise-text-") or value == "enterprise_text"
+                if key in selectors or (key == "id" and method.startswith("session.")):
+                    return value.strip().lower().startswith("enterprise-text-")
+                if key == "source":
+                    return value == "enterprise_text"
+                if key == "model_config":
+                    try:
+                        decoded = json.loads(value)
+                        return isinstance(decoded, dict) and "_enterprise_text" in decoded
+                    except (ValueError, TypeError):
+                        return False
+                return False
             if isinstance(value, dict):
-                return "_enterprise_text" in value or any(reserved(item) for item in value.values())
+                return "_enterprise_text" in value or any(reserved(item, name) for name, item in value.items())
             if isinstance(value, list):
-                return any(reserved(item) for item in value)
+                return any(reserved(item, key) for item in value)
             return False
-        entry = _sessions.get(params.get("session_id"))
+        sid = params.get("session_id")
+        entry = _sessions.get(sid) if isinstance(sid, str) else None
         if (entry and entry.get("text_only")) or reserved(params):
             return _err(rid, 403, "LOCAL_TEXT_GENERIC_METHOD_FORBIDDEN")
+        if params.get("profile") not in (None, ""):
+            try:
+                from hermes_cli.profiles import get_profile_dir
+                get_profile_dir(params["profile"])
+            except (ValueError, TypeError, OSError):
+                return _err(rid, 403, "LOCAL_TEXT_GENERIC_METHOD_FORBIDDEN")
     fn = _methods.get(method)
     if not fn:
         return _err(rid, -32601, f"unknown method: {method}")

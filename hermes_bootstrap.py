@@ -52,6 +52,20 @@ from __future__ import annotations
 import os
 import sys
 
+# Main injects these only into a direct backend spawn. Capture before lazy
+# imports or any child can inherit them; never recapture after startup.
+_enterprise_text_bootstrap = (
+    os.environ.pop("HERMES_ENTERPRISE_TEXT_BOOTSTRAP_KEY", ""),
+    os.environ.pop("HERMES_ENTERPRISE_TEXT_RUNTIME_ID", ""),
+)
+
+def strip_enterprise_text_bootstrap_env(env):
+    """Bootstrap authority is never a credential for a child process."""
+    for name in list(env):
+        upper = name.upper()
+        if upper.endswith(("HERMES_ENTERPRISE_TEXT_BOOTSTRAP_KEY", "HERMES_ENTERPRISE_TEXT_RUNTIME_ID")):
+            env.pop(name, None)
+
 _IS_WINDOWS = sys.platform == "win32"
 _bootstrap_applied = False
 
