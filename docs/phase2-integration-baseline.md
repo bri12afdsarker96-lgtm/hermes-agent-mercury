@@ -1,5 +1,9 @@
 # Mercury 二期企业集成基线（P2-00B）
 
+## 2026-10-22 P2-03-02R3 同项定向复核（当前）
+
+原 13 失败在完整 f274/af288 同 Windows/cp936/重建 argv 下逐条同现象，未观察到本次产品回归；三份测试最小适配后定向 10 PASS/6 SKIP，Windows DACL/file-symlink/macOS 未覆盖说明保留。实际合成 wire 的原五场景和新增并发/stop/epoch/冷重启/跨租户五组通过，SDK 仍为 MockTransport；间歇 session.create 超时未归因。标准客户端本地构建通过，原生入口及真实用户验收待完成；官方 JWKS 公共 GET 在本机后端收到 403，没有真实 OAuth/模型。当前 LOCAL_SYNTHETIC_VALIDATED / REAL_ACCEPTANCE_PENDING，Gate 未通过，无部署或发布。详见 [阶段检查点](phase2-03-02-checkpoint.md)。
+
 ## 2026-10-22 P2-03-02R3 GitHub 进度快照（当前）
 
 按用户要求保存 main 私有证明、owned auth/text HTTP/RPC 防护、namespace 路径隔离与 UI 错误/迟到回复处理，以及正式测试。当前 Python 105、桌面相关 92 通过；独立复核仅在限定合成范围内通过。旧回归仍有 13 失败/9 跳过，完整合成 submit 尚未通过；无真实 OAuth/模型、Electron 原生入口验收、部署或发布。状态 **PARTIAL_CHECKPOINT / NOT_ACCEPTED**，Gate 未通过；提交不自动改变开发授权。详见 [阶段检查点](phase2-03-02-checkpoint.md)，下方均保留历史时点含义。

@@ -115,13 +115,22 @@ class TestCreateProfile:
     """Tests for create_profile()."""
 
 
-    def test_seeds_placeholder_env_file(self, profile_env):
-        """Fresh profiles get their own .env (owner-only) so channel/env
-        writes are profile-scoped from day one instead of falling through
-        to the shell environment / root install."""
+    @pytest.mark.parametrize("check_posix_mode", [
+        pytest.param(False, id="content-and-chmod-request"),
+        pytest.param(True, id="posix-owner-mode", marks=pytest.mark.skipif(
+            sys.platform == "win32", reason="POSIX st_mode is not a Windows DACL check")),
+    ])
+    def test_seeds_placeholder_env_file(self, profile_env, check_posix_mode):
+        """Seed only comments in the new profile and request private POSIX mode.
+
+        Windows chmod intent is checked, but its actual DACL is not proved here.
+        """
         import stat
-        profile_dir = create_profile("coder", no_alias=True)
+        (profile_env / ".hermes" / ".env").write_text("SYNTHETIC_SECRET=root-only-canary\n", encoding="utf-8")
+        with patch.object(profiles.os, "chmod", wraps=os.chmod) as chmod:
+            profile_dir = create_profile("coder", no_alias=True)
         env_path = profile_dir / ".env"
+        chmod.assert_any_call(str(env_path), 0o600)
         assert env_path.exists()
         content = env_path.read_text(encoding="utf-8")
         # Placeholder only — no credentials leak in from anywhere.
@@ -129,8 +138,8 @@ class TestCreateProfile:
             line.startswith("#") or not line.strip()
             for line in content.splitlines()
         )
-        mode = stat.S_IMODE(env_path.stat().st_mode)
-        assert mode == 0o600
+        if check_posix_mode:
+            assert stat.S_IMODE(env_path.stat().st_mode) == 0o600
 
 
 
@@ -145,7 +154,7 @@ class TestCreateProfile:
 
         profile_dir = create_profile("coder", clone_config=True, no_alias=True)
 
-        cloned_config = yaml.safe_load((profile_dir / "config.yaml").read_text())
+        cloned_config = yaml.safe_load((profile_dir / "config.yaml").read_text(encoding="utf-8"))
         assert cloned_config["_config_version"] == DEFAULT_CONFIG["_config_version"]
         assert cloned_config["model"] == "test"
         assert (profile_dir / ".env").read_text().strip() == "KEY=val"
@@ -217,7 +226,12 @@ class TestBackfillProfileEnvs:
     gives pre-#44792 profiles (created before .env seeding) their own
     .env, copied from the default install so credentials don't break."""
 
-    def test_copies_default_env_into_envless_profiles(self, profile_env):
+    @pytest.mark.parametrize("check_posix_mode", [
+        pytest.param(False, id="content-and-chmod-request"),
+        pytest.param(True, id="posix-owner-mode", marks=pytest.mark.skipif(
+            sys.platform == "win32", reason="POSIX st_mode is not a Windows DACL check")),
+    ])
+    def test_copies_default_env_into_envless_profiles(self, profile_env, check_posix_mode):
         import stat
         tmp_path = profile_env
         (tmp_path / ".hermes" / ".env").write_text("OPENROUTER_API_KEY=root-key\n")
@@ -227,12 +241,16 @@ class TestBackfillProfileEnvs:
         (p1 / ".env").unlink()
         (p2 / ".env").unlink()
 
-        backfilled = backfill_profile_envs(quiet=True)
+        # Begin observation after setup so create_profile's chmod cannot satisfy it.
+        with patch.object(profiles.os, "chmod", wraps=os.chmod) as chmod:
+            backfilled = backfill_profile_envs(quiet=True)
 
         assert sorted(backfilled) == ["old1", "old2"]
         for p in (p1, p2):
             assert (p / ".env").read_text() == "OPENROUTER_API_KEY=root-key\n"
-            assert stat.S_IMODE((p / ".env").stat().st_mode) == 0o600
+            chmod.assert_any_call(str(p / ".env"), 0o600)
+            if check_posix_mode:
+                assert stat.S_IMODE((p / ".env").stat().st_mode) == 0o600
 
 
     def test_placeholder_when_default_has_no_env(self, profile_env):
@@ -570,15 +588,20 @@ class TestAliasCollision:
 class TestWrapperScript:
     """Tests for create_wrapper_script() and remove_wrapper_script()."""
 
-    def test_creates_sh_on_posix(self, profile_env, monkeypatch):
+    def test_creates_platform_wrapper(self, profile_env, monkeypatch):
         monkeypatch.setattr("hermes_cli.profiles.shutil.which", lambda name: "/opt/hermes/bin/hermes")
         from hermes_cli.profiles import create_wrapper_script
         wrapper = create_wrapper_script("mybot")
         assert wrapper is not None
-        assert wrapper.name == "mybot"
-        content = wrapper.read_text()
-        assert content.startswith("#!/bin/sh")
-        assert "exec /opt/hermes/bin/hermes -p mybot" in content
+        content = wrapper.read_text(encoding="utf-8")
+        if sys.platform == "win32":
+            assert wrapper.name == "mybot.bat"
+            assert content.startswith("@echo off")
+            assert "hermes -p mybot %*" in content
+        else:
+            assert wrapper.name == "mybot"
+            assert content.startswith("#!/bin/sh")
+            assert 'exec /opt/hermes/bin/hermes -p mybot "$@"' in content
 
 
     @pytest.mark.windows_only
@@ -655,7 +678,7 @@ class TestFindAliasForProfile:
         info = next(p for p in list_profiles() if p.name == "steve")
         assert info.alias_name == "qiaobusi"
         assert info.alias_path is not None
-        assert info.alias_path.name == "qiaobusi"
+        assert info.alias_path.name == ("qiaobusi.bat" if sys.platform == "win32" else "qiaobusi")
 
 
 # ===================================================================
@@ -748,6 +771,7 @@ class TestExportImport:
         assert "default/memories/MEMORY.md" in names
 
 
+    @pytest.mark.require_symlinks
     def test_export_default_handles_broken_symlinks(self, profile_env, tmp_path):
         """Broken symlinks inside allowed artifacts are preserved, not crashed (#58394).
 
@@ -925,6 +949,7 @@ class TestWriteProfileMetaDurability:
         assert "🧙" in raw
         assert profiles.read_profile_meta(profile_dir)["description"] == "Code wizard 🧙 ✨"
 
+    @pytest.mark.require_symlinks
     def test_symlinked_profile_yaml_survives_the_write(self, tmp_path):
         """Guard on the conversion, not a behavior change.
 
@@ -1024,7 +1049,7 @@ class TestEdgeCases:
         target_dir = create_profile(
             "target", clone_from="source", clone_config=True, no_alias=True,
         )
-        cloned_config = yaml.safe_load((target_dir / "config.yaml").read_text())
+        cloned_config = yaml.safe_load((target_dir / "config.yaml").read_text(encoding="utf-8"))
         assert cloned_config["_config_version"] == DEFAULT_CONFIG["_config_version"]
         assert cloned_config["model"] == "cloned"
         assert (target_dir / ".env").read_text().strip() == "SECRET=yes"

@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import stat
+import sys
 import zipfile
 from argparse import Namespace
 from pathlib import Path
@@ -1015,8 +1016,9 @@ class TestProfileRestoration:
         run_import(args)
 
         # Only valid profile should get a wrapper
-        assert (wrapper_dir / "valid").exists()
-        assert not (wrapper_dir / "empty").exists()
+        suffix = ".bat" if sys.platform == "win32" else ""
+        assert (wrapper_dir / f"valid{suffix}").exists()
+        assert not (wrapper_dir / f"empty{suffix}").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -1370,7 +1372,7 @@ class TestQuickSnapshotProjectsKanban:
         monkeypatch.setattr(bk, "_safe_copy_db", _spy)
         snap_id = create_quick_snapshot(hermes_home=hermes_home)
         # The board db was copied via _safe_copy_db (not raw copy).
-        assert any(s.endswith("boards/work/kanban.db") for s in called["db"]), called["db"]
+        assert hermes_home / "kanban" / "boards" / "work" / "kanban.db" in map(Path, called["db"]), called["db"]
         copy = hermes_home / "state-snapshots" / snap_id / "kanban" / "boards" / "work" / "kanban.db"
         rows = sqlite3.connect(str(copy)).execute("SELECT * FROM tasks").fetchall()
         assert rows == [("w1", "ship")]
@@ -1678,9 +1680,15 @@ class TestMemoryProviderExternalPaths:
         (outside / "leak.json").unlink()
         outside.rmdir()
 
-    def test_import_restores_external_to_home_relative_location(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("check_posix_mode", [
+        pytest.param(False, id="content-and-chmod-request"),
+        pytest.param(True, id="posix-owner-mode", marks=pytest.mark.skipif(
+            sys.platform == "win32", reason="POSIX st_mode is not a Windows DACL check")),
+    ])
+    def test_import_restores_external_to_home_relative_location(self, tmp_path, monkeypatch, check_posix_mode):
         """_external/ members restore to ~/<relpath>, not under HERMES_HOME,
-        and credential-shaped files get 0600."""
+        and credential-shaped files request POSIX 0600 (not a Windows ACL proof).
+        """
         dst_home = tmp_path / "dst"
         dst_home.mkdir()
         hermes_home = dst_home / ".hermes"
@@ -1697,13 +1705,15 @@ class TestMemoryProviderExternalPaths:
         monkeypatch.setattr(Path, "home", lambda: dst_home)
 
         from hermes_cli.backup import run_import
-        run_import(Namespace(zipfile=str(zip_path), force=True))
+        with patch("hermes_cli.backup.os.chmod", wraps=os.chmod) as chmod:
+            run_import(Namespace(zipfile=str(zip_path), force=True))
 
         restored = dst_home / ".honcho" / "config.json"
         assert restored.exists()
         assert restored.read_text() == '{"peer":"bob"}'
-        # Credential-shaped file tightened.
-        assert (restored.stat().st_mode & 0o777) == 0o600
+        chmod.assert_any_call(restored, 0o600)
+        if check_posix_mode:
+            assert (restored.stat().st_mode & 0o777) == 0o600
         # External state did NOT leak into HERMES_HOME.
         assert not (hermes_home / "_external").exists()
 

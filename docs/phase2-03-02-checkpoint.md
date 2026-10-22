@@ -1,5 +1,43 @@
 # P2-03-02 阶段检查点
 
+## 2026-10-22 P2-03-02R3 同项回归与合成链路复核（当前）
+
+继续已派发的 R3，未进入下一 Gate。M 基于 `af2885378`、S 基于 `32e32df`；本轮产品源码没有修改，仅修订三份既有测试并同步进度。当前 **LOCAL_SYNTHETIC_VALIDATED / REAL_ACCEPTANCE_PENDING**，仍未完成产品验收。
+
+### 原 13 项失败逐项归因
+
+独立使用完整 `f27403243` 与 `af2885378` git archive，在同一 Windows/Python 3.11.9、cp936、依赖顺序及明确记录的重建 argv 下，原 13 项在两侧均 **13 failed / 0 errors / 0 skipped**，失败类型逐条一致；未观察到这 13 项属于本次产品回归。原 legacy-first 的完整 argv 未留存，不能宣称本次精确恢复了原命令。archive 全部成员及产品/测试提取字节已核，CRLF 转换与非产品 contributors 文件名大小写碰撞单独记录，没有以部分文件替换伪装完整旧基线。
+
+| 原用例 | 两侧相同原因 | 最小修订与当前闭合判断 |
+|---|---|---|
+| test_seeds_placeholder_env_file | Windows stat 0666 不等于 POSIX 0600 | 内容与真实 chmod(0600) 请求通过；POSIX 实际权限另列，Windows DACL 未验 |
+| test_clone_config_copies_files | UTF-8 配置被默认 cp936 解码 | 明确 UTF-8 读取；原 cp936 父进程下通过 |
+| test_copies_default_env_into_envless_profiles | Windows stat 0666 不等于 POSIX 0600 | setup 后观察真实 chmod 与准确目标、复制内容通过；DACL 未验 |
+| test_creates_sh_on_posix | 原测试在 Windows 期待无后缀 shell wrapper | 改为实际平台 wrapper 用例，验证 .bat/参数透传；POSIX 分支保留 |
+| test_list_profiles_surfaces_custom_alias | Windows 实际为 qiaobusi.bat | 验证原 alias 关系及平台实际后缀，通过 |
+| test_export_default_handles_broken_symlinks | WinError 1314，不能创建文件 symlink | 复用已有真实能力检测 marker；当前跳过，行为未验 |
+| test_symlinked_profile_yaml_survives_the_write | WinError 1314，不能创建文件 symlink | 同上；不把目录 junction 证据充作文件 symlink 通过 |
+| test_clone_from_named_profile | UTF-8 配置被默认 cp936 解码 | 明确 UTF-8 读取；原 cp936 父进程下通过 |
+| test_import_skips_profile_dirs_without_config | Windows valid.bat 被按 valid 查找 | 保留有效/无配置 profile 恢复关系，使用实际平台文件名，通过 |
+| test_board_db_copied_wal_safely | 反斜线路径被按正斜线字符串后缀判断 | 精确 Path 源比较；实际复制库行仍验证，通过 |
+| test_import_restores_external_to_home_relative_location | Windows stat 0666 不等于 POSIX 0600 | home-relative 恢复、内容及真实目标 chmod 请求通过；DACL 未验 |
+| test_quick_snapshot_is_published_with_manifest | CRLF 使源文件为 11 字节，原断言固定 10 | manifest 对实际源字节，且备份字节与源相等，通过 |
+| test_make_run_env_real_launchd_path_gains_homebrew | confcutdir 绕过已有 macos_only hook | 正常 conftest 下按原 marker 跳过；原 Windows minimal-PATH 分支通过，macOS 实机未验 |
+
+修订后只运行上述定向集合及三个独立 POSIX 权限子例：**10 passed / 6 skipped / 0 failed / 0 errors**，父 `PYTHONUTF8=0`，加载真实项目 conftest。六跳过为三个 POSIX mode 子例、两个实际 file-symlink 能力不足及一个既有 macOS 专项；没有重跑或借用旧 193 PASS 作为新结果。独立 Source 与 Security 复核未发现该有限 test-only diff 的阻断问题。证据：`legacy-closure-first.xml`、`.agent_tmp/legacy-ab/attribution-and-review.json`。
+
+### 实际本机 wire 与剩余边界
+
+未修改产品 guard、重试次数或超时。独立原五场景通过：正常 S prepare/revalidate→单次 SDK 合成发送→S accept/C4、重复不重发、调用前后撤权拒绝、EOF UNKNOWN 查询不重放。新增五组实际 wire 验证通过：跨 tenant/channel 拒绝；同请求同时两次仅一次 SDK；stop/epoch 切换后迟到结果不发布、S accept 增量为零；真实 Python 冷重启后重新建立签名连接、查询原 UNKNOWN，重启后 SDK 为零且未重提原 submit。原普通 token、完整参数/连接绑定、nonce 与环境隔离证明保持；14 个关键产品文件与既有独立审查 hash 一致。
+
+真实边界为 Node adapter、CLI serve、WebSocket、HTTP、SessionDB、DPAPI 与 SDK 序列化/消费；模型传输仍是 MockTransport，原 S 在 M 进程内线程。冷重启后的状态查询使用 main 私有签名 RPC，不等于真实 Electron 恢复界面已验；旧 proof 的 403 未单独记录 age，不单凭此区分 TTL 与 runtime 拒绝，仍依赖既有固定时间反例。两份 wire 回执分别记录模拟发送 3 次、5 次及各次发送前持久 UNKNOWN，不与重叠单测相加。
+
+历史首次 submit 失败及后来两次 10 秒 session.create 超时未完成根因归因；单/双 channel 的最小复跑均约 3.5 秒成功，不能把当前 PASS 写成间歇故障已修复。原 FAIL、探针启动观测副作用与后续 PASS 分开保留。当前实际 Python/runner 残留为零，库仅有有限事实、不含正文、draft 或凭据载荷。
+
+标准客户端本地构建通过，仍是未发布的验收候选。独立本机验收包只在构建时将固定 S origin 指向隔离 loopback 服务，并在测试 bootstrap 抑制 OS 协议注册；原产品资产和 main 源码不改，不用于发布。独立 S 的正常 password→strict/operator→context status 已验；该 S 使用 `CAPABILITY_POLICY_MODE=off` 的 fixture 兼容模式，不能扩写为 PostgreSQL capability-policy/EffectivePermissions/RLS 验收。实际 Electron 空登录页已通过 UIA 观察，main 使用新 HOME/userData、白名单环境和真实 Python 路径，无 BOOT_FAKE、旧 integration hook 或预置 grant。独立 Security 已核启动合同与实际 spawn 回执绑定，未读取私有 store 或子进程 secret。尚未自动操作认证输入，也未通过实际用户 OAuth 与一次全新 Luna 请求。
+
+公共网络前置实测：实际 `_siwc_http` 对官方公开 JWKS GET 得到 HTTP 403（无登录/模型请求）；已仅请求用户恢复后台网络访问，未要求先登录。需解决真实后端可达性后才请求用户登录，不能借默认 token、浏览器 cookies、旧 URL 或旧 UNKNOWN。原生完整操作与 sender/frame/用户切换仍未验，生产 S 是否已有新 context API 未验；本轮不部署、不发布。当前本机 S 与隔离客户端为验收入口保持运行，精确 PID/优雅退出方式在本地 native-entry 回执中，不把进程存活写成认证通过。
+
 ## 2026-10-22 P2-03-02R3 GitHub 进度快照（当前）
 
 按本次用户“将进度提交到 GitHub”保存当前源码、正式测试和进度文档。状态 **PARTIAL_CHECKPOINT / NOT_ACCEPTED**，P2-03-02 尚未完成，Qualification/Product Gates 尚未通过；本次提交不表示发布、验收通过或自动暂停。后续范围仍依当前人类指令与监督派发判定，不能从下方历史暂停记录推断。

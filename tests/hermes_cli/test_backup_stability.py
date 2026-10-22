@@ -79,7 +79,9 @@ def test_quick_snapshot_is_published_with_manifest(tmp_path, monkeypatch) -> Non
         (home / "state-snapshots" / snapshot_id / "manifest.json").read_text(encoding="utf-8")
     )
     assert manifest["id"] == snapshot_id
-    assert manifest["files"] == {"config.yaml": 10}
+    source_bytes = (home / "config.yaml").read_bytes()
+    assert manifest["files"] == {"config.yaml": len(source_bytes)}
+    assert (home / "state-snapshots" / snapshot_id / "config.yaml").read_bytes() == source_bytes
 
 
 def test_quick_snapshot_listing_ignores_partial_directories(tmp_path) -> None:
