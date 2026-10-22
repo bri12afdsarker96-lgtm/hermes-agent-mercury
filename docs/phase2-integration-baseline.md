@@ -1,5 +1,15 @@
 # Mercury 二期企业集成基线（P2-00B）
 
+## 2026-10-23 P2-03-02R3 原页面停止与原请求查询有限闭合（最新）
+
+当前为 **SCOPED_NATIVE_STOP_QUERY_VALIDATED_HISTORICAL_CREATE_PENDING / P2-03-02R3**，本轮唯一具体项 `CREATE_RETURN_AND_NATIVE_STOP_CLOSURE`。M `b06fb5b10` / S `14aeec9e` 的生产源码、正式测试及超时/重试未改；新鲜合成 lane 复用原 renderer/preload，诊断 main 从固定原源码通过一个精确审计 import alias 构建，`7c9f850f…` 与旧产品 main `ccb95380…` 字节不同。原对象和业务返回保留，观测有额外开销。
+
+本次创建链路中，同一 RPC/conversation/runtime-session hash 从 Python SessionDB 初始化、会话写入、metadata/close、原 handler/dispatch/write_async 调用接至 Node 实收响应与原 Promise resolve；观测器均无失败或溢出。Node 同进程 create 区间9.906217秒，Python自身 schema 初始化包围区间9.813秒，含观测/调度等工作，不代表纯 SQL 或锁原因，未跨进程相减。旧第三次 create 仍缺原始分型证据；本次新路径未复现不能称已修复。
+
+primary 原页面连接但无 submit/SDK 后，原企业注销及独立显式测试准备建立另一员工 session。唯一原 UI submit 发送前持久 UNKNOWN，SDK及原 response entry 均1；输入15真实停止观察，经 backend `local_observation_stopped:true` 与 main `LOCAL_TEXT_OBSERVATION_STOPPED` 确认后才释放响应，17原“查询原请求”以相同三关联 hash 返回 UNKNOWN，S accept0、tenant-model0、无 backend accept 事件或原页答案。stop 即刻 durable interrupt 为false，submit finally 后为true，不能称即时落该字段或保证远端取消。19原企业注销、20旧有效 SID 程序 IPC 拒绝、21登录页另作生命周期旁证。
+
+controller/M/S 正常 exit0，14个已录 owned 身份的退出回执无剩余；不证明全部历史进程。旧4/5/6/7失败、未知原因与旧 UNKNOWN 保留，阅读区域仍有部分可见限制。本轮无生产代码修订、旧包重跑、真实 OAuth/模型、PG/RLS 或 OS 点击/截图资格；最终证据与限界见 [阶段检查点](phase2-03-02-checkpoint.md)。P2-03-02/Gates及二期未完成，不进入03-03、部署或发布，推送不自动暂停。
+
 ## 2026-10-23 P2-03-02R3 原页面合成验证与剩余停止场景（最新）
 
 当前仍为 **PARTIAL_SYNTHETIC_UI_VALIDATED_STOP_PENDING / P2-03-02R3**。M 仅修复当前分栏的本机文本摘要入口、相关实际布局/UNKNOWN 组件回归及宽屏最小高度冲突；S 运行代码未改。组件23/23及 renderer 类型检查通过依据 Builder 原实际工具执行回执，不冒称 root/Source 独立重跑。新 renderer 经原 Vite 配置真实构建；main/preload、权限及原超时不变。attempt-4/5/6 的首个失败原件保留，没有用新成功抹去失败或认定旧驱动失败唯一原因。

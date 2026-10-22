@@ -1,5 +1,24 @@
 # P2-03-02 阶段检查点
 
+## 2026-10-23 P2-03-02R3 创建返回与原页面停止/查询闭合（最新）
+
+当前唯一具体项为 **P2-03-02R3 / CREATE_RETURN_AND_NATIVE_STOP_CLOSURE**，本轮结果 **SCOPED_NATIVE_STOP_QUERY_VALIDATED_HISTORICAL_CREATE_PENDING**。基于 M `b06fb5b10` / S `14aeec9e`，没有修改生产源码、正式测试、请求超时或重试策略。新鲜隔离 lane `native-stop-closure-1` 复用 attempt-7 renderer/preload；诊断 main 从固定原源码真实构建，仅一个精确 import alias 加入审计观测，SHA256 `7c9f850f…`，不是旧产品 main `ccb95380…` 的相同字节。原 class、Promise、响应与 coroutine 对象及调用参数保持，单独有限观测开销并非零。
+
+本次同租户换员工后唯一 session.create 的创建返回接缝已闭合：Node 原请求进入时 connectionState 为 open、WS readyState 为1；相同 RPC/conversation/runtime-session hash 串联 Python dispatch、原 handler、enterprise_text.create、SessionDB 初始化/会话写入、metadata、close、原响应与 write_async 调用，随后 Node 实收响应且原 Promise resolve。两个观测器均 observerFailure/overflow 为0。Node 同进程 create 区间为 **9.906217秒**；Python 自身 `_init_schema.enter` 至 return 包围区间为 **9.813秒**。这包含观测、调度及该函数内部工作，不是纯 SQL 耗时或数据库锁原因证明；两个进程的单调时钟不能相减。本次没有 timer/WS/SQLite 异常，旧第三例缺少原始分型证据，原因仍未知；本次未复现不等于旧问题已修复。
+
+实际流程先用原页面建立 primary 本机连接，snapshot 确认业务 submit/SDK 为0，再通过原企业退出登录及单独显式测试准备建立 sameTenantOther 新 session；该准备不是 UI 密码登录或自动恢复。原页面唯一提交到达 revalidate、SDK MockTransport1，发送前持久 UNKNOWN。原件记录：
+
+- 原 Chromium 输入15点击“停止观察”，真实 backend stop 返回 `local_observation_stopped:true`，main 返回 unknown / `LOCAL_TEXT_OBSERVATION_STOPPED`；保存此时仍没有 released 事件的快照后，才释放持有的合成响应，保持原45秒预算。
+- 原 submit 随后返回 UNKNOWN；原页面输入17点击“查询原请求”，SID、conversation、request 三个 hash 与唯一 submit 一致，原 requestStatus 返回 UNKNOWN / `LOCAL_TEXT_RESULT_UNKNOWN`。SDK 和原 SDK response entry 均仍1，S accept 为0、tenant-model 为0，没有 backend accept 事件，原页 answerCount0、合成 marker 为false，没有重发或创建替代请求。
+- stop 即刻读取的 durable `interrupt_requested` 为false，原 submit finally 后为true、started为true、状态仍 UNKNOWN；不能把停止按钮回包说成该字段已经即时落库。该验证证明停止本地观察及本次迟到结果不发布，不保证远端模型取消。原显式查询在产品设计上可以接纳已 received 的 draft，本次是先 stop、后释放首个 SSE，因此查询仍 UNKNOWN。
+- 原页面输入19完成企业注销，20使用刚才有效 SID 的只读程序化 IPC 拒绝 `LOCAL_TEXT_OWNER_CHANGED`，21观察到原登录页。20只作为注销失效旁证，不冒充 UI 查询动作。
+
+正常收尾 controller OS0、M/S 各 exit0；14个已记录 owned PID/CreationDate 的退出回执无剩余，不扩大为全部历史进程或未记录后代证明。本轮未重复旧14项 IPC、13项回归或旧合成包，没有真实 OAuth/模型网络、PG/RLS、OS 鼠标/截图资格，也没有修复仍部分可见的答案阅读区域。
+
+最终本轮结果回执：既有审计 `p2-03-02-main-authority-20261022/.agent_tmp/native-stop-closure-1/native-stop-results-1.json`，SHA256 `c227f14883dc4728c630fe1255bd0d91f10294f903e688d358cf3007d5baeb92`。Source 已实际核验51个文件绑定的 hash/字节数全部一致，并独立读取创建 trace、停止前后快照、原 UI/IPC 关联、只读 DB 与14个已录身份的退出证据；只接受本次新鲜创建返回及 stop/query 路径，历史第三例与整体 Gate 保持未闭合。
+
+attempt-4/5/6 的失败、attempt-7 idle 模式变化与第三次 create 的未知原因、旧 reload UNKNOWN 均原样保留。当前只接受上述新鲜合成 stop/query 路径；P2-03-02、Qualification/Product Gates 与二期未完成，不进入03-03，不部署或发布。进度提交/推送不自动暂停持续研发。
+
 ## 2026-10-23 P2-03-02R3 原页面输入与生命周期合成验证（最新）
 
 当前唯一项仍为 **P2-03-02R3 / PRIMARY_UI_AND_LIFECYCLE_SYNTHETIC_CLOSURE**，结果 **PARTIAL_SYNTHETIC_UI_VALIDATED_STOP_PENDING**。本轮只修复三个 M 文件：`assistant-page.tsx` 在现有分栏布局加入本机能力可用时的“文本摘要”入口，沿用原模式切换与冻结/在途保护；`assistant-page.test.tsx` 补实际布局及原请求不重发回归；`enterprise-client.css` 仅覆盖宽屏、非客户回复分栏的固定高度与 540px 最小高度冲突，使输入及提交区域可达。没有改变模型、企业权限、main/preload 或请求超时。S 运行代码未改。
