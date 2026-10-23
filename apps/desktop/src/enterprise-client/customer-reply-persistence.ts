@@ -14,6 +14,7 @@ interface StoredCustomer {
   draft: string
   knowledgeGrounded: boolean | null
   interrupted: boolean
+  lastRequestId?: string
 }
 
 interface StoredWorkspace {
@@ -105,7 +106,8 @@ function snapshot(workspace: CustomerReplyWorkspaceStore): StoredWorkspace {
         memoryConfirmedAt: reply.memoryConfirmedAt,
         draft: reply.draft,
         knowledgeGrounded: reply.knowledgeGrounded,
-        interrupted: reply.requestId !== null || reply.outcomeUnknown === true
+        interrupted: reply.requestId !== null || reply.outcomeUnknown === true,
+        ...(reply.lastRequestId ? {lastRequestId:reply.lastRequestId} : {})
       }
     })
   }
@@ -154,6 +156,7 @@ function validateResponse(response: WorkspaceResponse): void {
     }
 
     const note = customer.memoryNote === undefined ? '' : customer.memoryNote
+    if(customer.lastRequestId !== undefined && (typeof customer.lastRequestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(customer.lastRequestId))) throw new Error('客户请求关联格式不正确。')
     const confirmedAt = customer.memoryConfirmedAt ?? null
 
     if (typeof note !== 'string' || note.length > 4000 ||
@@ -262,7 +265,7 @@ export async function reloadCustomerDrafts(workspace: CustomerReplyWorkspaceStor
     // A stale remote draft cannot erase a local binding or unconfirmed POST.
     const currentBindings = new Map(workspace.get().customers.map(customer => {
       const reply = customer.reply.get()
-      return [customer.id, { backendChoice: reply.backendChoice, outcomeUnknown: reply.outcomeUnknown === true || reply.requestId !== null }] as const
+      return [customer.id, { backendChoice: reply.backendChoice, lastRequestId:reply.lastRequestId, outcomeUnknown: reply.outcomeUnknown === true || reply.requestId !== null }] as const
     }))
 
     if (result.workspace || replacing) {
@@ -291,7 +294,8 @@ export async function reloadCustomerDrafts(workspace: CustomerReplyWorkspaceStor
             draft: customer.draft,
             knowledgeGrounded: customer.knowledgeGrounded,
             outcomeUnknown,
-            error: outcomeUnknown ? '上次生成结果未确认，未自动重发。请核实结果后新建客户会话。' : null
+            lastRequestId:binding?.outcomeUnknown && binding.lastRequestId ? binding.lastRequestId : customer.lastRequestId ?? binding?.lastRequestId,
+            error: outcomeUnknown ? '上次生成结果未确认，未自动重发。请打开客户历史核对原请求。' : null
           })
 
           return { id: customer.id, label: customer.label, reply }
@@ -403,7 +407,8 @@ async function performSave(workspace: CustomerReplyWorkspaceStore): Promise<void
       customers: result.workspace.customers.map(customer => ({
         id: customer.id, label: customer.label, context: customer.context, instructions: customer.instructions,
         memoryNote: customer.memoryNote ?? '', memoryConfirmedAt: customer.memoryConfirmedAt ?? null,
-        draft: customer.draft, knowledgeGrounded: customer.knowledgeGrounded, interrupted: customer.interrupted
+        draft: customer.draft, knowledgeGrounded: customer.knowledgeGrounded, interrupted: customer.interrupted,
+        ...(customer.lastRequestId ? {lastRequestId:customer.lastRequestId} : {})
       }))
     }
 

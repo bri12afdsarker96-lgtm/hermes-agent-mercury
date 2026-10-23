@@ -237,6 +237,7 @@ export function enterpriseWorkspaces(snapshot: EnterpriseRoleSnapshot | undefine
   if (['operator', 'supervisor', 'tenant_admin'].includes(snapshot?.role ?? '')) {
     entries.splice(1, 0,
       { id: 'assistant', label: '企业 AI 助手', glyph: 'AI', description: '直接提问，结合企业知识解答问题' },
+      { id: 'customer_replies', label: '客户接待', glyph: '客', description: '查看客户历史、核实记忆并起草答复', requiredPermissions: ['tenant.ai.assist'] },
       )
     entries.push({ id: 'receivables', label: '应收款跟进', glyph: '款', description: '创建和处理本人应收款', requiredPermissions: ['reminder.read'] })
     entries.push({ id: 'overdue', label: '逾期未处理', glyph: '期', description: '查看权限范围内的逾期待办', requiredPermissions: ['reminder.read'] })

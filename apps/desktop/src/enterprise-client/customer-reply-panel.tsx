@@ -16,6 +16,7 @@ import {
   updateCustomerReplyInput
 } from './customer-reply'
 import { CustomerReplyFeedback } from './customer-reply-feedback'
+import { CustomerConversationPanel } from './customer-conversation-panel'
 import { AssistantResponseDetails } from './assistant-response-details'
 import {
   customerDraftSyncFor,
@@ -239,6 +240,7 @@ function CustomerReplyPanel({
   store,
   workspace
 }: CustomerReplyPanelProps) {
+  const frozen = useStore($enterprisePackageInstallFrozen)
   const state = useStore(store)
   const sync = useStore(customerDraftSyncFor(workspace))
   const [copyStatus, setCopyStatus] = useState<{ draft: string; text: string } | null>(null)
@@ -270,6 +272,7 @@ function CustomerReplyPanel({
 
   return (
     <section aria-label={`${customerLabel}的回复`} className="hesc-customer-reply">
+      <CustomerConversationPanel key={customerId} runtime={runtime} customerId={customerId} disabled={frozen || !sync.loaded || busy} refreshToken={state.draft} configurationId={configurationId} backendChoice={backendChoice} unknownRequestId={state.outcomeUnknown ? state.lastRequestId : undefined} onAcknowledged={()=>store.set({...store.get(),outcomeUnknown:false,error:null})} onRecovered={(text,grounded)=>store.set({...store.get(),outcomeUnknown:false,error:null,draft:text,knowledgeGrounded:grounded})} />
       <p className="hesc-muted-copy">
         当前客户：{customerLabel} · #{customerId.slice(-8)}
         。粘贴会话、生成并审核建议，再复制到企业微信发送；无需会话存档。
@@ -345,7 +348,7 @@ function CustomerReplyPanel({
         <div>
           <span>只使用当前客户上下文。其他客户的生成任务可在后台继续。</span>
           <Button
-            disabled={!ready || !runtime?.post || busy || recordingBusy || (ENTERPRISE_LEARNING_ENABLED && (state.memoryPending || memoryEdited)) || !state.context.trim()}
+            disabled={!ready || !runtime?.post || busy || state.outcomeUnknown || recordingBusy || (ENTERPRISE_LEARNING_ENABLED && (state.memoryPending || memoryEdited)) || !state.context.trim()}
             size="sm"
             type="submit"
           >
@@ -355,7 +358,7 @@ function CustomerReplyPanel({
       </form>
       {state.error ? (
         <p className="hesc-error-copy" role="alert">
-          {state.error} 已保留输入，可再次生成。
+          {state.error} {state.outcomeUnknown ? '请先打开客户历史，核对原请求；不会自动重发。' : '已保留输入，可再次生成。'}
         </p>
       ) : null}
       {state.knowledgeGrounded === false ? (

@@ -16,6 +16,7 @@ export interface CustomerReplyBackendChoice extends EnterpriseAssistantBackendCh
 interface CustomerReplyState {
   backendChoice?: CustomerReplyBackendChoice
   outcomeUnknown?: boolean
+  lastRequestId?: string
   customerReplyOptions: CustomerReplyOption[]
   context: string
   instructions: string
@@ -33,7 +34,7 @@ interface CustomerReplyState {
   copiedDraft: string | null
 }
 
-interface CustomerReplyResponse {
+export interface CustomerReplyResponse {
   backend_choice?: EnterpriseAssistantBackendChoice
   answer_text?: string
   customer_reply_options?: Array<{ kind?: string; text?: string }>
@@ -307,6 +308,7 @@ export async function generateCustomerReply(
     knowledgeGrounded: null,
     knowledgeTrace: undefined,
     requestId,
+    lastRequestId:requestId,
     phase: 'queued',
     reasoningSummary: undefined,
     copiedDraft: null
@@ -339,6 +341,7 @@ export async function generateCustomerReply(
         content,
         mode: 'knowledge_answer',
         customer_id: customer.id,
+        customer_request_id: requestId,
         workspace_revision: revision,
         reply_preferences: preferences
       })

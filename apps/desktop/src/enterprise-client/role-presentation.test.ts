@@ -78,9 +78,10 @@ describe('enterprise role presentation', () => {
     expect(enterpriseWorkflowPresentation('tenant_admin').title).toBe('业务运营')
     expect(enterpriseWorkflowPresentation('unrecognised').title).toBe('业务工作')
   })
-  it('hides the deferred customer reception entry for every tenant role', () => {
+  it('exposes customer reception only with current assist permission while keeping outbound handoffs deferred', () => {
     for (const role of ['operator', 'supervisor', 'tenant_admin']) {
-      expect(enterpriseWorkspaces({ role, effective_permissions: ['*'] }).map(item => item.id)).not.toContain('customer_replies')
+      expect(enterpriseWorkspaces({ role, effective_permissions: ['tenant.ai.assist'] }).map(item => item.id)).toContain('customer_replies')
+      expect(enterpriseWorkspaces({ role, effective_permissions: [] }).map(item => item.id)).not.toContain('customer_replies')
       expect(enterpriseWorkspaces({ role, effective_permissions: ['*'] }).map(item => item.id)).not.toContain('handoffs')
     }
   })

@@ -79,6 +79,22 @@ afterEach(() => {
 })
 
 describe('customer draft durability', () => {
+  it('restores the original unknown request ID across a fresh workspace without generating', async () => {
+    const remote = server()
+    const first = workspace()
+    const runtime = remote.runtime('unknown-request-seat')
+    await start(first,runtime)
+    const original = 'ac3223ae-a034-449b-8460-f198cc8febd8'
+    first.get().customers[0]!.reply.set({...first.get().customers[0]!.reply.get(),
+      context:'需要保留的原问题',outcomeUnknown:true,lastRequestId:original})
+    await saveCustomerDrafts(first)
+    stopCustomerDraftSync(first)
+    const fresh = workspace()
+    await start(fresh,remote.runtime('unknown-request-seat'))
+    expect(fresh.get().customers[0]!.reply.get().lastRequestId).toBe(original)
+    expect(fresh.get().customers[0]!.reply.get().outcomeUnknown).toBe(true)
+    expect(vi.mocked(runtime.post!).mock.calls.every(([path])=>path === '/api/customer-reply-workspace')).toBe(true)
+  })
   it('keeps same-customer binding and unsaved uncertainty when an explicit reload replaces its store', async () => {
     const remote = server()
     const runtime = remote.runtime('binding-seat')
