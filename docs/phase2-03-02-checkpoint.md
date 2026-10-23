@@ -1,5 +1,14 @@
 # P2-03-02 阶段检查点
 
+## 2026-10-24 客户历史/缓存后续：私有上下文保护前置
+
+个人账号当前仍仅摘要，先封通用API/enterprise JSON/upload对私有context子树与保留local-text路径的访问；解码后traversal、反斜杠、重复斜杠及C0拒绝。generic handleHermesApiRequest在registry/刷新/文件处理之前断言；只有main固定contextURL可用，无renderer opt-out。S显式单Bearer拒Cookie回落并关闭早退未读请求体，revalidate不再返回input/instructions。仅客户端通道隔离，不是main/device attestation；普通合法Bearer自制客户端仍可调用，不能把其自报草稿算真实模型或送达。
+
+原main三个handler的实际TypeScript函数体经编译执行反例，最终transport文件39通过，Electron类型检查exit0；S原主树2context+2交叉HTTP共4通过。独立Source/Security按最后字节审查，审计及学习日志不提交。S device61b5/浪花e0c6在保留作者且不碰并行修改的安全同步后HEAD b3f7f20；浪花HTTP/Tools S580b/M6077待下一自然集成边界。
+
+原生客户尝试已正常收尾，原窗口载入但合成认证拒绝，7业务场景未执行、业务计数0；startup/cleanup接受不作客户UI通过。继续个人knowledge_answer同历史/记忆/知识/缓存的窄复用设计、实际SDK前phase release、原关联幂等accept/query与账号代际隔离；尚未实现或验收，不将摘要改名当两路平齐，UNKNOWN不重放，不部署/发布或自动暂停。
+
+
 ## 2026-10-24 客户历史、来源记忆与精确答复缓存（当前实施）
 
 按用户继续推进 04。客户接待复用原助手工作区/当前服务能力与 tenant.ai.assist 权限；历史与记忆按需展开，配置仍仅在工具集。S 复用原加密工作区数据库和认证 API，按 tenant/owner/customer UUID 分隔保存来源记录、模型请求与未发送草稿；手工录入明确为坐席记录，不能当真实渠道收发回执。显式同租户授权后可接续提问，读取、模型调用和返回前都检查当前权威身份、配置及客户版本；知识检索等待之后再重核权限。

@@ -150,6 +150,7 @@ import {
 import { rememberedLogin, rememberPasswordRotation } from './enterprise-remembered-login'
 import { EnterpriseSpeech } from './enterprise-speech'
 import {
+  assertPublicEnterpriseRequestPath,
   buildAutoConnectResult,
   classifyConnectError,
   ENTERPRISE_MAX_UPLOAD_BYTES,
@@ -158,6 +159,7 @@ import {
   isAllowedEnterpriseMethod,
   isValidEnterprisePassword,
   normalizeEnterpriseApiOriginOrNull,
+  resolveEnterpriseLocalTextContextUrl,
   resolveEnterpriseUrl,
   sanitizeMultipartContentType,
   uploadByteLength
@@ -13420,6 +13422,7 @@ async function mergeRemoteProfileSessions(searchParams, remoteProfiles) {
 }
 
 async function handleHermesApiRequest(request) {
+  assertPublicEnterpriseRequestPath(request?.path)
   // Registry-pinned request (request.connectionId): the renderer is working
   // against a REGISTERED gateway connection, so the data — cron jobs and their
   // run sessions included — lives in THAT host's state.db, not any local
@@ -13592,7 +13595,7 @@ ipcMain.handle('hermes:enterprise:local-text', async (event, payload: LocalTextR
       const active = await refreshedEnterpriseSession(event.sender.id, payload.sessionId)
       assertCurrent()
       if (!active) {throw new Error('LOCAL_TEXT_AUTHORITY_UNAVAILABLE')}
-      const data = await fetchJson(resolveEnterpriseUrl(active.baseUrl, '/api/tenant-ai-assist/context'), '', {
+      const data = await fetchJson(resolveEnterpriseLocalTextContextUrl(active.baseUrl), '', {
         bearer: active.token, headers: { Origin: new URL(active.baseUrl).origin }, body, method: 'POST', timeoutMs: 15000
       })
       assertCurrent()

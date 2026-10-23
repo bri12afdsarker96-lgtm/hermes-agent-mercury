@@ -228,7 +228,27 @@ export function classifyConnectError(err: unknown): { code: string; message: str
 
 /** Validate + resolve the absolute request URL, asserting it stays on the
  *  session's origin (defence in depth against host injection via the path). */
-export function resolveEnterpriseUrl(baseUrl: string, path: unknown): string {
+export function assertPublicEnterpriseRequestPath(path: unknown): void {
+  if (typeof path !== 'string') {throw new Error('invalid path')}
+  let pathname: string
+  try {
+    pathname = new URL(path, 'https://path.invalid').pathname
+    // Proxies can decode before routing. Never let encoded names turn a
+    // renderer request into a private operation after this boundary.
+    for (let depth = 0; pathname.includes('%') && depth < 8; depth += 1) {
+      pathname = decodeURIComponent(pathname)
+    }
+  } catch {
+    throw new Error('invalid path')
+  }
+  if (pathname.includes('%') || pathname.includes('\\') || pathname.includes('//') || hasControlChars(pathname) ||
+      pathname.split('/').some(segment => segment === '.' || segment === '..') ||
+      /\/api\/(?:tenant-ai-assist\/|enterprise-local-text(?:\/|$))/i.test(pathname)) {
+    throw new Error('private enterprise path')
+  }
+}
+
+function resolveEnterpriseApiUrl(baseUrl: string, path: unknown): string {
   if (!isValidEnterprisePath(path)) {
     throw new Error('invalid path')
   }
@@ -240,6 +260,17 @@ export function resolveEnterpriseUrl(baseUrl: string, path: unknown): string {
   }
 
   return full.toString()
+}
+
+/** Every generic renderer bridge uses this resolver, including uploads. */
+export function resolveEnterpriseUrl(baseUrl: string, path: unknown): string {
+  assertPublicEnterpriseRequestPath(path)
+  return resolveEnterpriseApiUrl(baseUrl, path)
+}
+
+/** Main-only fixed operation: there is deliberately no caller-supplied path. */
+export function resolveEnterpriseLocalTextContextUrl(baseUrl: string): string {
+  return resolveEnterpriseApiUrl(baseUrl, '/api/tenant-ai-assist/context')
 }
 
 /**

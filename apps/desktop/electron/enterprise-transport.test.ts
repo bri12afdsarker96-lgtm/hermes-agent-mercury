@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 
 import {
+  assertPublicEnterpriseRequestPath,
   buildAutoConnectResult,
   classifyConnectError,
   enterpriseRequestTimeoutMs,
@@ -14,9 +17,86 @@ import {
   normalizeEnterpriseApiOriginOrNull,
   normalizeEnterpriseBaseUrl,
   resolveEnterpriseUrl,
+  resolveEnterpriseLocalTextContextUrl,
   sanitizeMultipartContentType,
   uploadByteLength
 } from './enterprise-transport'
+
+const privatePaths = [
+  '/api/tenant-ai-assist/context', '/api/tenant-ai-assist/context?x=1',
+  '/api/tenant-ai-assist/context#fragment', '/api/tenant-ai-assist/context/accept',
+  '/api/tenant-ai-assist/local-register', '/api/tenant-ai-assist/local/revalidate',
+  '/api/enterprise-local-text', '/api/enterprise-local-text/register',
+  '/api/tenant-ai-assist/%63ontext', '/api/tenant-ai-assist/%2563ontext',
+  '/api/tenant-ai-assist/x/../context', '/api/tenant-ai-assist%2fcontext',
+  '/api/x/%252e%252e/tenant-ai-assist/context', '/api%255ctenant-ai-assist%255ccontext',
+  '/api/x/%2e%2e/tenant-ai-assist/context', '/api%5ctenant-ai-assist%5ccontext',
+  '/api//tenant-ai-assist/context',
+  '/prefix/api/tenant-ai-assist/context',
+  'https://business.invalid/api/tenant-ai-assist/context'
+]
+
+// Execute the actual main bridge bodies with transport/lifecycle boundaries
+// supplied. This checks ordering before any backend refresh or file buffering.
+function mainBridge(name: string, dependencies: Record<string, unknown>) {
+  const source = ts.createSourceFile('main.ts', readFileSync(new URL('./main.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true)
+  let body: ts.Node | undefined
+  const visit = (node: ts.Node) => {
+    if (ts.isFunctionDeclaration(node) && node.name?.text === name) {body = node}
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.getText(source) === 'ipcMain.handle' && ts.isStringLiteral(node.arguments[0]) && node.arguments[0].text === name) {
+      body = node.arguments[1]
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  if (!body) {throw new Error('main handler missing')}
+  const javascript = ts.transpileModule(`const handler = ${body.getText(source)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  return new Function(...Object.keys(dependencies), `${javascript}; return handler`)(...Object.values(dependencies))
+}
+
+describe('private enterprise context boundaries', () => {
+  it('rejects private families under URL normalization and preserves the public assist route', () => {
+    for (const path of privatePaths) {
+      expect(() => assertPublicEnterpriseRequestPath(path), path).toThrow()
+      expect(() => resolveEnterpriseUrl('https://business.invalid/prefix', path), path).toThrow()
+    }
+    expect(resolveEnterpriseUrl('https://business.invalid', '/api/tenant-ai-assist')).toBe('https://business.invalid/api/tenant-ai-assist')
+    expect(resolveEnterpriseLocalTextContextUrl('https://business.invalid/prefix')).toBe('https://business.invalid/prefix/api/tenant-ai-assist/context')
+  })
+
+  it('blocks generic API including registry/upload before backend or file work', async () => {
+    const touched: string[] = []
+    const forbidden = (name: string) => () => {touched.push(name); throw new Error('unexpected side effect')}
+    const handler = mainBridge('handleHermesApiRequest', { assertPublicEnterpriseRequestPath,
+      apiRequestRegistryConnectionId: forbidden('registry'), ensureRegistryBackend: forbidden('ensure'),
+      interceptSessionRequestForRemote: forbidden('reroute'), prepareProfileRenameRequest: forbidden('rename'),
+      prepareProfileDeleteRequest: forbidden('delete'), fetchJsonForBackend: forbidden('fetch') })
+    for (const path of privatePaths) {
+      for (const connectionId of [undefined, 'registered']) {
+        await expect(handler({ path, connectionId, upload: { bytes: new Uint8Array([1]) } })).rejects.toThrow()
+      }
+    }
+    expect(touched).toEqual([])
+  })
+
+  it('blocks both enterprise JSON and upload bridge before refresh and network', async () => {
+    const touched: string[] = []
+    const deps = { isEnterpriseClientSender: () => true,
+      enterpriseSessions: { resolve: () => ({ baseUrl: 'https://business.invalid', token: 'synthetic' }) },
+      isAllowedEnterpriseMethod, resolveEnterpriseUrl, uploadByteLength, ENTERPRISE_MAX_UPLOAD_BYTES,
+      refreshedEnterpriseSession: async () => {touched.push('refresh'); throw new Error('unexpected refresh')},
+      fetchJson: async () => {touched.push('fetch'); throw new Error('unexpected fetch')} }
+    for (const name of ['hermes:enterprise:request', 'hermes:enterprise:upload']) {
+      const handler = mainBridge(name, deps)
+      for (const path of privatePaths) {
+        const result = await handler({ sender: { id: 1 } }, { sessionId: 'synthetic', path, method: 'POST', bytes: new Uint8Array([1]) })
+        expect(result).toMatchObject({ kind: 'error', status: 0 })
+      }
+    }
+    expect(touched).toEqual([])
+  })
+})
 
 describe('normalizeEnterpriseBaseUrl', () => {
   it('accepts loopback over http and any host over https', () => {
