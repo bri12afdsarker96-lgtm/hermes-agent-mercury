@@ -9699,7 +9699,8 @@ def siwc_commit_login(attempt: dict, record: dict) -> dict:
     return {"registration_id": registration, "generation": state["generation"], "state": "ready"}
 
 
-def resolve_siwc_runtime_credentials(profile: str, registration: str, generation: int) -> dict:
+def resolve_siwc_runtime_credentials(profile: str, registration: str, generation: int, *,
+                                     refresh_if_needed: bool = True) -> dict:
     if not isinstance(registration, str) or type(generation) is not int:
         raise _siwc_error("siwc_connection_changed")
     path = siwc_auth_path(profile)
@@ -9719,6 +9720,8 @@ def resolve_siwc_runtime_credentials(profile: str, registration: str, generation
         revision = account["revision"]
         refresh = record["expires_at"] <= time.time() + 60
         if refresh:
+            if not refresh_if_needed:
+                raise _siwc_error("siwc_refresh_unconfirmed")
             earliest = record.get("earliest_refresh_at")
             if isinstance(earliest, (int, float)) and earliest > time.time():
                 raise _siwc_error("siwc_busy")
@@ -9746,6 +9749,91 @@ def resolve_siwc_runtime_credentials(profile: str, registration: str, generation
         raise _siwc_error("siwc_permission_missing")
     return {"provider": SIWC_PROVIDER, "source": "owned-siwc", "base_url": SIWC_RESOURCE,
             "api_key": record["access_token"], "registration_id": registration, "generation": generation}
+
+
+def siwc_check_model_support(profile: str, registration: str, generation: int) -> dict:
+    """Explicit owned catalog observation; never refresh or claim inference success."""
+    import re
+    if (not isinstance(registration, str) or not re.fullmatch(r"[a-f0-9]{32}", registration)
+            or type(generation) is not int or not 0 <= generation <= 9007199254740991):
+        raise _siwc_error("siwc_connection_changed")
+    public = {"model": "gpt-6-luna", "reasoning_effort": "medium",
+              "registration_id": registration, "generation": generation}
+    credentials = current = None
+    deadline = time.monotonic() + 10.0
+
+    def check_deadline():
+        if time.monotonic() >= deadline:
+            raise ValueError("catalog observation expired")
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate catalog key")
+            result[key] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError("invalid catalog JSON")
+
+    try:
+        credentials = resolve_siwc_runtime_credentials(profile, registration, generation, refresh_if_needed=False)
+        check_deadline()
+        # Five seconds bounds each HTTP I/O phase, not the whole request. The
+        # ten-second deadline is checked around headers/chunks and local work.
+        with httpx.Client(timeout=5.0, trust_env=False, follow_redirects=False) as client:
+            check_deadline()
+            with client.stream("GET", SIWC_RESOURCE + "/models", headers={
+                "Authorization": "Bearer " + credentials["api_key"], "Accept-Encoding": "identity",
+            }) as response:
+                check_deadline()
+                if (response.status_code != 200
+                        or response.headers.get("content-encoding", "identity").strip().lower() != "identity"):
+                    raise ValueError("catalog response unavailable")
+                body = bytearray()
+                chunks = iter(response.iter_bytes())
+                while True:
+                    check_deadline()
+                    try:
+                        chunk = next(chunks)
+                    except StopIteration:
+                        break
+                    check_deadline()
+                    if len(body) + len(chunk) > 1_048_576:
+                        raise ValueError("catalog response too large")
+                    body.extend(chunk)
+        check_deadline()
+        catalog = json.loads(body, object_pairs_hook=unique_object, parse_constant=invalid_constant)
+        if not isinstance(catalog, dict) or not isinstance(catalog.get("models"), list):
+            raise ValueError("catalog shape")
+        seen, supported = set(), False
+        for model in catalog["models"]:
+            if not isinstance(model, dict):
+                raise ValueError("catalog model shape")
+            slug, visibility = model.get("slug"), model.get("visibility")
+            for value, limit in ((slug, 256), (visibility, 64)):
+                if (not isinstance(value, str) or not value or value.strip() != value
+                        or not value.isprintable() or len(value.encode("utf-8")) > limit):
+                    raise ValueError("catalog field shape")
+            if slug in seen:
+                raise ValueError("duplicate catalog slug")
+            seen.add(slug)
+            if slug == "gpt-6-luna" and visibility == "list":
+                supported = True
+        check_deadline()
+        current = resolve_siwc_runtime_credentials(profile, registration, generation, refresh_if_needed=False)
+        check_deadline()
+        if not hmac.compare_digest(current["api_key"], credentials["api_key"]):
+            raise ValueError("catalog identity changed")
+        return {**public, "model_status": "supported" if supported else "unsupported"}
+    except Exception:
+        return {**public, "model_status": "unconfirmed"}
+    finally:
+        if credentials is not None:
+            credentials.clear()
+        if current is not None:
+            current.clear()
 
 
 def siwc_logout(profile: str) -> dict:

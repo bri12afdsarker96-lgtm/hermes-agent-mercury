@@ -348,13 +348,13 @@ function AssistantSessionPage({
   const visibleBackends: EnterpriseAssistantBackendOption[] = runtime?.localText
     ? [...(backends.some(item => item.backend_id === 'tenant_model') ? backends.filter(item => item.backend_id !== 'codex') : [{ backend_id: 'tenant_model' as const, label: '企业模型' }]), { backend_id: 'codex', label: '本机 ChatGPT · 自行连接' }]
     : backends
-  const backendModels: TenantModel[] = backendId === 'codex' && local.state.choice
+  const backendModels: TenantModel[] = backendId === 'codex' && local.state.modelStatus === 'supported' && local.state.choice
     ? [{ ...local.state.choice, provider: '本机 ChatGPT', is_default: false }]
     : models.filter(model => model.backend_id === backendId)
   const defaultModel = backendModels.find(item => item.is_default)
   const chosenModel = backendModels.find(item => item.configuration_id === (fixedChoice?.configuration_id ?? selectedConfigurationId))
     ?? (!fixedChoice && !selectedConfigurationId ? defaultModel ?? backendModels[0] : undefined)
-  const catalogChoice: EnterpriseAssistantBackendChoice | null = backendId === 'codex' ? local.state.choice ?? null : chosenModel ? {
+  const catalogChoice: EnterpriseAssistantBackendChoice | null = backendId === 'codex' ? local.state.modelStatus === 'supported' ? local.state.choice ?? null : null : chosenModel ? {
     backend_id: backendId, configuration_id: chosenModel.configuration_id,
     ...(chosenModel.configuration_version !== undefined ? { configuration_version: chosenModel.configuration_version } : {}),
     model: chosenModel.model, runtime_protocol: chosenModel.runtime_protocol!, reasoning_effort: chosenModel.reasoning_effort ?? null,
@@ -363,8 +363,14 @@ function AssistantSessionPage({
   const backendOption = backends.find(backend => backend.backend_id === backendId)
   const choiceChanged = Boolean(fixedChoice && catalogChoice && !assistantChoicesMatch(fixedChoice, catalogChoice))
   const backendReady = Boolean((backendId === 'tenant_model' || (mode === 'summarize' && runtime?.localText)) && catalogChoice?.availability === 'available' && !choiceChanged && !outcomeUnknown)
+  const localConnected = local.state.state === 'connected' || local.state.state === 'ready'
+  const localStatusLabel = local.state.modelStatus === 'checking' ? '正在检查模型'
+    : local.state.modelStatus === 'supported' ? '模型目录已确认'
+      : local.state.modelStatus === 'unsupported' ? '当前账号不支持此模型'
+        : local.state.modelStatus === 'unconfirmed' ? '模型检查未确认'
+          : localConnected ? '本机已连接 · 模型未检查' : local.state.state === 'connecting' ? '正在连接本机账号' : '本机连接未确认'
   const unavailableReason = outcomeUnknown ? new EnterpriseAssistantRequestUnknown().message : choiceChanged
-    ? assistantBackendReason('CONFIGURATION_CHANGED') : fixedChoice && !catalogChoice
+    ? assistantBackendReason('CONFIGURATION_CHANGED') : fixedChoice && !catalogChoice && backendId !== 'codex'
       ? assistantBackendReason('CONFIGURATION_UNAVAILABLE') : backendId === 'codex' && runtime?.localText && mode !== 'summarize'
         ? '本机账号当前支持文本摘要，请选择“文本摘要”；其它处理仍可使用企业模型。'
         : assistantBackendReason(backendId === 'codex' ? runtime?.localText ? local.state.reason ?? 'LOCAL_TEXT_CONNECT_REQUIRED' : 'CODEX_LOCAL_RUNTIME_REQUIRED' : catalogChoice?.reason ?? backendOption?.reason)
@@ -673,7 +679,7 @@ function AssistantSessionPage({
             </div>
             {onRemind ? <button className="hesc-action" type="button" onClick={() => onRemind(composer)}>定时提醒</button> : null}
             <span className="hesc-status" data-tone={backendReady ? 'success' : error ? 'error' : 'warning'}>
-              {modelBusy ? '正在加载模型' : backendReady ? backendId === 'codex' ? '本机账号已连接' : '企业模型已就绪' : '当前后端不可用'}
+              {modelBusy ? '正在加载模型' : backendId === 'codex' ? localStatusLabel : backendReady ? '企业模型已就绪' : '当前后端不可用'}
             </span>
           </header>
         )}
@@ -690,11 +696,13 @@ function AssistantSessionPage({
               {' · '}调用方式：{fixedChoice?.runtime_protocol ?? catalogChoice?.runtime_protocol ?? backendOption?.runtime_protocol ?? '待选择'}
               {' · '}推理强度：{fixedChoice?.reasoning_effort ?? catalogChoice?.reasoning_effort ?? backendOption?.reasoning_effort ?? (backendId === 'codex' ? CODEX_SOFTWARE_DEFAULTS.reasoning_effort : '默认')}</p>
             {!modelBusy && !backendReady ? <p role="status">{unavailableReason}</p> : null}
+            {backendId === 'codex' && local.state.modelStatus === 'supported' ? <p className="hesc-muted-copy" role="status">{assistantBackendReason('LOCAL_TEXT_MODEL_SUPPORTED')}</p> : null}
             {backendId === 'codex' && runtime?.localText ? <div className="hesc-toolbar hesc-ai-local-actions">
               <button type="button" className="hesc-action" disabled={frozen || submitting || local.state.state === 'connecting'} onClick={() => void local.command('connect')}>连接自己的 ChatGPT 账号</button>
               <button type="button" className="hesc-action" disabled={frozen} onClick={() => void local.refresh()}>检查本机连接</button>
+              <button type="button" className="hesc-action" disabled={frozen || submitting || !localConnected || local.state.modelStatus === 'checking'} onClick={() => void local.command('checkModel')}>检查模型支持</button>
               {local.state.state === 'connecting' ? <button type="button" className="hesc-action" onClick={() => void local.command('cancelLogin')}>取消登录</button> : null}
-              {local.state.state === 'ready' ? <button type="button" className="hesc-action" onClick={() => void local.command('logout')}>断开本机账号</button> : null}
+              {localConnected ? <button type="button" className="hesc-action" onClick={() => void local.command('logout')}>断开本机账号</button> : null}
               {local.authUrl ? <div><input aria-label="ChatGPT 官方登录链接" readOnly value={local.authUrl} /><button type="button" className="hesc-action" onClick={() => void Promise.resolve().then(async () => {const copied = window.hermesDesktop?.writeClipboard ? await window.hermesDesktop.writeClipboard(local.authUrl) : await navigator.clipboard.writeText(local.authUrl); if (copied === false) {throw new Error('clipboard unavailable')}}).catch(() => setError('复制未完成，请手动选择登录链接后复制。'))}>复制登录链接</button></div> : null}
               {localRequestId && submitting ? <button type="button" className="hesc-action" onClick={() => void runtime.localText!({ action: 'stop', conversationId: activeConversation.id, requestId: localRequestId }).then(() => {if (foregroundConversation.current === activeConversation) {setError(assistantBackendReason('LOCAL_TEXT_OBSERVATION_STOPPED'))}}).catch(() => {if (foregroundConversation.current === activeConversation) {setError(assistantBackendReason('LOCAL_TEXT_RESULT_UNKNOWN'))}})}>停止观察</button> : null}
               {localRequestId && outcomeUnknown && !submitting ? <button type="button" className="hesc-action" onClick={() => {
@@ -727,7 +735,7 @@ function AssistantSessionPage({
                 </select>
               </label>
               <span className="hesc-status" data-tone={backendReady ? 'success' : error ? 'error' : 'warning'}>
-                {modelBusy ? '正在加载模型' : backendReady ? backendId === 'codex' ? '本机账号已连接' : '企业模型已就绪' : '当前后端不可用'}
+                {modelBusy ? '正在加载模型' : backendId === 'codex' ? localStatusLabel : backendReady ? '企业模型已就绪' : '当前后端不可用'}
               </span>
               {onRemind ? <button className="hesc-action" type="button" onClick={() => onRemind(composer)}>定时提醒</button> : null}
             </div>

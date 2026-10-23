@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { AssistantPage } from './assistant-page'
 import { assistantSessionFor, createAssistantChatThread, preserveAssistantSessionForPageReload, releaseAssistantSession } from './assistant-session'
 import type { EnterpriseClientRuntime } from './runtime'
+import type { LocalTextReply } from '../../electron/enterprise-local-text-types'
 import { WebPresentationContext } from './web-presentation'
 import { $enterprisePackageInstallFrozen } from './enterprise-install-readiness'
 
@@ -58,10 +59,97 @@ describe('AssistantPage', () => {
       get: vi.fn(async (path: string) => path === '/api/tenant-ai-personas' ? personaPool : { configured: false, models: [], backends: [] }) as EnterpriseClientRuntime['get'] }
   }
 
+  it('model preflight UI requires an explicit check before enabling a fixed owned summary', async () => {
+    const localText = vi.fn(async (payload: { action: string }): Promise<LocalTextReply> => payload.action === 'checkModel'
+      ? { state: 'ready', modelStatus: 'supported', choice: ownedChoice }
+      : payload.action === 'submit' ? { state: 'completed', text: '目录检查后的摘要', backend_choice: ownedChoice }
+        : { state: 'connected', modelStatus: 'unverified', reason: 'LOCAL_TEXT_MODEL_UNVERIFIED', choice: ownedChoice })
+    const runtime = localRuntime(localText)
+    render(<AssistantPage runtime={runtime} principalId="model-preflight-explicit" />)
+    fireEvent.change(await screen.findByLabelText('运行后端'), { target: { value: 'codex' } })
+    fireEvent.click(screen.getByRole('button', { name: /文本摘要/ }))
+    await screen.findByText('本机已连接 · 模型未检查')
+    expect((screen.getByRole('button', { name: '提交处理' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(localText.mock.calls.every(([payload]) => payload.action === 'status')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '检查模型支持' }))
+    await screen.findByText('模型目录已确认')
+    expect(screen.getByText(/额度和实际可用性以请求结果为准/)).toBeTruthy()
+    expect(localText.mock.calls.filter(([payload]) => payload.action === 'checkModel')).toHaveLength(1)
+    expect(localText.mock.calls.some(([payload]) => payload.action === 'submit')).toBe(false)
+    fireEvent.change(screen.getByLabelText('输入内容'), { target: { value: '明确提交的合成材料' } })
+    fireEvent.click(screen.getByRole('button', { name: '提交处理' }))
+    await screen.findByText('目录检查后的摘要')
+    expect(localText.mock.calls.filter(([payload]) => payload.action === 'submit')).toHaveLength(1)
+    expect(runtime.post).not.toHaveBeenCalled()
+  })
+
+  it.each(['unsupported', 'unconfirmed'] as const)('model preflight UI distinguishes %s and retains retry and logout', async modelStatus => {
+    const localText = vi.fn(async (payload: { action: string }): Promise<LocalTextReply> => payload.action === 'checkModel'
+      ? { state: 'connected', modelStatus, reason: modelStatus === 'unsupported' ? 'LOCAL_TEXT_MODEL_UNSUPPORTED' : 'LOCAL_TEXT_MODEL_CHECK_FAILED' }
+      : { state: 'connected', modelStatus: 'unverified', reason: 'LOCAL_TEXT_MODEL_UNVERIFIED' })
+    render(<AssistantPage runtime={localRuntime(localText)} principalId={`model-preflight-${modelStatus}`} />)
+    fireEvent.change(await screen.findByLabelText('运行后端'), { target: { value: 'codex' } })
+    fireEvent.click(screen.getByRole('button', { name: /文本摘要/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '检查模型支持' }))
+    await screen.findByText(modelStatus === 'unsupported' ? '当前账号不支持此模型' : '模型检查未确认')
+    expect((screen.getByRole('button', { name: '检查模型支持' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByRole('button', { name: '断开本机账号' })).toBeTruthy()
+    expect((screen.getByRole('button', { name: '提交处理' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(localText.mock.calls.some(([payload]) => payload.action === 'submit' || payload.action === 'connect')).toBe(false)
+  })
+
+  it('model preflight UI revokes a previous choice while checking and discards support arriving after logout', async () => {
+    let release!: (reply: LocalTextReply) => void
+    const held = new Promise<LocalTextReply>(done => {release = done})
+    const localText = vi.fn(async (payload: { action: string }): Promise<LocalTextReply> => payload.action === 'checkModel' ? held
+      : payload.action === 'logout' ? { state: 'disconnected' } : { state: 'ready', modelStatus: 'supported', choice: ownedChoice })
+    render(<AssistantPage runtime={localRuntime(localText)} principalId="model-preflight-logout" />)
+    fireEvent.change(await screen.findByLabelText('运行后端'), { target: { value: 'codex' } })
+    fireEvent.click(screen.getByRole('button', { name: /文本摘要/ }))
+    await screen.findByText('模型目录已确认')
+    fireEvent.click(screen.getByRole('button', { name: '检查模型支持' }))
+    expect((screen.getByLabelText('输入内容') as HTMLTextAreaElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: '检查模型支持' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '检查模型支持' }))
+    expect(localText.mock.calls.filter(([payload]) => payload.action === 'checkModel')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: '断开本机账号' }))
+    await act(async () => {release({ state: 'ready', modelStatus: 'supported', choice: ownedChoice }); await held})
+    expect(screen.queryByText('模型目录已确认')).toBeNull()
+    expect((screen.getByRole('button', { name: '提交处理' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(localText.mock.calls.some(([payload]) => payload.action === 'submit')).toBe(false)
+  })
+
+  it('model preflight UI keeps the original UNKNOWN query usable after a check fails', async () => {
+    const localText = vi.fn(async (payload: { action: string }): Promise<LocalTextReply> => payload.action === 'submit'
+      ? { state: 'unknown', reason: 'LOCAL_TEXT_RESULT_UNKNOWN' }
+      : payload.action === 'checkModel' ? { state: 'connected', modelStatus: 'unconfirmed', reason: 'LOCAL_TEXT_MODEL_CHECK_FAILED' }
+        : payload.action === 'requestStatus' ? { state: 'completed', text: '原关联的已接受结果', backend_choice: ownedChoice }
+          : { state: 'ready', modelStatus: 'supported', choice: ownedChoice })
+    const runtime = localRuntime(localText)
+    render(<AssistantPage runtime={runtime} principalId="model-preflight-unknown-query" />)
+    fireEvent.change(await screen.findByLabelText('运行后端'), { target: { value: 'codex' } })
+    fireEvent.click(screen.getByRole('button', { name: /文本摘要/ }))
+    await waitFor(() => expect((screen.getByLabelText('输入内容') as HTMLTextAreaElement).disabled).toBe(false))
+    fireEvent.change(screen.getByLabelText('输入内容'), { target: { value: '仅提交一次' } })
+    fireEvent.click(screen.getByRole('button', { name: '提交处理' }))
+    await screen.findByRole('button', { name: '查询原请求' })
+    fireEvent.click(screen.getByRole('button', { name: '检查模型支持' }))
+    await screen.findByText('模型检查未确认')
+    const query = screen.getByRole('button', { name: '查询原请求' }) as HTMLButtonElement
+    expect(query.disabled).toBe(false)
+    fireEvent.click(query)
+    await screen.findByText('原关联的已接受结果')
+    const calls = localText.mock.calls.map(([payload]) => payload as { action: string; requestId?: string; conversationId?: string })
+    expect(calls.filter(payload => payload.action === 'submit')).toHaveLength(1)
+    const original = calls.find(payload => payload.action === 'submit')!
+    expect(calls.find(payload => payload.action === 'requestStatus')).toMatchObject({ requestId: original.requestId, conversationId: original.conversationId })
+    expect(runtime.post).not.toHaveBeenCalled()
+  })
+
   it('opens an owned text summary from the actual separated workspace without tenant model configuration', async () => {
     const localText = vi.fn(async (payload: { action: string }) => payload.action === 'submit'
       ? { state: 'completed', text: '分栏工作台摘要已接受', backend_choice: ownedChoice }
-      : { state: 'ready', choice: ownedChoice })
+      : { state: 'ready', modelStatus: 'supported' as const, choice: ownedChoice })
     const runtime = localRuntime(localText)
     render(<WebPresentationContext.Provider value><AssistantPage separatedNavigation runtime={runtime} principalId="workspace-owned-summary" /></WebPresentationContext.Provider>)
     const summary = screen.getByRole('button', { name: '文本摘要' })
@@ -86,7 +174,7 @@ describe('AssistantPage', () => {
     { local: true, mode: 'customer_reply' as const },
     { local: true, mode: 'knowledge_question' as const }
   ])('keeps the owned summary entry out of unrelated workspace surfaces ($local/$mode)', async ({ local, mode }) => {
-    const localText = vi.fn(async () => ({ state: 'ready', choice: ownedChoice }))
+    const localText = vi.fn(async () => ({ state: 'ready', modelStatus: 'supported' as const, choice: ownedChoice }))
     const runtime = local ? localRuntime(localText) : runtimeFor()
     const principalId = `workspace-no-summary-${local}-${mode}`
     assistantSessionFor(runtime, undefined, principalId).mode.set(mode)
@@ -101,7 +189,7 @@ describe('AssistantPage', () => {
     let resolve!: (value: { state: 'unknown'; reason: string }) => void
     const held = new Promise<{ state: 'unknown'; reason: string }>(done => { resolve = done })
     const localText = vi.fn(async (payload: { action: string }) => payload.action === 'submit'
-      ? held : { state: 'ready', choice: ownedChoice })
+      ? held : { state: 'ready', modelStatus: 'supported' as const, choice: ownedChoice })
     const runtime = localRuntime(localText)
     render(<WebPresentationContext.Provider value><AssistantPage separatedNavigation runtime={runtime} principalId="workspace-summary-guard" /></WebPresentationContext.Provider>)
     const summary = screen.getByRole('button', { name: '文本摘要' }) as HTMLButtonElement
@@ -128,7 +216,7 @@ describe('AssistantPage', () => {
   it('submits a fixed owned summary with no configured tenant model or tenant write', async () => {
     const localText = vi.fn(async (payload: { action: string }) => payload.action === 'submit'
       ? { state: 'completed', text: '本机摘要已接受', backend_choice: ownedChoice }
-      : { state: 'ready', choice: ownedChoice })
+      : { state: 'ready', modelStatus: 'supported' as const, choice: ownedChoice })
     const runtime = localRuntime(localText)
     render(<AssistantPage runtime={runtime} principalId="owned-no-tenant-key" />)
     fireEvent.change(await screen.findByLabelText('运行后端'), { target: { value: 'codex' } })
@@ -145,7 +233,7 @@ describe('AssistantPage', () => {
     const localText = vi.fn(async (payload: { action: string }) => payload.action === 'submit'
       ? { state: 'unknown', reason: 'LOCAL_TEXT_RESULT_UNKNOWN' }
       : payload.action === 'requestStatus' ? { state: 'completed', text: '原请求的已接受摘要', backend_choice: ownedChoice }
-        : { state: 'ready', choice: ownedChoice })
+        : { state: 'ready', modelStatus: 'supported' as const, choice: ownedChoice })
     const runtime = localRuntime(localText)
     render(<WebPresentationContext.Provider value><AssistantPage separatedNavigation runtime={runtime} principalId="owned-query-once" /></WebPresentationContext.Provider>)
     fireEvent.change(await screen.findByLabelText('运行后端'), { target: { value: 'codex' } })

@@ -1,5 +1,11 @@
 # Mercury 二期企业集成基线（P2-00B）
 
+## 2026-10-23 P2-03-02R3 显式目录检查与本地连接分离（当前）
+
+基于M500f71aa3/S44182cc，已实现用户显式“检查模型支持”：本机连接只产生未检查状态，目录supported才给main-owned available choice；检查中、明确不支持、未确认均不启新submit。只有固定官方目录中exact Luna/list有效且身份前后稳定才支持；medium沿官方模型合同，目录不证明额度或推理成功。不在status/revalidate/accept探目录，不刷新或借默认授权；首await前撤支持、同slot/epoch/身份拦迟到，原UNKNOWN/query/stop/accept不受新模型检查门控。
+
+本片有限回执fe6abd43…：Python唯一62（20前轮不受读取循环改动+最终42），新增Node26、UI唯一8，renderer/Electron类型exit0；实际红例与首Python环境错误保留，旧52/16/22段包未重跑。11源码/测试快照和12证据绑定见phase2-03-02-checkpoint。本片真实OAuth/目录/模型/JWKS0，原生新候选尚未构建/启动；上一基线入口不能代表本实现。S权限/context保持，真实接入、PG/RLS及整体Gates仍未完成，不进入03-03或发布。
+
 ## 2026-10-23 P2-03-02R3 自有身份接入前置（当前）
 
 上一片M `146bedc2b` / S `4c875e5` 的ready屏障与22段阅读已获限定接受。本片只核官方OSS协议、当前匿名网络与原始构建；没有源码/测试修改或合成重跑。唯一新JWKS GET于04:55:58 UTC收到403/HTML/Cloudflare，传输等价隔离检查回执 `7e5b3396…`，新OAuth/目录/模型均0；不重复原网络问题、不借默认授权或重放UNKNOWN。

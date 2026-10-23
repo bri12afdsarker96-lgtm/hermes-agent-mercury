@@ -11783,6 +11783,24 @@ async def siwc_owned_logout(request: Request, profile: str):
         raise HTTPException(status_code=503, detail="SIWC_LOGOUT_UNCONFIRMED") from None
 
 
+@app.post("/api/providers/siwc/models/check")
+async def siwc_owned_model_check(request: Request, profile: str, registration_id: str, generation: str):
+    from hermes_cli.auth import siwc_check_model_support
+    await _siwc_owned_request(request, profile)
+    if (set(request.query_params) != {"profile", "registration_id", "generation"}
+            or not re.fullmatch(r"[a-f0-9]{32}", registration_id)
+            or not re.fullmatch(r"0|[1-9][0-9]{0,15}", generation)
+            or int(generation) > 9007199254740991):
+        raise HTTPException(status_code=400, detail="SIWC_MODEL_CHECK_INVALID")
+    selected_generation = int(generation)
+    try:
+        return await asyncio.get_running_loop().run_in_executor(
+            None, siwc_check_model_support, profile, registration_id, selected_generation)
+    except Exception:
+        return {"model_status": "unconfirmed", "model": "gpt-6-luna", "reasoning_effort": "medium",
+                "registration_id": registration_id, "generation": selected_generation}
+
+
 @app.post("/api/providers/oauth/{provider_id}/start")
 async def start_oauth_login(
     provider_id: str,

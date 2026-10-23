@@ -11,7 +11,7 @@ export interface LocalTextChoice {
 
 export interface LocalTextRequest {
   sessionId: string
-  action: 'status' | 'connect' | 'cancelLogin' | 'logout' | 'submit' | 'requestStatus' | 'stop'
+  action: 'status' | 'connect' | 'checkModel' | 'cancelLogin' | 'logout' | 'submit' | 'requestStatus' | 'stop'
   conversationId?: string
   requestId?: string
   content?: string
@@ -21,6 +21,7 @@ export interface LocalTextRequest {
 
 export interface LocalTextReply {
   state: string
+  modelStatus?: 'unverified' | 'checking' | 'supported' | 'unsupported' | 'unconfirmed'
   reason?: string
   authUrl?: string
   choice?: LocalTextChoice

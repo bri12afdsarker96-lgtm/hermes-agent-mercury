@@ -17,7 +17,7 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-function harness() {
+function harness(catalogSupported = true) {
   const session: EnterpriseSession = { authSource: 'password', baseUrl: 'https://business.invalid', sessionId: 'enterprise', token: 'private-enterprise-fixture' }
   let current = true
   let clock = 0
@@ -27,7 +27,11 @@ function harness() {
     prepared_at: 123, expires_in: 180, instructions: 'instructions', input: 'synthetic prepared text',
     model: 'gpt-6-luna', reasoning_effort: 'medium', runtime_protocol: 'codex_responses' }
   const client = {
-    connect: vi.fn(async () => undefined), close: vi.fn(),
+    // Older lower-chain cases begin with a synthetic main-owned snapshot.
+    // Preflight cases pass false and obtain it only through checkModel.
+    connect: vi.fn(async () => {
+      if (catalogSupported) {session.localText!.modelCheck = { status: 'supported', account: { registrationId: choice.configuration_id, generation } }}
+    }), close: vi.fn(),
     request: vi.fn(async (method: string) => {
       if (method === 'enterprise_text.capabilities') {return { protocol_version: 2, runtime_id: 'd'.repeat(32), channel_id: 'e'.repeat(32) }}
       if (method === 'session.create') {return { session_id: 'enterprise-text-runtime-fixture' }}
@@ -44,6 +48,7 @@ function harness() {
     localConnection: vi.fn(async () => ({ baseUrl: 'http://127.0.0.1:1234', wsUrl: 'ws://127.0.0.1:1234/api/ws?token=fixture', mode: 'local', token: 'fixture' })),
     localApi: vi.fn(async (_connection, path) => {
       if (path.startsWith('/api/providers/siwc/status')) {return { state: 'ready', registration_id: choice.configuration_id, generation }}
+      if (path.startsWith('/api/providers/siwc/models/check')) {return { model_status: 'supported', registration_id: choice.configuration_id, generation, model: 'gpt-6-luna', reasoning_effort: 'medium' }}
       if (path.includes('/start?')) {return { session_id: 'owned-login', auth_url: 'https://auth.openai.com/api/accounts/authorize?state=synthetic' }}
       if (path.includes('/poll/')) {return { status: 'pending' }}
       return { state: 'disconnected', ok: true }
@@ -257,9 +262,235 @@ it('cannot publish a held readiness response after disposal, epoch change or own
 it('storage preparation failure cannot advertise ready or begin a conversation', async () => {
   const h = harness()
   vi.mocked(h.deps.localApi).mockResolvedValue({ state: 'unavailable', reason: 'SIWC_RECORD_UNAVAILABLE' })
-  expect((await h.run({ sessionId: 'enterprise', action: 'status' })).state).toBe('disconnected')
+  expect((await h.run({ sessionId: 'enterprise', action: 'status' })).state).toBe('unavailable')
   expect((await h.run()).state).toBe('unavailable')
   expect(h.client.request.mock.calls.some(([method]) => method === 'session.create')).toBe(false)
   expect(h.sends()).toBe(0)
   expect(vi.mocked(h.deps.context).mock.calls.some(([body]) => body.action === 'prepare')).toBe(false)
+})
+
+const control = (action: LocalTextRequest['action']): LocalTextRequest => ({ sessionId: 'enterprise', action })
+const catalogCalls = (h: ReturnType<typeof harness>) => vi.mocked(h.deps.localApi).mock.calls.filter(([, path]) => path.startsWith('/api/providers/siwc/models/check'))
+
+it('model preflight keeps connected identity unverified and rejects a forged available submit without side effects', async () => {
+  const h = harness(false)
+  expect(await h.run(control('status'))).toMatchObject({ state: 'connected', modelStatus: 'unverified' })
+  expect((await h.run(control('status'))).choice).toBeUndefined()
+  expect(await h.run()).toMatchObject({ state: 'unavailable', reason: 'LOCAL_TEXT_MODEL_UNVERIFIED' })
+  expect(catalogCalls(h)).toHaveLength(0)
+  expect(h.sends()).toBe(0)
+  expect(h.client.request.mock.calls.some(([method]) => method === 'session.create')).toBe(false)
+  expect(vi.mocked(h.deps.context).mock.calls.some(([body]) => body.action === 'prepare')).toBe(false)
+  expect((await h.run({ ...control('checkModel'), modelStatus: 'supported' } as LocalTextRequest)).reason).toBe('LOCAL_TEXT_REQUEST_INVALID')
+  expect(catalogCalls(h)).toHaveLength(0)
+})
+
+it('model preflight checks the main selected account once and never fetches during submit or accept', async () => {
+  const h = harness(false)
+  expect(await h.run(control('checkModel'))).toMatchObject({ state: 'ready', modelStatus: 'supported', choice })
+  const calls = catalogCalls(h)
+  expect(calls).toHaveLength(1)
+  expect(calls[0][1]).toBe(`/api/providers/siwc/models/check?registration_id=${choice.configuration_id}&generation=1&profile=${h.session.localText!.profile}`)
+  expect(calls[0][3]).toBe('POST')
+  expect(await h.run()).toMatchObject({ state: 'completed', text: 'safe summary' })
+  expect((await h.run(control('status'))).modelStatus).toBe('supported')
+  expect(catalogCalls(h)).toHaveLength(1)
+  expect(h.sends()).toBe(1)
+})
+
+it.each(['unsupported', 'unconfirmed', 'wrong-model', 'wrong-effort', 'wrong-generation', 'malformed', 'transport-error'])('model preflight %s cannot enable a new request and an explicit retry recovers', async kind => {
+  const h = harness(false)
+  const original = vi.mocked(h.deps.localApi).getMockImplementation()!
+  vi.mocked(h.deps.localApi).mockImplementation(async (...args) => {
+    const value = await original(...args)
+    if (!args[1].startsWith('/api/providers/siwc/models/check')) {return value}
+    if (kind === 'transport-error') {throw new Error('private upstream diagnostic canary')}
+    return kind === 'malformed' ? { available: true } : { ...value,
+      ...(kind === 'unsupported' || kind === 'unconfirmed' ? { model_status: kind } : {}),
+      ...(kind === 'wrong-model' ? { model: 'other-model' } : {}),
+      ...(kind === 'wrong-effort' ? { reasoning_effort: 'high' } : {}),
+      ...(kind === 'wrong-generation' ? { generation: 2 } : {}) }
+  })
+  const result = await h.run(control('checkModel'))
+  expect(result).toMatchObject({ state: 'connected', modelStatus: kind === 'unsupported' ? 'unsupported' : 'unconfirmed' })
+  expect(result.choice).toBeUndefined()
+  expect(JSON.stringify(result)).not.toContain('canary')
+  expect((await h.run()).state).toBe('unavailable')
+  expect(h.sends()).toBe(0)
+  expect(h.client.request.mock.calls.some(([method]) => method === 'session.create')).toBe(false)
+  vi.mocked(h.deps.localApi).mockImplementation(original)
+  expect((await h.run(control('checkModel'))).modelStatus).toBe('supported')
+  expect(catalogCalls(h)).toHaveLength(2)
+})
+
+it('model preflight reserves one check, revokes old support while waiting and completes without another GET', async () => {
+  const h = harness(false)
+  await h.run(control('checkModel'))
+  const entered = deferred<void>(), release = deferred<void>()
+  const original = vi.mocked(h.deps.localApi).getMockImplementation()!
+  vi.mocked(h.deps.localApi).mockImplementation(async (...args) => {
+    if (args[1].startsWith('/api/providers/siwc/models/check')) {entered.resolve(); await release.promise}
+    return original(...args)
+  })
+  const running = h.run(control('checkModel'))
+  await entered.promise
+  expect(await h.run(control('checkModel'))).toMatchObject({ state: 'connected', modelStatus: 'checking' })
+  expect((await h.run(control('status'))).choice).toBeUndefined()
+  expect((await h.run()).state).toBe('unavailable')
+  expect(catalogCalls(h)).toHaveLength(2)
+  release.resolve()
+  expect((await running).modelStatus).toBe('supported')
+  expect((await h.run(control('status'))).modelStatus).toBe('supported')
+  expect(catalogCalls(h)).toHaveLength(2)
+})
+
+it.each(['generation', 'logout', 'cancelLogin', 'connect', 'dispose', 'epoch', 'owner', 'runtime'])('model preflight discards held support after %s changes', async change => {
+  const h = harness(false)
+  const entered = deferred<void>(), release = deferred<void>()
+  const original = vi.mocked(h.deps.localApi).getMockImplementation()!
+  let failRuntime = false
+  vi.mocked(h.deps.localApi).mockImplementation(async (...args) => {
+    if (failRuntime) {throw new Error('LOCAL_TEXT_RUNTIME_UNAVAILABLE')}
+    if (args[1].startsWith('/api/providers/siwc/models/check')) {entered.resolve(); await release.promise}
+    return original(...args)
+  })
+  const running = h.run(control('checkModel'))
+  await entered.promise
+  if (change === 'generation') {h.accountChanged()}
+  if (change === 'logout' || change === 'cancelLogin' || change === 'connect') {await h.run(control(change))}
+  if (change === 'dispose') {h.session.localText!.dispose()}
+  if (change === 'epoch') {h.session.localTextEpoch = (h.session.localTextEpoch ?? 0) + 1}
+  if (change === 'owner') {h.ownerChanged()}
+  if (change === 'runtime') {failRuntime = true}
+  release.resolve()
+  expect((await running).modelStatus).not.toBe('supported')
+  expect(h.session.localText?.modelCheck?.status).not.toBe('supported')
+  expect(h.sends()).toBe(0)
+  expect(catalogCalls(h)).toHaveLength(1)
+})
+
+it('model preflight failure preserves same-request UNKNOWN query and accepted recovery without a second send', async () => {
+  const h = harness(false)
+  await h.run(control('checkModel'))
+  h.setObserved({ state: 'unknown', draft: '' })
+  expect((await h.run()).state).toBe('unknown')
+  const original = vi.mocked(h.deps.localApi).getMockImplementation()!
+  vi.mocked(h.deps.localApi).mockImplementation(async (...args) => args[1].startsWith('/api/providers/siwc/models/check')
+    ? { model_status: 'unconfirmed', registration_id: choice.configuration_id, generation: 1, model: 'gpt-6-luna', reasoning_effort: 'medium' }
+    : original(...args))
+  expect((await h.run(control('checkModel'))).modelStatus).toBe('unconfirmed')
+  expect((await h.run({ ...submit, action: 'requestStatus' })).state).toBe('unknown')
+  h.setObserved({ state: 'received', draft: 'private draft' })
+  expect(await h.run({ ...submit, action: 'requestStatus' })).toMatchObject({ state: 'completed', text: 'safe summary' })
+  expect((await h.run({ ...submit, action: 'stop' })).state).toBe('unknown')
+  expect(h.sends()).toBe(1)
+  expect(catalogCalls(h)).toHaveLength(2)
+})
+
+it('model preflight final guard rejects a revoked snapshot after held revalidation without sending', async () => {
+  const h = harness(false)
+  await h.run(control('checkModel'))
+  const entered = deferred<void>(), release = deferred<void>()
+  const originalContext = vi.mocked(h.deps.context).getMockImplementation()!
+  vi.mocked(h.deps.context).mockImplementation(async body => {
+    if (body.action === 'revalidate') {entered.resolve(); await release.promise}
+    return originalContext(body)
+  })
+  const sending = h.run()
+  await entered.promise
+  const originalApi = vi.mocked(h.deps.localApi).getMockImplementation()!
+  vi.mocked(h.deps.localApi).mockImplementation(async (...args) => {
+    const reply = await originalApi(...args)
+    return args[1].startsWith('/api/providers/siwc/models/check') ? { ...reply, model_status: 'unconfirmed' } : reply
+  })
+  expect((await h.run(control('checkModel'))).modelStatus).toBe('unconfirmed')
+  release.resolve()
+  expect(await sending).toMatchObject({ state: 'unavailable', reason: 'LOCAL_TEXT_MODEL_UNVERIFIED' })
+  expect(h.sends()).toBe(0)
+  expect(vi.mocked(h.deps.context).mock.calls.some(([body]) => body.action === 'accept')).toBe(false)
+})
+
+it.each(['success', 'failure'])('model preflight late check %s never reads identity or clears newer supported result', async outcome => {
+  const h = harness(false)
+  const entered = deferred<void>(), release = deferred<void>()
+  const original = vi.mocked(h.deps.localApi).getMockImplementation()!
+  let catalogs = 0, failStatus = false
+  vi.mocked(h.deps.localApi).mockImplementation(async (...args) => {
+    if (args[1].startsWith('/api/providers/siwc/status') && failStatus) {throw new Error('LOCAL_TEXT_RUNTIME_UNAVAILABLE')}
+    if (args[1].startsWith('/api/providers/siwc/models/check') && ++catalogs === 1) {
+      entered.resolve(); await release.promise
+      if (outcome === 'failure') {throw new Error('private old error')}
+    }
+    return original(...args)
+  })
+  const first = h.run(control('checkModel'))
+  await entered.promise
+  failStatus = true
+  expect((await h.run(control('status'))).state).toBe('unavailable')
+  failStatus = false
+  expect((await h.run(control('checkModel'))).modelStatus).toBe('supported')
+  const before = vi.mocked(h.deps.localApi).mock.calls.filter(([, path]) => path.startsWith('/api/providers/siwc/status')).length
+  failStatus = true
+  release.resolve()
+  expect((await first).modelStatus).not.toBe('supported')
+  const after = vi.mocked(h.deps.localApi).mock.calls.filter(([, path]) => path.startsWith('/api/providers/siwc/status')).length
+  expect(after).toBe(before)
+  failStatus = false
+  expect((await h.run(control('status'))).modelStatus).toBe('supported')
+  expect(catalogCalls(h)).toHaveLength(2)
+  expect(h.sends()).toBe(0)
+})
+
+it.each(['checkModel', 'connect'] as const)('model preflight entry revokes support before %s waits for enterprise status', async action => {
+  const h = harness()
+  await h.run(control('status'))
+  const entered = deferred<void>(), release = deferred<void>()
+  const original = vi.mocked(h.deps.context).getMockImplementation()!
+  let hold = true
+  vi.mocked(h.deps.context).mockImplementation(async body => {
+    if (hold && body.action === 'status') {hold = false; entered.resolve(); await release.promise}
+    return original(body)
+  })
+  const running = h.run(control(action))
+  await entered.promise
+  try {
+    expect(await h.run()).toMatchObject({ state: 'unavailable' })
+    expect((await h.run(control('status'))).choice).toBeUndefined()
+    expect(h.sends()).toBe(0)
+    expect(h.client.request.mock.calls.some(([method]) => method === 'session.create')).toBe(false)
+    expect(vi.mocked(h.deps.context).mock.calls.some(([body]) => body.action === 'prepare')).toBe(false)
+  } finally {release.resolve(); await running}
+  expect(catalogCalls(h)).toHaveLength(action === 'checkModel' ? 1 : 0)
+})
+
+it('model preflight entry failure clears its reservation and permits a later explicit retry', async () => {
+  const h = harness()
+  await h.run(control('status'))
+  const original = vi.mocked(h.deps.context).getMockImplementation()!
+  vi.mocked(h.deps.context).mockRejectedValueOnce(new Error('private enterprise diagnostic'))
+  expect((await h.run(control('checkModel'))).state).toBe('unavailable')
+  expect(h.session.localText!.modelCheck).toBeUndefined()
+  expect(catalogCalls(h)).toHaveLength(0)
+  vi.mocked(h.deps.context).mockImplementation(original)
+  expect((await h.run(control('checkModel'))).modelStatus).toBe('supported')
+  expect(catalogCalls(h)).toHaveLength(1)
+})
+
+it('model preflight entry coalesces concurrent checks while the first enterprise status is held', async () => {
+  const h = harness()
+  await h.run(control('status'))
+  const entered = deferred<void>(), release = deferred<void>()
+  const original = vi.mocked(h.deps.context).getMockImplementation()!
+  let hold = true
+  vi.mocked(h.deps.context).mockImplementation(async body => {
+    if (hold && body.action === 'status') {hold = false; entered.resolve(); await release.promise}
+    return original(body)
+  })
+  const first = h.run(control('checkModel'))
+  await entered.promise
+  expect((await h.run(control('checkModel'))).modelStatus).toBe('checking')
+  expect(catalogCalls(h)).toHaveLength(0)
+  release.resolve()
+  expect((await first).modelStatus).toBe('supported')
+  expect(catalogCalls(h)).toHaveLength(1)
 })

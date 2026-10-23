@@ -38,6 +38,16 @@ interface Pending {
   accepted?: LocalTextReply
 }
 
+interface Account {
+  registrationId: string
+  generation: number
+}
+
+interface ModelCheck {
+  account?: Account
+  status: NonNullable<LocalTextReply['modelStatus']>
+}
+
 export interface LocalTextDependencies {
   assertCurrent(): void
   context(body: Record<string, unknown>): Promise<Context>
@@ -56,6 +66,7 @@ export interface EnterpriseLocalTextState {
   epoch: number
   loginId?: string
   loginStarting: boolean
+  modelCheck?: ModelCheck
   requests: Record<string, Pending>
   conversations: Record<string, { id: string; binding: string }>
   init: Promise<void>
@@ -126,7 +137,7 @@ export function createEnterpriseTextAuthority(backend: { kind?: string; shell?: 
 function assertPayload(payload: LocalTextRequest) {
   const allowed = new Set(['sessionId', 'action', 'conversationId', 'requestId', 'content', 'personaId', 'choice'])
   if (!payload || Object.keys(payload).some(key => !allowed.has(key)) ||
-      !['status', 'connect', 'cancelLogin', 'logout', 'submit', 'requestStatus', 'stop'].includes(payload.action)) {
+      !['status', 'connect', 'checkModel', 'cancelLogin', 'logout', 'submit', 'requestStatus', 'stop'].includes(payload.action)) {
     throw finite('LOCAL_TEXT_REQUEST_INVALID')
   }
 }
@@ -159,6 +170,7 @@ async function binding(session: EnterpriseSession, deps: LocalTextDependencies, 
         if (state.closed) {return}
         state.closed = true
         state.epoch += 1
+        state.modelCheck = undefined
         const cleanup: Promise<unknown>[] = []
         if (state.loginId) {
           cleanup.push(state.api(`/api/providers/oauth/sessions/${state.loginId}`, 'DELETE').catch(() => undefined))
@@ -209,12 +221,35 @@ async function binding(session: EnterpriseSession, deps: LocalTextDependencies, 
   return state
 }
 
-function choiceFrom(status: any): LocalTextChoice {
+function accountFrom(status: any): Account {
   if (status.state !== 'ready' || !/^[a-f0-9]{32}$/.test(status.registration_id) || !Number.isSafeInteger(status.generation) || status.generation < 0) {
-    throw finite('LOCAL_TEXT_CONNECT_REQUIRED')
+    throw finite(['disconnected', 'reconnect_required'].includes(status.state) ? 'LOCAL_TEXT_CONNECT_REQUIRED' : 'LOCAL_TEXT_CONNECTION_CHECK_FAILED')
   }
-  return { backend_id: 'codex', configuration_id: status.registration_id, configuration_version: status.generation,
+  return { registrationId: status.registration_id, generation: status.generation }
+}
+
+function sameAccount(left: Account, right: Account) {
+  return left.registrationId === right.registrationId && left.generation === right.generation
+}
+
+function choiceAccountMatches(choice: LocalTextChoice, account: Account) {
+  return choice.configuration_id === account.registrationId && choice.configuration_version === account.generation
+}
+
+function supportedChoice(account: Account): LocalTextChoice {
+  return { backend_id: 'codex', configuration_id: account.registrationId, configuration_version: account.generation,
     model: 'gpt-6-luna', reasoning_effort: 'medium', runtime_protocol: 'codex_responses', availability: 'available' }
+}
+
+const modelReasons = { unverified: 'LOCAL_TEXT_MODEL_UNVERIFIED', checking: 'LOCAL_TEXT_MODEL_CHECKING',
+  supported: 'LOCAL_TEXT_MODEL_SUPPORTED', unsupported: 'LOCAL_TEXT_MODEL_UNSUPPORTED', unconfirmed: 'LOCAL_TEXT_MODEL_CHECK_FAILED' } as const
+
+function connectionReply(state: EnterpriseLocalTextState, account: Account): LocalTextReply {
+  const check = state.modelCheck
+  const modelStatus = check?.status === 'checking' ? 'checking'
+    : check?.account && sameAccount(check.account, account) ? check.status : 'unverified'
+  return { state: modelStatus === 'supported' ? 'ready' : 'connected', modelStatus,
+    reason: modelReasons[modelStatus], ...(modelStatus === 'supported' ? { choice: supportedChoice(account) } : {}) }
 }
 
 function sameChoice(left: LocalTextChoice, right: LocalTextChoice) {
@@ -223,6 +258,7 @@ function sameChoice(left: LocalTextChoice, right: LocalTextChoice) {
 
 export async function operateEnterpriseLocalText(session: EnterpriseSession, payload: LocalTextRequest, deps: LocalTextDependencies): Promise<LocalTextReply> {
   let pending: Pending | undefined
+  let reservation: { state: EnterpriseLocalTextState; check: ModelCheck; owns: boolean } | undefined
   try {
     assertPayload(payload)
     deps.assertCurrent()
@@ -255,6 +291,7 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
       const state = session.localText
       if (!state) {return { state: 'disconnected' }}
       state.epoch += 1
+      state.modelCheck = undefined
       if (state.loginId) {
         await state.api(`/api/providers/oauth/sessions/${state.loginId}`, 'DELETE')
         state.loginId = undefined
@@ -271,6 +308,16 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
       deps.assertCurrent()
       return { state: 'disconnected' }
     }
+    // Revoke old eligibility before even the enterprise-status await. A
+    // concurrent renderer cannot submit with it while that check is pending.
+    const existing = session.localText
+    if (payload.action === 'connect' && existing) {existing.modelCheck = undefined}
+    if (payload.action === 'checkModel' && existing && !existing.closed && !existing.loginStarting && !existing.loginId) {
+      const running = existing.modelCheck?.status === 'checking'
+      const check: ModelCheck = running ? existing.modelCheck! : { status: 'checking' }
+      if (!running) {existing.modelCheck = check}
+      reservation = { state: existing, check, owns: !running }
+    }
     const authority = await deps.context({ action: 'status' })
     assertOperation()
     const state = await binding(session, deps, authority.owner_scope)
@@ -282,9 +329,14 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
       if (state.closed || session.localText !== state || state.epoch !== epoch) {throw finite('LOCAL_TEXT_OWNER_CHANGED')}
     }
     const account = async () => {
-      const status = await state.api('/api/providers/siwc/status')
-      current()
-      return choiceFrom(status)
+      const checkAtRead = state.modelCheck
+      try {
+        const status = await state.api('/api/providers/siwc/status')
+        current()
+        const selected = accountFrom(status)
+        if (state.modelCheck === checkAtRead && checkAtRead?.account && !sameAccount(checkAtRead.account, selected)) {state.modelCheck = undefined}
+        return selected
+      } catch (error) {if (state.modelCheck === checkAtRead) {state.modelCheck = undefined}; throw error}
     }
     if (payload.action === 'status') {
       if (state.loginStarting) {return { state: 'connecting' }}
@@ -295,12 +347,49 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
         state.loginId = undefined
         if (login.status !== 'approved') {return { state: 'disconnected', reason: 'LOCAL_TEXT_LOGIN_UNCONFIRMED' }}
       }
-      try {return { state: 'ready', choice: await account() }}
-      catch {return { state: 'disconnected', reason: 'LOCAL_TEXT_CONNECT_REQUIRED' }}
+      try {return connectionReply(state, await account())}
+      catch (error) {return error instanceof Error && error.message === 'LOCAL_TEXT_CONNECT_REQUIRED'
+        ? { state: 'disconnected', reason: 'LOCAL_TEXT_CONNECT_REQUIRED' }
+        : { state: 'unavailable', reason: 'LOCAL_TEXT_CONNECTION_CHECK_FAILED' }}
+    }
+    if (payload.action === 'checkModel') {
+      if (state.loginStarting || state.loginId) {return { state: 'connecting' }}
+      if (reservation && reservation.state !== state) {throw finite('LOCAL_TEXT_OWNER_CHANGED')}
+      if ((reservation && !reservation.owns) || (!reservation && state.modelCheck)) {
+        return connectionReply(state, await account())
+      }
+      const check: ModelCheck = reservation?.check ?? { status: 'checking' }
+      if (!reservation) {state.modelCheck = check; reservation = { state, check, owns: true }}
+      if (state.modelCheck !== check) {throw finite('LOCAL_TEXT_ACCOUNT_CHANGED')}
+      try {
+        const selected = await account()
+        if (state.modelCheck !== check) {throw finite('LOCAL_TEXT_ACCOUNT_CHANGED')}
+        check.account = selected
+        const reply = await state.api(`/api/providers/siwc/models/check?registration_id=${selected.registrationId}&generation=${selected.generation}`, 'POST')
+        current()
+        if (state.modelCheck !== check) {throw finite('LOCAL_TEXT_ACCOUNT_CHANGED')}
+        const after = await account()
+        if (state.modelCheck !== check || !sameAccount(selected, after)) {throw finite('LOCAL_TEXT_ACCOUNT_CHANGED')}
+        if (!reply || reply.registration_id !== selected.registrationId || reply.generation !== selected.generation ||
+            reply.model !== 'gpt-6-luna' || reply.reasoning_effort !== 'medium' ||
+            !['supported', 'unsupported', 'unconfirmed'].includes(reply.model_status)) {
+          throw finite('LOCAL_TEXT_MODEL_CHECK_FAILED')
+        }
+        check.status = reply.model_status
+        return connectionReply(state, selected)
+      } catch (error) {
+        try {current()} catch (changed) {if (state.modelCheck === check) {state.modelCheck = undefined}; throw changed}
+        if (state.modelCheck === check && check.account) {
+          check.status = 'unconfirmed'
+          return connectionReply(state, check.account)
+        }
+        throw error
+      }
     }
     if (payload.action === 'connect') {
       if (state.loginStarting || state.loginId) {return { state: 'connecting' }}
       if (Object.values(state.requests).some(item => item.inFlight)) {throw finite('LOCAL_TEXT_RESULT_UNKNOWN')}
+      state.modelCheck = undefined
       state.loginStarting = true
       try {
         const login = await state.api('/api/providers/oauth/openai-siwc/start', 'POST')
@@ -323,9 +412,14 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
         payload.personaId !== pending.personaId || !payload.choice || !sameChoice(payload.choice, pending.choice))) {
       throw finite('LOCAL_TEXT_REQUEST_CHANGED')
     }
-    const selected = await account()
+    const selectedAccount = await account()
     current()
     if (payload.action === 'submit' && !pending) {
+      const support = state.modelCheck
+      if (support?.status !== 'supported' || !support.account || !sameAccount(support.account, selectedAccount)) {
+        throw finite(modelReasons[state.modelCheck?.status ?? 'unverified'])
+      }
+      const selected = supportedChoice(selectedAccount)
       if (session.localTextStops?.has(requestId)) {throw finite('LOCAL_TEXT_OBSERVATION_STOPPED')}
       if (!payload.choice || !sameChoice(payload.choice, selected) || typeof payload.content !== 'string' ||
           !payload.content.trim() || payload.content.length > 24000 ||
@@ -363,11 +457,12 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
         conversation_id: pending.conversationId, request_id: requestId, prepared_at: prepared.prepared_at,
         expected_context_hash: prepared.context_hash })
       current()
-      if (released.context_hash !== prepared.context_hash || now() >= pending.deadline || pending.stopped || !sameChoice(await account(), selected)) {
+      if (released.context_hash !== prepared.context_hash || now() >= pending.deadline || pending.stopped || !choiceAccountMatches(selected, await account())) {
         throw finite('LOCAL_TEXT_CONTEXT_CHANGED')
       }
       current()
       if (session.localTextStops?.has(requestId)) {throw finite('LOCAL_TEXT_OBSERVATION_STOPPED')}
+      if (state.modelCheck !== support || support.status !== 'supported') {throw finite('LOCAL_TEXT_MODEL_UNVERIFIED')}
       pending.attempted = true
       pending.inFlight = true
       const observed = await state.request<any>('enterprise_text.submit', { owner: state.owner,
@@ -376,7 +471,7 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
       pending.inFlight = false
       return await finish(observed, false)
     }
-    if (!pending || !sameChoice(pending.choice, selected)) {throw finite('LOCAL_TEXT_RESULT_UNKNOWN')}
+    if (!pending || !choiceAccountMatches(pending.choice, selectedAccount)) {throw finite('LOCAL_TEXT_RESULT_UNKNOWN')}
     if (pending.completed) {return pending.completed}
     const observed = await state.request<any>('enterprise_text.status', {
       owner: state.owner, session_id: pending.gatewaySessionId, request_id: requestId }, 5000)
@@ -392,19 +487,19 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
           TEXT_MODEL_OR_REQUEST_UNAVAILABLE: 'LOCAL_TEXT_MODEL_UNAVAILABLE', TEXT_RATE_LIMITED: 'LOCAL_TEXT_RATE_LIMITED' }
         return { state: observed.state === 'failed' ? 'failed' : 'unknown', reason: reasons[observed.reason] ?? 'LOCAL_TEXT_RESULT_UNKNOWN', requestId }
       }
-      if (!sameChoice(await account(), pending.choice)) {throw finite('LOCAL_TEXT_ACCOUNT_CHANGED')}
+      if (!choiceAccountMatches(pending.choice, await account())) {throw finite('LOCAL_TEXT_ACCOUNT_CHANGED')}
       const accepted = await deps.context({ action: 'accept', mode: 'summarize', content: pending.content,
         persona_id: pending.personaId, conversation_id: pending.conversationId, request_id: requestId,
         prepared_at: pending.prepared.prepared_at, expected_context_hash: pending.prepared.context_hash, answer: draft })
       current()
       if (accepted.owner_scope !== state.ownerScope || accepted.context_hash !== pending.prepared.context_hash ||
           typeof accepted.text !== 'string' || now() >= pending.deadline || (!explicitQuery && pending.stopped) ||
-          !sameChoice(await account(), pending.choice)) {throw finite('LOCAL_TEXT_CONTEXT_CHANGED')}
+          !choiceAccountMatches(pending.choice, await account())) {throw finite('LOCAL_TEXT_CONTEXT_CHANGED')}
       current()
       pending.accepted = { state: 'completed', text: accepted.text, requestId, backend_choice: pending.choice }
       await state.request('enterprise_text.accept', { owner: state.owner, session_id: pending.gatewaySessionId, request_id: requestId }, 5000)
       current()
-      if (!sameChoice(await account(), pending.choice)) {throw finite('LOCAL_TEXT_ACCOUNT_CHANGED')}
+      if (!choiceAccountMatches(pending.choice, await account())) {throw finite('LOCAL_TEXT_ACCOUNT_CHANGED')}
       current()
       pending.completed = pending.accepted
       pending.content = ''
@@ -413,6 +508,9 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
       return pending.completed
     }
   } catch (error) {
+    if (reservation?.owns && reservation.state.modelCheck === reservation.check && reservation.check.status === 'checking') {
+      reservation.state.modelCheck = undefined
+    }
     if (pending) {pending.inFlight = false}
     const reason = error instanceof Error && /^LOCAL_TEXT_[A-Z_]+$/.test(error.message) ? error.message : 'LOCAL_TEXT_UNAVAILABLE'
     return { state: pending?.attempted ? 'unknown' : 'unavailable', reason }

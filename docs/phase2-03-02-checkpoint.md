@@ -1,5 +1,17 @@
 # P2-03-02 阶段检查点
 
+## 2026-10-23 P2-03-02R3 模型目录前置与可用性语义（当前）
+
+本片 OWNED_AVAILABILITY_SEMANTICS_AND_MODEL_PREFLIGHT 基于M `500f71aa3` / S `44182cc`。现账号/DB ready只显示本机已连接、模型未检查；只有用户显式点击“检查模型支持”，才沿原IPC/main私有provider检查一次目录。界面区分未检查、检查中、目录支持、明确不支持与检查未确认；检查中即撤销旧choice，失败仍可重查/断开，不自动登录、探目录或提交业务。目录支持仅代表本次快照，额度与实际成功仍以请求结果为准。
+
+新增窄POST复用原token、main一次性proof、完整query/owner/profile和空body校验，registration/generation由main当前账号取得。既有resolver增加内部no-refresh选项，目录检查临期/轮换未确认时拒绝，不写refresh_pending或刷新/JWKS；原推理默认行为保持。固定官方GET只用同一owned bearer、原TLS、无环境代理/重定向/重试，identity编码、流式1MiB、5秒各I/O及10秒代码检查点；无分块聚合，不宣称绝对总墙钟上限。有效唯一models[]中exact `gpt-6-luna`/list才supported，有效缺失/隐藏才unsupported，错误/坏shape/重复/身份变化均unconfirmed。medium来自官方Luna模型合同，未虚构账号目录中的推理强度字段或模型替代。
+
+main只在既有owned state保存一条有限结果；原owner/session/connection/runtime/epoch与registration/generation共同限定它，退出、连接、换代、dispose或失败使旧支持失效。重查/连接在首个S context await之前同步撤旧；重复检查不多发GET，旧回复先核自身slot再读当前身份，不能清新结果。模型支持只门控新submit，并在原发送前再次核同支持对象；原UNKNOWN query/stop/received accept仍仅沿原身份、context、期限与请求关联，不要求重查模型，不增第二次发送。企业校权、发送前持久UNKNOWN/no-tools/原10秒create和零重试保持。
+
+正常conftest/canonical runner下，本片Python62个唯一用例由20个未进入改动读取循环的前轮通过项及最终42个受影响通过项组成；不是60+42。Node新增26通过、旧16未选；原UI组件5和hook3去重共8通过，renderer/Electron最终类型检查各exit0。已保存并修正三个实际红例：在途poll被刷新后卡住、旧检查迟到多读身份清新结果、首S状态等待中旧支持仍能提交（均受控Mock）；另修HTTPX分块聚合规避检查点，tiny-chunk反例第4字节停止。首轮Python超大参数自动ID导致Windows环境上限的60pass/2 setup-teardown errors保留，改有限ID后oversize实跑，未弱化断言。
+
+有限验证原件 `owned-model-preflight-1/validation-results-1.json` SHA256 `fe6abd4329a543fd16d9bb8b5fc4682ad568846a5f1aad8eae8638951af4585b`，绑定11份最终源码/测试快照及12份合同/回执；后端最终回执 `ad81f30a…`，Node `d32b1540…`。本片真实OAuth/目录/模型/JWKS请求均0，未启动应用、修改S运行代码、部署或发布；上一片403仍是未满足前置，不重探或重复泛问。旧原始入口清单c5729f23…属上一源码基线，不能冒充本片实现，后续原生/真实验收须重新构建。现有未完成Gate、旧失败和UNKNOWN保留，进度保存不自动暂停。
+
 ## 2026-10-23 P2-03-02R3 用户自有接入前置与原始入口（当前）
 
 本片为 OWNED_CONNECTION_QUALIFICATION_AND_ONE_REAL_TEXT_ACCEPTANCE，基线 M `146bedc2b` / S `4c875e5`。上一片就绪屏障和22段合成阅读已获限定接受。本片没有修改运行源码或测试，也没有重跑已接受的合成场景；真实资格尚未完成。
