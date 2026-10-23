@@ -26,6 +26,8 @@ export type EnterpriseWorkspaceId =
 export interface EnterpriseRoleSnapshot {
   effective_permissions?: readonly string[]
   role?: string
+  tenant_id?: string
+  principal_id?: string
 }
 
 export interface EnterpriseWorkspaceDefinition {
@@ -148,6 +150,11 @@ function hasAnyPermission(
 
 export function canConfigureTenantAi(snapshot: EnterpriseRoleSnapshot | undefined): boolean {
   return snapshot?.role === 'tenant_admin' && hasAnyPermission(snapshot.effective_permissions, ['tenant.profile.read'])
+}
+
+export function canConfigureLanghua(snapshot: EnterpriseRoleSnapshot | undefined): boolean {
+  return snapshot?.role === 'tenant_admin' && Boolean(snapshot.tenant_id?.trim() && snapshot.principal_id?.trim()) &&
+    hasAnyPermission(snapshot.effective_permissions, ['connector.update'])
 }
 
 function candidateWorkspaces(role: string | undefined): readonly EnterpriseWorkspaceDefinition[] {

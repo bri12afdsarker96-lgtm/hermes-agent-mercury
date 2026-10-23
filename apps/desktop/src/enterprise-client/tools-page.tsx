@@ -8,9 +8,10 @@ import { WeComSeatBindingPanel } from './wecom-seat-binding-panel'
 import { WeComDutyPanel } from './wecom-duty-panel'
 import { WebSections, useWebLayoutCopy } from './web-sections'
 import { useWebPresentation } from './web-presentation'
+import { LanghuaConfigEntry } from './langhua-config-panel'
 
 /** Work aids and protected service configuration share the tools destination. */
-export function ToolsPage({ runtime, role, canConfigureAi = false }: { runtime?: EnterpriseClientRuntime | null; role?: string; canConfigureAi?: boolean }) {
+export function ToolsPage({ runtime, role, canConfigureAi = false, canConfigureLanghua = false, scope = '' }: { runtime?: EnterpriseClientRuntime | null; role?: string; canConfigureAi?: boolean; canConfigureLanghua?: boolean; scope?: string }) {
   const [configurationOpen, setConfigurationOpen] = useState(false)
   const { t } = useI18n()
   const web = useWebPresentation()
@@ -26,6 +27,7 @@ export function ToolsPage({ runtime, role, canConfigureAi = false }: { runtime?:
       <summary>{t.enterpriseModelConfig.configurationEntry}</summary>
       {configurationOpen ? <AiConfigurationPage runtime={runtime ?? null} /> : null}
     </details> : null}
+    {runtime && canConfigureLanghua && scope ? <LanghuaConfigEntry runtime={runtime} scope={scope} /> : null}
     {web.enabled ? <WebSections label={labels.settings} items={[
       {id:'tools',label:labels.tools,content:<OrderFilterPanel />},
       {id:'notifications',label:labels.notifications,content:<><WeComSeatBindingPanel runtime={runtime} />{runtime && ['supervisor','operator'].includes(role ?? '') ? <WeComDutyPanel runtime={runtime} role={role!} /> : null}</>},
