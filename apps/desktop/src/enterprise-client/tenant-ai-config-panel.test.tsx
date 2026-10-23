@@ -5,6 +5,32 @@ import type { EnterpriseClientRuntime } from './runtime'
 import { TenantAiConfigPanel } from './tenant-ai-config-panel'
 
 describe('TenantAiConfigPanel', () => {
+  it('prefills the Nfvid relay and saves a key once without Codex login or exposing the key', async () => {
+    const status = {configured: false, encryption_ready: true, models: [], providers: [{key: 'custom', label: 'Custom'}]}
+    let finish!: (value: typeof status) => void
+    const post = vi.fn(() => new Promise<typeof status>(resolve => {finish = resolve}))
+    const runtime = {get: vi.fn(async () => status), post, disconnect: vi.fn()} as unknown as EnterpriseClientRuntime
+    render(<TenantAiConfigPanel runtime={runtime} />)
+    const preset = await screen.findByRole('button', {name: /Nfvid API/})
+    await waitFor(() => expect((preset as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.change(screen.getByLabelText('API Key'), {target: {value: 'old-unsaved-key'}})
+    fireEvent.click(preset)
+    expect(screen.queryByDisplayValue('old-unsaved-key')).toBeNull()
+    expect(screen.getByDisplayValue('gpt-6.1-sol')).toBeTruthy()
+    expect(screen.getByDisplayValue('https://api.nfvid.vip/v1')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('API Key'), {target: {value: 'synthetic-nfvid-key'}})
+    const save = screen.getByRole('button', {name: '安全保存新模型'})
+    fireEvent.click(save)
+    fireEvent.click(save)
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(post).toHaveBeenCalledWith('/api/tenant-ai-config', {
+      action: 'upsert_model', api_key: 'synthetic-nfvid-key', base_url: 'https://api.nfvid.vip/v1',
+      configuration_id: undefined, model: 'gpt-6.1-sol', provider: 'custom'
+    })
+    expect(screen.queryByDisplayValue('synthetic-nfvid-key')).toBeNull()
+    finish(status)
+    await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(true))
+  })
   it('adds multiple server-encrypted models and changes the default without displaying keys', async () => {
     const initial = {
       configured: true,

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useI18n } from '@/i18n/context'
 
 import type { EnterpriseClientRuntime } from './runtime'
 import { useWebPresentation } from './web-presentation'
@@ -62,6 +63,7 @@ function errorText(reason: unknown): string {
 }
 
 export function TenantAiConfigPanel({ runtime, section }: { runtime: EnterpriseClientRuntime | null; section?: 'models' | 'embedding' }) {
+  const { t } = useI18n()
   const web = useWebPresentation()
   const [editorOpen, setEditorOpen] = useState(false)
   const [apiKey, setApiKey] = useState('')
@@ -310,7 +312,7 @@ export function TenantAiConfigPanel({ runtime, section }: { runtime: EnterpriseC
       {(!web.enabled || section !== 'embedding') ? <div className="hesc-section-heading">
         <div>
           <h2 className="hesc-section-title">{web.enabled ? '回复服务配置' : '企业 AI 模型与密钥'}</h2>
-          {!web.enabled ? <p className="hesc-muted-copy">同一厂商、模型和地址可重复添加不同密钥；额度不足或限流时自动尝试备用密钥（每次最多四个）。密钥加密保存在服务器。同一账户的多把密钥可能共享额度。</p> : null}
+          {!web.enabled ? <p className="hesc-muted-copy">{t.enterpriseModelConfig.boundChoicePolicy}</p> : null}
         </div>
         <span className="hesc-status" data-tone={status?.configured ? 'success' : status?.encryption_ready === false ? 'error' : 'warning'}>
           {status?.configured ? `${models.length} 个已配置模型` : '尚未配置'}
@@ -319,6 +321,10 @@ export function TenantAiConfigPanel({ runtime, section }: { runtime: EnterpriseC
 
       <div className="hesc-ai-config-grid" style={web.enabled ? {display:'flex',flexDirection:'column',order:2} : undefined}>
         {(!web.enabled || section !== 'embedding') ? <section aria-label="企业 AI 模型配置" className="hesc-ai-config-section">
+          <button className="hesc-action hesc-action-secondary" type="button" disabled={!runtime || submitting || !catalog.some(item => item.key === 'custom')} onClick={() => {
+            setEditorOpen(true); setEditingId(null); setProvider('custom'); setModel('gpt-6.1-sol'); setBaseUrl('https://api.nfvid.vip/v1'); setApiKey(''); setError(null); setNotice(null)
+          }}>{t.enterpriseModelConfig.nfvidPreset}</button>
+          {baseUrl === 'https://api.nfvid.vip/v1' ? <p className="hesc-muted-copy">{t.enterpriseModelConfig.nfvidDisclosure}</p> : null}
           {web.enabled ? <button className="hesc-action" type="button" onClick={() => {resetEditor(status);setEditorOpen(true)}}>新增回答模型</button> : null}
           <div className="hesc-provisioning-form" hidden={web.enabled && !editorOpen}>
             <label>AI 厂商

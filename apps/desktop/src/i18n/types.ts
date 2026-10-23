@@ -49,6 +49,11 @@ interface AuxTaskCopy {
 }
 
 export interface Translations {
+  enterpriseModelConfig: {
+    nfvidPreset: string
+    nfvidDisclosure: string
+    boundChoicePolicy: string
+  }
   common: {
     apply: string
     back: string

@@ -3,6 +3,11 @@ import { defineFieldCopy } from '@/app/settings/field-copy'
 import { defineLocale } from './define-locale'
 
 export const ja = defineLocale({
+  enterpriseModelConfig: {
+    nfvidPreset: 'Nfvid API · gpt-6.1-sol を設定',
+    nfvidDisclosure: 'Chat Completions を使う Nfvid API 中継の設定です。権限のある API キーを入力してください。保存はモデルの動作確認ではありません。Codex アカウントは不要です。',
+    boundChoicePolicy: 'キーはサーバーで暗号化保存します。設定を固定した返信は失敗してもキーを切り替えません。他の従来サービスでは既存の同一モデルの予備キーを使う場合があります。'
+  },
   common: {
     apply: '適用',
     back: '戻る',

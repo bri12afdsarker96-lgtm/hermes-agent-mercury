@@ -3,6 +3,11 @@ import { defineFieldCopy } from '@/app/settings/field-copy'
 import { defineLocale } from './define-locale'
 
 export const zhHant = defineLocale({
+  enterpriseModelConfig: {
+    nfvidPreset: '設定 Nfvid API · gpt-6.1-sol',
+    nfvidDisclosure: 'Nfvid API 中轉設定，使用 Chat Completions。請在下方輸入獲授權的 API Key；儲存設定不代表模型已實測可用，無需 Codex 帳號。',
+    boundChoicePolicy: '金鑰加密儲存在伺服器。已固定設定的回覆失敗後不會切換金鑰；其他舊版服務仍可能使用既有同模型備用金鑰。'
+  },
   common: {
     apply: '套用',
     back: '返回',

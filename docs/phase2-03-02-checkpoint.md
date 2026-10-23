@@ -1,5 +1,15 @@
 # P2-03-02 阶段检查点
 
+## 2026-10-24 原始入口准备与 Nfvid 配置首片
+
+`real-owned-entry-readiness-3` 原界面实际完成企业合成身份登录及个人路线准备、复制、取消各一次。官方链接字段校验通过、复制哈希一致；取消后 URL 清空、同一 owned Python 回调端口关闭、系统协议恢复。fresh HOME/userData 及原 main/preload/renderer/Python 未注入认证替身；没有真实授权、交换、公钥或模型调用。历史 ready 回执不证明窗口当前仍在运行。第一份 argv 启动失败及单值协议恢复、第二份未归因的登录阶段 CDP 超时均保留；第三份未调大 3 秒边界，成功不证明旧超时根因已修复。
+
+个人路线仍需原后台在 `trust_env=False`、不重定向和默认 TLS 下读取 `https://auth.openai.com/.well-known/jwks.json` 得到 200/有效 JWKS JSON。唯一匿名预检历史是 2026-10-23T04:55:58Z 的 403/HTML、2.141 秒；本轮未复测。随后才能核真实授权、签名/身份、目录和调用；浏览器登录不证明后台路径可用，无需 client secret。
+
+API 首片复用原受保护配置表单，以 `provider=custom`（OpenAI 兼容适配）预填 Nfvid `https://api.nfvid.vip/v1` / `gpt-6.1-sol`。四语言文案明确中转身份、无需 Codex 和保存不等于模型实测可用。切换预填清除未提交 key，提交后输入清空，挂起时重复点击不重复保存。S 的 bound_config 在原身份/版本比对后仅构建所选配置，不收集备用 key；未绑定旧服务保持既有同模型备用机制。另一路在途 webserver/企微文件未修改。
+
+验证：S 原两个文件 57 项通过，含五个新增实际 loopback HTTP 场景（成功、402、429、401、403 均只用所选 key）；M 配置面板两项通过。监督先前用户授权的独立 Nfvid 短调用回执 SHA `e6306cdb426f937b11d313b690dd547fedc15694b7c61cc412da42e24d58e504` 已只读核对；该 key 未进入产品，本窗口没有新增真实请求。完整无 Codex 坐席业务链、历史/记忆/缓存、PG/RLS 与真实收发仍待后续验收，整体 Gate/发布未通过。
+
 ## 2026-10-23 P2-03-02R3 原生模型检查与退出失效验收（当前）
 
 本片 `OWNED_MODEL_NATIVE_UI_AND_IPC_CLOSURE` 基于已提交 M `1c13b969457dc68f4cf24f57851cf25d46b422d9` / S `9da5fd5ae188fc9b021aa698e247a22fbb21ec63` 的 Git archive 重新构建原 renderer、preload、main；没有修改产品源码。独立目录使用新 HOME/userData、单个合成用户、strict SQLite 与原安全存储 prepare/commit。测试包装入口保留网络/进程守卫，仅部署 JSON 改为固定 loopback S；模型目录使用 MockTransport。因此这是有限合成原生验收，不是可发布包或真实模型资格。
