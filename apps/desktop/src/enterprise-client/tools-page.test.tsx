@@ -10,6 +10,23 @@ vi.mock('./wecom-seat-binding-panel', () => ({WeComSeatBindingPanel: () => null}
 vi.mock('./wecom-duty-panel', () => ({WeComDutyPanel: () => null}))
 
 describe('tools configuration entry', () => {
+  it('opens Langhua independently of model permission and removes the form on observed revocation', async () => {
+    const get = vi.fn(async () => ({configured: false, connection_id: null, version: 0, enabled: false,
+      encryption_ready: true, credential_state: 'unverified', gateway_url: 'https://api6.beikke.com/aibot/v1'}))
+    const runtime = {get, post: vi.fn(), disconnect: vi.fn()} as unknown as EnterpriseClientRuntime
+    const view = render(<I18nProvider initialLocale="zh" configClient={null}><ToolsPage runtime={runtime} role="tenant_admin" canConfigureLanghua scope="seat" /></I18nProvider>)
+    expect(get).not.toHaveBeenCalled()
+    expect(screen.queryByText('AI 模型、密钥与人设配置')).toBeNull()
+    const details = screen.getByText('浪花数字员工连接配置').closest('details')!
+    details.open = true
+    fireEvent(details, new Event('toggle'))
+    await waitFor(() => expect(get).toHaveBeenCalledExactlyOnceWith('/api/langhua-config'))
+    const input = screen.getByLabelText('AppKey') as HTMLInputElement
+    fireEvent.change(input, {target: {value: 'synthetic-input'}})
+    view.rerender(<I18nProvider initialLocale="zh" configClient={null}><ToolsPage runtime={runtime} role="tenant_admin" scope="seat" /></I18nProvider>)
+    expect(input.value).toBe('')
+    expect(screen.queryByText('浪花数字员工连接配置')).toBeNull()
+  })
   it('opens the existing protected model form only on demand from tools', async () => {
     const get = vi.fn(async () => ({models: [], personas: [], providers: [{key:'custom', label:'Custom'}]}))
     const runtime = {get, post:vi.fn(), disconnect:vi.fn()} as unknown as EnterpriseClientRuntime

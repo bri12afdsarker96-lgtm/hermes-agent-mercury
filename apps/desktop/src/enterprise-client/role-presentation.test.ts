@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  canConfigureLanghua,
   canConfigureTenantAi,
   enterpriseRoleLabel,
   enterpriseWorkbenchPresentation,
@@ -9,6 +10,21 @@ import {
 } from './role-presentation'
 
 describe('enterprise role presentation', () => {
+  it('separates Langhua connector management from model configuration with explicit tenant/seat scope', () => {
+    const admin = {role: 'tenant_admin', tenant_id: 'tenant-a', principal_id: 'admin-a'}
+    for (const permission of ['connector.update', 'connector.*', '*']) {
+      expect(canConfigureLanghua({...admin, effective_permissions: [permission]})).toBe(true)
+    }
+    for (const permission of ['tenant.profile.read', 'tenant.*', 'connector.list']) {
+      expect(canConfigureLanghua({...admin, effective_permissions: [permission]})).toBe(false)
+    }
+    for (const role of ['operator', 'supervisor', 'super_admin']) {
+      expect(canConfigureLanghua({...admin, role, effective_permissions: ['*']})).toBe(false)
+    }
+    expect(canConfigureLanghua({...admin, tenant_id: '', effective_permissions: ['*']})).toBe(false)
+    expect(canConfigureLanghua({...admin, principal_id: '', effective_permissions: ['*']})).toBe(false)
+    expect(canConfigureLanghua(undefined)).toBe(false)
+  })
   it('places AI configuration under tools while preserving its tenant administrator permission gate', () => {
     for (const role of ['operator', 'supervisor', 'tenant_admin', 'super_admin']) {
       expect(enterpriseWorkspaces({role, effective_permissions: ['*']}).map(item => item.id)).not.toContain('ai_config')

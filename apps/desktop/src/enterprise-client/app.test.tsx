@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ThemeProvider, useTheme } from '@/themes/context'
 
@@ -69,6 +69,19 @@ afterEach(() => {
 })
 
 describe('EnterpriseClientApp authority lifecycle', () => {
+  it.each([true, false])('derives Langhua visibility from current connector permission, independently of model config: %s', async permitted => {
+    const bridge = installAuthorityBridge({
+      '/api/health': {data: HEALTH, kind: 'ok'},
+      '/api/metrics?window=24h': {data: METRICS, kind: 'ok'},
+      '/api/whoami': {data: {...IDENTITY, role: 'tenant_admin', effective_permissions: permitted ? ['connector.update'] : ['tenant.profile.read']}, kind: 'ok'}
+    })
+    render(<EnterpriseClientApp />)
+    const tools = await screen.findByRole('button', {name: '工具集'})
+    await act(async () => {fireEvent.click(tools)})
+    expect(Boolean(screen.queryByText('浪花数字员工连接配置'))).toBe(permitted)
+    expect(Boolean(screen.queryByText('AI 模型、密钥与人设配置'))).toBe(!permitted)
+    expect(bridge.request.mock.calls.some(([call]) => call.path === '/api/langhua-config')).toBe(false)
+  })
   it.each([false, true])('retains overview modules but hides them only on web: %s', async web => {
     const time={now:'2026-10-03T09:00:00+08:00',timezone_label:'北京时间',reminder_rule:'测试规则',runner:{running:true}}
     installAuthorityBridge({

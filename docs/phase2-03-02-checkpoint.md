@@ -1,5 +1,14 @@
 # P2-03-02 阶段检查点
 
+## 2026-10-24 浪花保护配置入口整合与客户后续合同
+
+已将独立验收6077的8文件Tools配置入口合到当前私有context保护之后，自动合并无产品冲突；所有8文件与原已审commit blob一致，原WeCom面板及contributor三个dirty文件逐字节保持。配置只在工具集按权限按需挂载，不加入智能问答；/api/langhua-config仍走受保护公共业务API，私有context默认拒绝不影响此路由。
+
+本轮仅重验2个Tools交叉正例（另1例未选择跳过）和renderer类型exit0；S两项交叉HTTP验证浪花保存/轮换/租户隔离与private-cookie拒绝通过。此前47HTTP/46UI为原作者回执，不重复执行或累加。最后Source/Security按整合差异审查，整体客户/owned/设备/Gate仍未闭合，真实供应商、模型及手机未调用。
+
+个人knowledge_answer新增业务pack/phase release/幂等accept和owned-cache命名空间仍先冻结窄四角色复用共识；既有no-tools consumer、SessionDB/HMAC/UNKNOWN不重发保持，上游prompt_cache_key与x-client-request-id只是routing hint，不能当企业原请求幂等或授权。当前安全前置与既有配置整合之外未扩大模型调用资格。
+
+
 ## 2026-10-24 客户历史/缓存后续：私有上下文保护前置
 
 个人账号当前仍仅摘要，先封通用API/enterprise JSON/upload对私有context子树与保留local-text路径的访问；解码后traversal、反斜杠、重复斜杠及C0拒绝。generic handleHermesApiRequest在registry/刷新/文件处理之前断言；只有main固定contextURL可用，无renderer opt-out。S显式单Bearer拒Cookie回落并关闭早退未读请求体，revalidate不再返回input/instructions。仅客户端通道隔离，不是main/device attestation；普通合法Bearer自制客户端仍可调用，不能把其自报草稿算真实模型或送达。

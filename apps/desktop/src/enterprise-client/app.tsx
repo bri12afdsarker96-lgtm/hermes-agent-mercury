@@ -12,7 +12,7 @@ import { DeliveryHistory } from './delivery-history'
 import { $enterpriseReminderTasks, $personalReminders, type PersonalReminder, type ReminderCenterTask } from './reminder-state'
 
 import { AssistantPage } from './assistant-page'
-import { canConfigureTenantAi } from './role-presentation'
+import { canConfigureLanghua, canConfigureTenantAi } from './role-presentation'
 import { AssistantReminders } from './assistant-reminders'
 import { OverduePage } from './overdue-page'
 import { BusinessTasksPanel } from './business-tasks-panel'
@@ -791,7 +791,10 @@ function EnterpriseClientContent({ additionalAccountActions, onBeforeLogout, rec
         ) : null}
         {activeDefinition.id === 'governance' ? <GovernancePage runtime={authorityRuntime} reviewRequest={reviewRequest} /> : null}
         {activeDefinition.id === 'knowledge' ? <KnowledgePage runtime={authorityRuntime} /> : null}
-        {activeDefinition.id === 'tools' ? <ToolsPage runtime={authorityRuntime} role={authoritySnapshot?.identity.role} canConfigureAi={canConfigureTenantAi(authoritySnapshot?.identity)} /> : null}
+        {activeDefinition.id === 'tools' ? <ToolsPage runtime={authorityRuntime} role={authoritySnapshot?.identity.role}
+          canConfigureAi={canConfigureTenantAi(authoritySnapshot?.identity)}
+          canConfigureLanghua={canConfigureLanghua(authoritySnapshot?.identity)}
+          scope={JSON.stringify([authorityRuntime?.serverOrigin, authoritySnapshot?.identity.tenant_id, authoritySnapshot?.identity.principal_id])} /> : null}
         {activeDefinition.id === 'overdue' && authorityRuntime && authoritySnapshot ? <OverduePage
           key={`${authorityRuntime.serverOrigin}:${authoritySnapshot.identity.tenant_id}:${authoritySnapshot.identity.principal_id}`}
           scope={JSON.stringify([authorityRuntime.serverOrigin,authoritySnapshot.identity.tenant_id,authoritySnapshot.identity.principal_id])}
