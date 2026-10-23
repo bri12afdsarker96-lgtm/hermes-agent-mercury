@@ -1,5 +1,17 @@
 # P2-03-02 阶段检查点
 
+## 2026-10-23 P2-03-02R3 用户自有接入前置与原始入口（当前）
+
+本片为 OWNED_CONNECTION_QUALIFICATION_AND_ONE_REAL_TEXT_ACCEPTANCE，基线 M `146bedc2b` / S `4c875e5`。上一片就绪屏障和22段合成阅读已获限定接受。本片没有修改运行源码或测试，也没有重跑已接受的合成场景；真实资格尚未完成。
+
+按当前[官方 OSS 登录协议](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)核对现有动态客户端、loopback/PKCE、issued client、验签及显式 owned 身份；该公开客户端路线无需 client secret 或 partner API key。2026-10-23 04:55:58 UTC 唯一新匿名公钥 GET 实际收到 **403 / HTML / Cloudflare**，2.141秒，子进程exit0；没有新OAuth、目录或模型请求。它是隔离 HOME、原TLS、HTTPX timeout15/trust_env=false/no redirects 的传输等价前置检查，未调用产品 auth 函数，不能扩大为全网或账号失效结论。有限回执 `owned-connection-qualification-1/jwks-receipt-1.json` SHA256 `7e5b33964b7db3f7eda4cb4455257960997b7519f0e3d5877b26a8c4e2a17856`；脚本 `500fdbd8…`，绑定 auth `42e6a80f…`。双防重复标记保留，不重探，不再次提出原泛化网络问题。
+
+已只构建新的原始产品入口：原 main/preload 的 esbuild dev 参数，无 alias/plugin/观测 bootstrap/模拟授权或协议保护包装；原交付配置 `https://ppbb096.site` 未替换为旧夹具10431/10432。新 main `e14c1d57…`、preload `7eb96148…`，输入284/1，复用165件已核冻结页面/资产；root实际核632项文件绑定无差异，工作树dist未改。清单 `owned-connection-qualification-1/original-entry-build-manifest-1.json` SHA256 `c5729f23373c58c7cd61119a2a1f186280595985e92d489c84085d8c640feae5`。本片未启动此入口或服务；历史“窗口可见”答复保留，但当前旧PID已不存在，不能沿用为当前运行证据。交付origin不证明远端S已部署本次版本、权限或PG/RLS。以后启动原main会执行其原hermes协议注册，未宣称已验证。
+
+当前 `choiceFrom` 仍把账号/DB ready映射为固定Luna/medium的本地available，尚无当前账号模型目录证据，未称已修复。后续网络条件满足且用户在新隔离入口完成自有SIWC后，按[官方目录合同](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)只读验证同一显式registration/generation的 `models[]` 中精确Luna且visibility=list，前后身份不稳、缺失或失败均不推理。不把GET塞进多次status/accept校权，也不新增缓存框架或预热模型调用；目录匹配不证明额度或真实推理成功。
+
+只在上述条件、当前企业权限/context及可归属S均满足后，才允许一次全新安全短文本原UI提交；原 `enterprise_text.submit` 的发送前持久UNKNOWN与单次claim、有限started/delta/error/terminal/interrupt事实、received→原S accept→持久completed及原UI结果须关联同一请求。原UI query只查原关联，ACK或停止观察不代表完成/远端取消，旧UNKNOWN不重放。实际启动应使用新鲜HOME/userData/workspace、显式M源码/Python和限定依赖环境，先核PID+CreationDate/端口与无同HOME实例；不得用默认CLI凭据。本片保留真实接入缺口，不进入03-03、部署或发布。
+
 ## 2026-10-23 P2-03-02R3 私有就绪屏障与逐段阅读（当前）
 
 本片 CREATE_LATENCY_CONSUMER_FIX 已实现并经独立Source/Security接受限定合成范围，待监督复核。基线M 2714316a3 / S 4092ed6，S运行代码未改。P2-03-02、Qualification/Product Gates与二期仍未完成，不进入03-03、不部署或发布。当前合理摘要spacing保持；此前200px和首段必须同时atStart完整可见是执行者诊断偏好，不是产品门槛，下方历史失败不改写。

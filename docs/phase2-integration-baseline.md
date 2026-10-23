@@ -1,5 +1,11 @@
 # Mercury 二期企业集成基线（P2-00B）
 
+## 2026-10-23 P2-03-02R3 自有身份接入前置（当前）
+
+上一片M `146bedc2b` / S `4c875e5` 的ready屏障与22段阅读已获限定接受。本片只核官方OSS协议、当前匿名网络与原始构建；没有源码/测试修改或合成重跑。唯一新JWKS GET于04:55:58 UTC收到403/HTML/Cloudflare，传输等价隔离检查回执 `7e5b3396…`，新OAuth/目录/模型均0；不重复原网络问题、不借默认授权或重放UNKNOWN。
+
+原main/preload已按原dev参数重新构建，无审计alias/fixture/bootstrap，保持交付origin `https://ppbb096.site`；main `e14c1d57…`、preload `7eb96148…`、输入284/1、165冻结复制输入（164保留复制，preload由原构建覆盖且同字节），root632绑定无差异，未启动。构建清单 `c5729f23…`；交付地址不证明远S版本/权限。原界面available仅本地账号/DB就绪，当前账号Luna目录与真实response.completed/S accept仍待验证；不要把目录GET加入每次校权或为验证新增模型预热。详细有限证据、单次调用及原请求查询约束见本仓库phase2-03-02-checkpoint最新节。P2/Gates仍未完成，不越03-03、部署或发布。
+
 ## 2026-10-23 P2-03-02R3 就绪准备与原客户端阅读（当前）
 
 本片CREATE_LATENCY_CONSUMER_FIX完成最小消费者修订：私有status在原executor中完成owned数据库打开/关闭，确认账号registration/generation二读稳定才ready，失败不缓存、不ready；原权限、schema/事务、10秒create、25秒HTTP inactivity和UNKNOWN/once保持，S运行代码未改。冷准备成本仍在，不称全部历史失败已修。
