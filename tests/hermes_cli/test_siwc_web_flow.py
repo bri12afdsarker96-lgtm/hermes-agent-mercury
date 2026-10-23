@@ -1,4 +1,5 @@
 """Actual ASGI routing, loopback and owned-session lifecycle; synthetic grant."""
+import asyncio
 import threading
 import hashlib
 import hmac
@@ -6,7 +7,9 @@ import secrets
 import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -116,3 +119,128 @@ def test_cross_owner_poll_cancel_and_bad_profile_cannot_touch_pending(client):
     assert poll(client, login["session_id"]).json()["status"] == "pending"
     for profile in ("default", "../foreign", "current"):
         assert client.post("/api/providers/oauth/openai-siwc/start", params={"profile": profile}).status_code == 400
+
+
+def commit_grant(profile, *, replacement=False):
+    attempt = auth.siwc_prepare_login(profile, new_account=replacement)
+    payload = record(attempt, {"state": attempt["state"]}, None)
+    if replacement:
+        payload["subject"] = "fixture-replacement"
+    try:
+        return auth.siwc_commit_login(attempt, payload)
+    finally:
+        payload.clear()
+
+
+def hold_database_close(monkeypatch, profile):
+    from hermes_state import SessionDB
+    entered, release, closed = threading.Event(), threading.Event(), threading.Event()
+    target = auth.siwc_auth_path(profile).parent / "state.db"
+    original = SessionDB.close
+    def close(db):
+        if db.db_path == target and db._conn is not None and not entered.is_set():
+            entered.set()
+            try:
+                assert release.wait(30)
+            finally:
+                original(db)
+                closed.set()
+            return
+        return original(db)
+    monkeypatch.setattr(SessionDB, "close", close)
+    return entered, release, closed
+
+
+def signed_status_request(client, profile):
+    request = client.build_request("GET", "/api/providers/siwc/status", params={"profile": profile})
+    for sign in client.event_hooks["request"]:
+        sign(request)
+    return request
+
+
+def test_ready_status_prepares_fresh_and_existing_owned_databases_without_cross_profile_reuse(client):
+    other = "enterprise-text-" + "d" * 32
+    grants = {profile: commit_grant(profile) for profile in (PROFILE, other)}
+    paths = {profile: auth.siwc_auth_path(profile).parent / "state.db" for profile in grants}
+    assert all(not path.exists() for path in paths.values())
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        prepared = [pool.submit(text.ready_status, profile) for profile in (PROFILE, PROFILE, other)]
+        for profile, result in zip((PROFILE, PROFILE, other), prepared):
+            assert result.result(30) == grants[profile]
+    assert paths[PROFILE] != paths[other] and all(path.exists() for path in paths.values())
+    for profile, grant in grants.items():
+        assert text.ready_status(profile) == grant
+        params = {"text_only": True, "profile": profile, "owner": OWNER, "owner_scope": hashlib.sha256(profile.encode()).hexdigest(),
+                  "registration_id": grant["registration_id"], "generation": grant["generation"],
+                  "conversation_id": "prepared-consumer", "prompt_hash": hashlib.sha256(b"no-model").hexdigest()}
+        _, entry = text.create(params, object())
+        assert text.fact(entry, "unsubmitted") == {"state": "not_started"}
+        with text.database(profile) as db:
+            row = db.get_session(entry["db_session_id"])
+            assert row["source"] == "enterprise_text"
+            assert db.db_path == paths[profile]
+
+
+def test_status_waits_for_actual_database_close_without_blocking_its_event_loop(client, monkeypatch):
+    grant = commit_grant(PROFILE)
+    entered, release, closed = hold_database_close(monkeypatch, PROFILE)
+    other = "enterprise-text-" + "d" * 32
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=web.app)) as asynchronous:
+            pending = asyncio.create_task(asynchronous.send(signed_status_request(client, PROFILE)))
+            try:
+                assert await asyncio.to_thread(entered.wait, 20)
+                assert not pending.done() and not closed.is_set()
+                unrelated = await asyncio.wait_for(asynchronous.send(signed_status_request(client, other)), 3)
+                assert unrelated.json()["state"] == "disconnected"
+                assert not (auth.siwc_auth_path(other).parent / "state.db").exists()
+                assert not pending.done()
+            finally:
+                release.set()
+            response = await asyncio.wait_for(pending, 10)
+            assert closed.is_set() and response.json() == grant
+    asyncio.run(scenario())
+
+
+def test_disconnected_status_never_opens_database(client, monkeypatch):
+    monkeypatch.setattr(text, "database", lambda profile: pytest.fail("disconnected account must not prepare storage"))
+    response = client.get("/api/providers/siwc/status", params={"profile": PROFILE})
+    assert response.json()["state"] == "disconnected"
+
+
+def test_database_prepare_failure_is_unavailable_and_next_status_can_recover(client, monkeypatch):
+    from hermes_state import SessionDB
+    grant = commit_grant(PROFILE)
+    original = SessionDB._init_schema
+    fail = [True]
+    def initialize(db):
+        if fail:
+            fail.pop()
+            raise RuntimeError("private-initialization-canary")
+        return original(db)
+    monkeypatch.setattr(SessionDB, "_init_schema", initialize)
+    unavailable = client.get("/api/providers/siwc/status", params={"profile": PROFILE})
+    assert unavailable.json() == {"state": "unavailable", "reason": "SIWC_RECORD_UNAVAILABLE"}
+    assert "private-initialization-canary" not in unavailable.text
+    assert client.get("/api/providers/siwc/status", params={"profile": PROFILE}).json() == grant
+
+
+@pytest.mark.parametrize("change", ["logout", "replacement"])
+def test_account_change_while_preparing_cannot_publish_late_ready(client, monkeypatch, change):
+    before = commit_grant(PROFILE)
+    entered, release, closed = hold_database_close(monkeypatch, PROFILE)
+    monkeypatch.setattr(auth, "_siwc_http", lambda *args, **kwargs: {})
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=web.app)) as asynchronous:
+            pending = asyncio.create_task(asynchronous.send(signed_status_request(client, PROFILE)))
+            try:
+                assert await asyncio.to_thread(entered.wait, 20)
+                assert not pending.done()
+                after = await asyncio.to_thread(auth.siwc_logout, PROFILE) if change == "logout" else await asyncio.to_thread(commit_grant, PROFILE, replacement=True)
+                assert after["state"] != "ready" or after["registration_id"] != before["registration_id"] or after["generation"] != before["generation"]
+            finally:
+                release.set()
+            response = await asyncio.wait_for(pending, 10)
+            assert closed.is_set()
+            assert response.json() == {"state": "unavailable", "reason": "SIWC_RECORD_UNAVAILABLE"}
+    asyncio.run(scenario())

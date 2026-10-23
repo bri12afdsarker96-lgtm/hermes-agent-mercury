@@ -98,6 +98,7 @@ def test_ordinary_http_token_and_valid_owner_cannot_access_owned_endpoints(clien
         pytest.fail("Rejected request reached an owned authentication side effect")
     for name in ("siwc_status", "siwc_logout", "siwc_prepare_login"):
         monkeypatch.setattr(auth, name, forbidden)
+    monkeypatch.setattr(text, "database", forbidden)
     monkeypatch.setattr(web, "_gc_oauth_sessions", forbidden)
     for headers in ({}, {"X-Hermes-Text-Proof": "invalid"}):
         response = client.request(method, path, params={"profile": PROFILE}, headers=headers)
@@ -109,7 +110,8 @@ def test_ordinary_http_token_and_valid_owner_cannot_access_owned_endpoints(clien
 def test_actual_http_signature_covers_query_owner_and_empty_body(client, monkeypatch):
     from hermes_cli import auth
     calls = []
-    monkeypatch.setattr(auth, "siwc_status", lambda profile: calls.append(profile) or {"state": "ready"})
+    monkeypatch.setattr(auth, "siwc_status", lambda profile: calls.append(profile) or {"state": "disconnected"})
+    monkeypatch.setattr(text, "database", lambda profile: pytest.fail("signature test must not prepare a database"))
     path = "/api/providers/siwc/status"
     payload = {"path": path, "query": [["profile", PROFILE]], "owner": OWNER, "body": ""}
     for change in ("owner", "query", "body", "duplicate"):

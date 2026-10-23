@@ -11761,10 +11761,10 @@ async def _start_siwc_owned(request, profile):
 
 @app.get("/api/providers/siwc/status")
 async def siwc_owned_status(request: Request, profile: str):
-    from hermes_cli.auth import siwc_status
+    from hermes_cli.enterprise_text import ready_status
     await _siwc_owned_request(request, profile)
     try:
-        return siwc_status(profile)
+        return await asyncio.get_running_loop().run_in_executor(None, ready_status, profile)
     except Exception:
         return {"state": "unavailable", "reason": "SIWC_RECORD_UNAVAILABLE"}
 

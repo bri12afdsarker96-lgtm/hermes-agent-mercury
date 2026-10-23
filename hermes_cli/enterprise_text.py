@@ -178,6 +178,22 @@ def database(profile):
         db.close()
 
 
+def ready_status(profile):
+    """Report a stable account ready only after its owned database can open."""
+    from hermes_cli.auth import siwc_status
+    before = siwc_status(profile)
+    if before.get("state") != "ready":
+        return before
+    with database(profile):
+        pass
+    after = siwc_status(profile)
+    if (after.get("state") != "ready"
+            or after.get("registration_id") != before.get("registration_id")
+            or after.get("generation") != before.get("generation")):
+        raise TextBoundaryError("LOCAL_TEXT_ACCOUNT_CHANGED")
+    return after
+
+
 def _metadata(conn, entry):
     row = conn.execute("SELECT source, model_config FROM sessions WHERE id=?", (entry["db_session_id"],)).fetchone()
     if row is None or row[0] != "enterprise_text":

@@ -199,3 +199,67 @@ it('late login start after cancellation is cancelled and never returns an author
   expect(await running).toMatchObject({ state: 'unavailable', reason: 'LOCAL_TEXT_OWNER_CHANGED' })
   expect(vi.mocked(h.deps.localApi).mock.calls.some(([, path, , method]) => path.includes('/sessions/owned-login') && method === 'DELETE')).toBe(true)
 })
+
+it('waits for owned storage readiness before publishing ready or creating and submitting a conversation', async () => {
+  const h = harness()
+  const statusEntered = deferred<void>(), submitEntered = deferred<void>(), release = deferred<void>()
+  const original = vi.mocked(h.deps.localApi).getMockImplementation()!
+  let statusCalls = 0
+  vi.mocked(h.deps.localApi).mockImplementation(async (...args) => {
+    if (args[1].startsWith('/api/providers/siwc/status')) {
+      statusCalls += 1
+      if (statusCalls === 1) {statusEntered.resolve()}
+      if (statusCalls === 2) {submitEntered.resolve()}
+      await release.promise
+    }
+    return original(...args)
+  })
+  let statusReturned = false
+  const checking = h.run({ sessionId: 'enterprise', action: 'status' }).then(result => {
+    statusReturned = true
+    return result
+  })
+  await statusEntered.promise
+  const sending = h.run()
+  await submitEntered.promise
+  expect(statusReturned).toBe(false)
+  expect(h.client.request.mock.calls.some(([method]) => method === 'session.create')).toBe(false)
+  expect(h.sends()).toBe(0)
+  expect(vi.mocked(h.deps.context).mock.calls.some(([body]) => body.action === 'prepare')).toBe(false)
+  release.resolve()
+  expect(await checking).toMatchObject({ state: 'ready', choice })
+  expect(await sending).toMatchObject({ state: 'completed', text: 'safe summary' })
+  expect(h.sends()).toBe(1)
+})
+
+it('cannot publish a held readiness response after disposal, epoch change or owner change', async () => {
+  for (const change of ['dispose', 'epoch', 'owner'] as const) {
+    const h = harness()
+    const entered = deferred<void>(), release = deferred<void>()
+    const original = vi.mocked(h.deps.localApi).getMockImplementation()!
+    vi.mocked(h.deps.localApi).mockImplementation(async (...args) => {
+      if (args[1].startsWith('/api/providers/siwc/status')) {entered.resolve(); await release.promise}
+      return original(...args)
+    })
+    const checking = h.run({ sessionId: 'enterprise', action: 'status' })
+    await entered.promise
+    if (change === 'dispose') {h.session.localText!.dispose()}
+    if (change === 'epoch') {h.session.localTextEpoch = (h.session.localTextEpoch ?? 0) + 1}
+    if (change === 'owner') {h.ownerChanged()}
+    release.resolve()
+    expect((await checking).state).not.toBe('ready')
+    expect(h.client.request.mock.calls.some(([method]) => method === 'session.create')).toBe(false)
+    expect(h.sends()).toBe(0)
+    if (change === 'dispose') {expect(h.client.close).toHaveBeenCalled()}
+  }
+})
+
+it('storage preparation failure cannot advertise ready or begin a conversation', async () => {
+  const h = harness()
+  vi.mocked(h.deps.localApi).mockResolvedValue({ state: 'unavailable', reason: 'SIWC_RECORD_UNAVAILABLE' })
+  expect((await h.run({ sessionId: 'enterprise', action: 'status' })).state).toBe('disconnected')
+  expect((await h.run()).state).toBe('unavailable')
+  expect(h.client.request.mock.calls.some(([method]) => method === 'session.create')).toBe(false)
+  expect(h.sends()).toBe(0)
+  expect(vi.mocked(h.deps.context).mock.calls.some(([body]) => body.action === 'prepare')).toBe(false)
+})

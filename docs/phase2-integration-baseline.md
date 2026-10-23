@@ -1,5 +1,13 @@
 # Mercury 二期企业集成基线（P2-00B）
 
+## 2026-10-23 P2-03-02R3 就绪准备与原客户端阅读（当前）
+
+本片CREATE_LATENCY_CONSUMER_FIX完成最小消费者修订：私有status在原executor中完成owned数据库打开/关闭，确认账号registration/generation二读稳定才ready，失败不缓存、不ready；原权限、schema/事务、10秒create、25秒HTTP inactivity和UNKNOWN/once保持，S运行代码未改。冷准备成本仍在，不称全部历史失败已修。
+
+52唯一Python、16Node及Electron类型检查通过；一次fresh原客户端合成请求原create93.9141ms resolve，SDK/response/UNKNOWN各1，S prepare/revalidate/accept各1、tenant-model0。22段安全回复经105次原wheel逐段完整可见/命中；held composer可见保留禁用、stop启用，完成后composer启用。232px与首段atStart不是Gate，本轮未点stop/query/logout，旧c227独立。
+
+Source/Security实际接受限定实现、测试及合成集成；原件d98d7515…共52绑定、测试7475d895…，路径、初轮环境失败、非零guard计数及serve子进程code1/有限退出粒度见[阶段检查点](phase2-03-02-checkpoint.md)。整体P2/Gates、真实OAuth/模型、全owner及PG/RLS仍未通过，不越03-03、不部署/发布或自动暂停。下方保留历史时点。
+
 ## 2026-10-23 P2-03-02R3 阅读空间有限改善，原创建超时待闭合（最新）
 
 当前 **ACTIVE / NOT_COMPLETE / LIMITED_LAYOUT_GEOMETRY_CREATE_TIMEOUT_BLOCKED**，唯一项仍为 `SUMMARY_READING_SPACE_CLOSURE`，基线M `3494a4acb` / S `447ef8cd`。M仅增加五个语义class及摘要分栏的局部留白调整，原账号/连接/后端、stop/query、handler/UNKNOWN/权限/once保持；字号始终未改，后续五组spacing未再改变第一候选的textarea/按钮尺寸或按钮padding；窗口1220×800 DIP/zoom0.9、10秒超时/原滚动保持。两次renderer从对应真实源码构建，无编译JS补丁；诊断main `7c9f850f…` 不同于旧产品 `ccb95380…`，preload/guard复用，未改S运行代码。23组件用例/类型检查是第一class候选Builder原回执，第二次纯CSS未重跑，不代替几何验收。
