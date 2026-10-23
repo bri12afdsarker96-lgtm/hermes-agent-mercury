@@ -692,9 +692,6 @@ function AssistantSessionPage({
                 {visibleBackends.map(backend => <option key={backend.backend_id} value={backend.backend_id}>{backend.label}</option>)}
               </select>
             </label>
-            <p className="hesc-muted-copy hesc-ai-backend-metadata">配置：{fixedChoice?.configuration_id ?? catalogChoice?.configuration_id ?? '待选择'} · 模型：{fixedChoice?.model ?? catalogChoice?.model ?? backendOption?.model ?? (backendId === 'codex' ? CODEX_SOFTWARE_DEFAULTS.model : '待选择')}
-              {' · '}调用方式：{fixedChoice?.runtime_protocol ?? catalogChoice?.runtime_protocol ?? backendOption?.runtime_protocol ?? '待选择'}
-              {' · '}推理强度：{fixedChoice?.reasoning_effort ?? catalogChoice?.reasoning_effort ?? backendOption?.reasoning_effort ?? (backendId === 'codex' ? CODEX_SOFTWARE_DEFAULTS.reasoning_effort : '默认')}</p>
             {!modelBusy && !backendReady ? <p role="status">{unavailableReason}</p> : null}
             {backendId === 'codex' && local.state.modelStatus === 'supported' ? <p className="hesc-muted-copy" role="status">{assistantBackendReason('LOCAL_TEXT_MODEL_SUPPORTED')}</p> : null}
             {backendId === 'codex' && runtime?.localText ? <div className="hesc-toolbar hesc-ai-local-actions">

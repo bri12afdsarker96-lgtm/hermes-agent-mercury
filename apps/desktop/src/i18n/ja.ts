@@ -4,6 +4,8 @@ import { defineLocale } from './define-locale'
 
 export const ja = defineLocale({
   enterpriseModelConfig: {
+    configurationEntry: 'AI モデル・キー・ペルソナ設定',
+    toolsPurpose: '作業ツール、通知、権限のあるサービス設定をまとめています。モデルのキーはサーバーで暗号化保存します。',
     nfvidPreset: 'Nfvid API · gpt-6.1-sol を設定',
     nfvidDisclosure: 'Chat Completions を使う Nfvid API 中継の設定です。権限のある API キーを入力してください。保存はモデルの動作確認ではありません。Codex アカウントは不要です。',
     boundChoicePolicy: 'キーはサーバーで暗号化保存します。設定を固定した返信は失敗してもキーを切り替えません。他の従来サービスでは既存の同一モデルの予備キーを使う場合があります。'

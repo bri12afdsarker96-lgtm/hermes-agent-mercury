@@ -232,7 +232,7 @@ export function GovernancePage({ runtime, reviewRequest = 0 }: { runtime: Enterp
       <header className="hesc-page-header">
         <div>
           <h1>{web.enabled && !isPlatformAdministrator ? web.words.members : '治理中心'}</h1>
-          <p>{web.enabled ? (isPlatformAdministrator ? '查看权限、能力与操作记录。' : '管理员工、组别与坐席申请。') : isPlatformAdministrator ? '平台侧身份范围、能力策略和审计证据均由 Hermes_AI 授权与投射；客户端不自行判定权限，也不提供审计重放。' : '集中管理员工账号、组别归属和待审批坐席申请；企业模型与密钥请在“AI模型配置”中维护。'}</p>
+          <p>{web.enabled ? (isPlatformAdministrator ? '查看权限、能力与操作记录。' : '管理员工、组别与坐席申请。') : isPlatformAdministrator ? '平台侧身份范围、能力策略和审计证据均由 Hermes_AI 授权与投射；客户端不自行判定权限，也不提供审计重放。' : '集中管理员工账号、组别归属和待审批坐席申请；企业模型与密钥请在“工具集”的 AI 配置中维护。'}</p>
         </div>
         <span
           className="hesc-status"

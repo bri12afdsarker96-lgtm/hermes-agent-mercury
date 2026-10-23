@@ -103,13 +103,6 @@ const ADMIN_WORKSPACES: readonly EnterpriseWorkspaceDefinition[] = [
     requiredPermissions: ['kb.candidate.view']
   },
   {
-    description: '配置企业 AI 模型、密钥与人设',
-    glyph: '06',
-    id: 'ai_config',
-    label: 'AI模型配置',
-    requiredPermissions: ['tenant.profile.read']
-  },
-  {
     description: '查看员工权限、能力与治理事实',
     glyph: '07',
     id: 'governance',
@@ -151,6 +144,10 @@ function hasAnyPermission(
   }
 
   return effectivePermissions.includes('*') || requiredPermissions.some(permission => effectivePermissions.some(granted => granted === permission || (granted.endsWith('.*') && permission.startsWith(granted.slice(0, -1)))))
+}
+
+export function canConfigureTenantAi(snapshot: EnterpriseRoleSnapshot | undefined): boolean {
+  return snapshot?.role === 'tenant_admin' && hasAnyPermission(snapshot.effective_permissions, ['tenant.profile.read'])
 }
 
 function candidateWorkspaces(role: string | undefined): readonly EnterpriseWorkspaceDefinition[] {

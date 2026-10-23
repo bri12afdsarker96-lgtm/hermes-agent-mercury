@@ -4,6 +4,8 @@ import type { Translations } from './types'
 
 export const en: Translations = {
   enterpriseModelConfig: {
+    configurationEntry: 'AI models, keys and personas',
+    toolsPurpose: 'Work tools, notifications and authorized service configuration. Model keys are encrypted on the server.',
     nfvidPreset: 'Configure Nfvid API · gpt-6.1-sol',
     nfvidDisclosure: 'Nfvid API relay using Chat Completions. Enter your authorized API key below; saving is not a live model check. A Codex account is not required.',
     boundChoicePolicy: 'Keys are encrypted on the server. Replies bound to a selected configuration do not switch keys on failure. Legacy services may use their existing same-model backup keys.'

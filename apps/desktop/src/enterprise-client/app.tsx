@@ -12,7 +12,7 @@ import { DeliveryHistory } from './delivery-history'
 import { $enterpriseReminderTasks, $personalReminders, type PersonalReminder, type ReminderCenterTask } from './reminder-state'
 
 import { AssistantPage } from './assistant-page'
-import { AiConfigurationPage } from './ai-configuration-page'
+import { canConfigureTenantAi } from './role-presentation'
 import { AssistantReminders } from './assistant-reminders'
 import { OverduePage } from './overdue-page'
 import { BusinessTasksPanel } from './business-tasks-panel'
@@ -791,13 +791,12 @@ function EnterpriseClientContent({ additionalAccountActions, onBeforeLogout, rec
         ) : null}
         {activeDefinition.id === 'governance' ? <GovernancePage runtime={authorityRuntime} reviewRequest={reviewRequest} /> : null}
         {activeDefinition.id === 'knowledge' ? <KnowledgePage runtime={authorityRuntime} /> : null}
-        {activeDefinition.id === 'tools' ? <ToolsPage runtime={authorityRuntime} role={authoritySnapshot?.identity.role} /> : null}
+        {activeDefinition.id === 'tools' ? <ToolsPage runtime={authorityRuntime} role={authoritySnapshot?.identity.role} canConfigureAi={canConfigureTenantAi(authoritySnapshot?.identity)} /> : null}
         {activeDefinition.id === 'overdue' && authorityRuntime && authoritySnapshot ? <OverduePage
           key={`${authorityRuntime.serverOrigin}:${authoritySnapshot.identity.tenant_id}:${authoritySnapshot.identity.principal_id}`}
           scope={JSON.stringify([authorityRuntime.serverOrigin,authoritySnapshot.identity.tenant_id,authoritySnapshot.identity.principal_id])}
           principalId={authoritySnapshot.identity.principal_id ?? ''}
           onInspect={task => {if (TaskDetails || task.source_type === 'receivable_followup') {setSelectedFollowup(task);setRemindersOpen(true)} else {setSelectedFollowup(null);setActiveWorkspace('reminders')}}}/>:null}
-        {activeDefinition.id === 'ai_config' ? <AiConfigurationPage runtime={authorityRuntime} /> : null}
         {authorityRuntime && authoritySnapshot?.identity.principal_id && visibleWorkspaces.some(item => item.id === 'receivables') ? <div hidden={activeDefinition.id !== 'receivables'}>
           <ReceivablesPage key={authoritySnapshot.identity.principal_id} runtime={authorityRuntime}
             Overview={receivablesOverview}

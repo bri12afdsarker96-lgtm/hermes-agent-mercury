@@ -4,6 +4,8 @@ import type { Translations } from './types'
 
 export const zh: Translations = {
   enterpriseModelConfig: {
+    configurationEntry: 'AI 模型、密钥与人设配置',
+    toolsPurpose: '集中使用工作工具、通知和获授权的服务配置。模型密钥加密保存在服务器。',
     nfvidPreset: '配置 Nfvid API · gpt-6.1-sol',
     nfvidDisclosure: 'Nfvid API 中转配置，使用 Chat Completions。在下方填写有权使用的 API Key；保存配置不代表模型已实测可用，无需 Codex 账号。',
     boundChoicePolicy: '密钥加密保存在服务器。已固定配置的答复失败后不会切换密钥；旧版其他服务仍可能使用其既有同模型备用密钥。'

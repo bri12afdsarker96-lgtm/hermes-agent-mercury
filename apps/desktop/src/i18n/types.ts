@@ -50,6 +50,8 @@ interface AuxTaskCopy {
 
 export interface Translations {
   enterpriseModelConfig: {
+    configurationEntry: string
+    toolsPurpose: string
     nfvidPreset: string
     nfvidDisclosure: string
     boundChoicePolicy: string

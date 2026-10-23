@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  canConfigureTenantAi,
   enterpriseRoleLabel,
   enterpriseWorkbenchPresentation,
   enterpriseWorkflowPresentation,
@@ -8,6 +9,16 @@ import {
 } from './role-presentation'
 
 describe('enterprise role presentation', () => {
+  it('places AI configuration under tools while preserving its tenant administrator permission gate', () => {
+    for (const role of ['operator', 'supervisor', 'tenant_admin', 'super_admin']) {
+      expect(enterpriseWorkspaces({role, effective_permissions: ['*']}).map(item => item.id)).not.toContain('ai_config')
+    }
+    expect(canConfigureTenantAi({role:'tenant_admin', effective_permissions:['tenant.profile.read']})).toBe(true)
+    expect(canConfigureTenantAi({role:'tenant_admin', effective_permissions:['tenant.*']})).toBe(true)
+    expect(canConfigureTenantAi({role:'tenant_admin', effective_permissions:[]})).toBe(false)
+    expect(canConfigureTenantAi({role:'operator', effective_permissions:['*']})).toBe(false)
+    expect(canConfigureTenantAi({role:'super_admin', effective_permissions:['*']})).toBe(false)
+  })
   it('exposes receivables only for tenant roles with reminder read permission', () => {
     for (const role of ['operator', 'supervisor', 'tenant_admin']) {
       expect(enterpriseWorkspaces({role, effective_permissions:['reminder.read']}).map(item => item.id)).toContain('receivables')
