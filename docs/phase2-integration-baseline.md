@@ -1,5 +1,11 @@
 # Mercury 二期企业集成基线（P2-00B）
 
+## 2026-10-23 P2-03-02R3 原生目录检查有限闭合（当前）
+
+M `1c13b969` / S `9da5fd5a` 的原 renderer/preload/main 经新鲜 Git archive 构建，最终隔离合成候选七项通过：未检查禁提交、伪造 available 拒绝、辅助窗口拒绝、显式原按钮检查与支持状态、刷新不重复目录、重查撤旧支持及原退出后的迟到有效回复失效。重查开始229ms内、成功退出后释放模拟目录，两个签名私有POST、两个有效目录回复；main第二次返回OWNER_CHANGED/no-choice，原界面保持登录页。业务/SDK/真实认证与模型调用均0；此结果不等于真实账号额度、推理或可发布包资格。
+
+原件SHA `853f9daf50628f9ac827c023018006c364745e87563eb96248498e013b26d779` 与范围见[阶段检查点](phase2-03-02-checkpoint.md)。10650条绑定=10647唯一文件；四轮装配失败保留，最终17个已录进程身份已退出无剩余；外层controller/S/seed/M均0，后台serve子进程码1，guard拒绝尝试单列。产品源码未改，外部并行改动和本地审计/学习记录不纳入提交。真实接入、PG/RLS、OS视觉及整体Gates仍待验，不进入下一Gate或发布。
+
 ## 2026-10-23 P2-03-02R3 显式目录检查与本地连接分离（当前）
 
 基于M500f71aa3/S44182cc，已实现用户显式“检查模型支持”：本机连接只产生未检查状态，目录supported才给main-owned available choice；检查中、明确不支持、未确认均不启新submit。只有固定官方目录中exact Luna/list有效且身份前后稳定才支持；medium沿官方模型合同，目录不证明额度或推理成功。不在status/revalidate/accept探目录，不刷新或借默认授权；首await前撤支持、同slot/epoch/身份拦迟到，原UNKNOWN/query/stop/accept不受新模型检查门控。

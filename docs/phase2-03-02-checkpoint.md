@@ -1,5 +1,17 @@
 # P2-03-02 阶段检查点
 
+## 2026-10-23 P2-03-02R3 原生模型检查与退出失效验收（当前）
+
+本片 `OWNED_MODEL_NATIVE_UI_AND_IPC_CLOSURE` 基于已提交 M `1c13b969457dc68f4cf24f57851cf25d46b422d9` / S `9da5fd5ae188fc9b021aa698e247a22fbb21ec63` 的 Git archive 重新构建原 renderer、preload、main；没有修改产品源码。独立目录使用新 HOME/userData、单个合成用户、strict SQLite 与原安全存储 prepare/commit。测试包装入口保留网络/进程守卫，仅部署 JSON 改为固定 loopback S；模型目录使用 MockTransport。因此这是有限合成原生验收，不是可发布包或真实模型资格。
+
+最终 `owned-model-native-5` 原页面 Chromium 输入与原 preload/main IPC 的七项场景通过：连接后模型未检查，输入和提交禁用；主窗口通过原 preload 伪造 available 提交被 `LOCAL_TEXT_MODEL_UNVERIFIED` 拒绝；辅助真实窗口携原 SID 的检查被 `LOCAL_TEXT_OWNER_CHANGED` 拒绝且无 S/context、私有检查或目录副作用；原“检查模型支持”经签名私有 POST 与模拟目录 GET 后显示支持并启用输入；原连接刷新不增加目录请求；重查立即隐藏旧支持并禁用提交，在第二个 GET 实际被持有后通过原账户页面退出登录。重查开始229ms内、成功 disconnect 后释放响应，后台第二次仍返回有效 supported，而 main 返回 `LOCAL_TEXT_OWNER_CHANGED`、无 choice，界面保持登录页。
+
+最终计数为私有检查 POST 2、模拟目录 GET/有效返回各2、supported2、hold timeout0。企业 create/submit、SDK/Responses/run response、OAuth/JWKS/token/refresh/revoke及 S 业务动作/tenant model 均0。拒绝尝试单列：Chromium1、seed及M后台 process各3，不能写所有 guard 计数0。controller/S/seed/M退出均0，17个已记录 PID/CreationDate 身份无剩余、无强杀；原后台 serve 子进程退出码1，不能称所有子进程exit0；不扩大为所有未观察的历史后代。
+
+证据在既有本地审计 `.cache/audits/p2-03-02-main-authority-20261022/.agent_tmp/owned-model-native-5/`：`native-cases-1.json` SHA256 `853f9daf50628f9ac827c023018006c364745e87563eb96248498e013b26d779`；manifest `777b51e2c9d0e28e3a80d1b7952d58f348acadbad77c69cdafabf422186225e6`，contract `9e9d27b8a40267cb78b1515b29ec63bfdc68bfef30395689af82a5fa913b3b99`。10650条文件绑定对应10647个规范化唯一文件，3组同字节路径表示重复。执行前 Source/Security 均实际核验最终字节。
+
+Source/Security 已独立复核上述最终运行证据及全部文件绑定，接受此有限闭环。首轮S DNS守卫失败、第二轮seed被进程守卫拒绝、第三轮原界面未加载、第四轮释放控制目录缺失均保留，分别用全新候选修复测试装配后运行。第三轮的另行依赖解析证明装配缺口，但未捕获原导入错误，不倒推现场精确栈；第四轮前六项成功不能补算迟到有效响应场景。没有重放旧 UNKNOWN、业务请求或真实认证。真实自有账号/目录/一次安全文本终态、PG/RLS、OS任务栏图标与鼠标截图、整体 P2/Gates仍未由本片验收，不进入03-03、部署或发布。
+
 ## 2026-10-23 P2-03-02R3 模型目录前置与可用性语义（当前）
 
 本片 OWNED_AVAILABILITY_SEMANTICS_AND_MODEL_PREFLIGHT 基于M `500f71aa3` / S `44182cc`。现账号/DB ready只显示本机已连接、模型未检查；只有用户显式点击“检查模型支持”，才沿原IPC/main私有provider检查一次目录。界面区分未检查、检查中、目录支持、明确不支持与检查未确认；检查中即撤销旧choice，失败仍可重查/断开，不自动登录、探目录或提交业务。目录支持仅代表本次快照，额度与实际成功仍以请求结果为准。
