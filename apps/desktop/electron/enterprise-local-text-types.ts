@@ -17,6 +17,17 @@ export interface LocalTextRequest {
   content?: string
   personaId?: string
   choice?: LocalTextChoice
+  mode?: 'summarize' | 'knowledge_answer'
+  customerId?: string
+  workspaceRevision?: number
+  customerOwnerId?: string
+  conversationRevision?: number
+  knowledgeQuery?: string
+  replyPreferences?: {
+    tone: 'professional' | 'warm'
+    length: 'concise' | 'balanced' | 'detailed'
+    address: 'nin' | 'ni'
+  }
 }
 
 export interface LocalTextReply {

@@ -23,6 +23,17 @@ _PROOF_LOCK = threading.Lock()
 _PROOF_NONCE_LIMIT = 8192
 
 
+class _TextStop(threading.Event):
+    """The existing teardown's Event.set also wakes a held private release."""
+    def __init__(self, release_event):
+        super().__init__()
+        self.release_event = release_event
+
+    def set(self):
+        super().set()
+        self.release_event.set()
+
+
 def proof_runtime_id():
     if (isinstance(_PROOF_KEY, str) and isinstance(_PROOF_RUNTIME, str)
             and re.fullmatch(r"[a-f0-9]{64}", _PROOF_KEY) and re.fullmatch(r"[a-f0-9]{32}", _PROOF_RUNTIME)):
@@ -222,11 +233,14 @@ def create(params, transport):
         raise TextBoundaryError("LOCAL_TEXT_ACCOUNT_CHANGED")
     binding = {key: params[key] for key in ("owner_scope", "registration_id", "generation", "prompt_hash")}
     binding.update(model="gpt-6-luna", reasoning_effort="medium")
+    release_event = threading.Event()
     entry = {"text_only": True, "profile": profile, "owner": params["owner"], "binding": binding,
              "db_session_id": PREFIX + digest(params["owner_scope"] + ":" + conversation),
              "transport": transport, "created_at": time.time(), "last_active": time.time(),
              "agent": None, "history": [], "inflight_turn": None, "close_on_disconnect": True,
-             "text_stop": threading.Event(), "text_stream": None, "text_draft": None,
+             "text_stop": _TextStop(release_event), "text_stream": None, "text_draft": None,
+             "text_release_lock": threading.Lock(), "text_release_event": release_event,
+             "text_release": None,
              "text_cancelled": set(),
              "text_facts": {},
              "text_request_id": None, "text_lock": threading.Lock()}
@@ -285,6 +299,62 @@ def result(entry, request):
     return public
 
 
+def release(entry, params):
+    """One private ACK; no DB, account read, or submit lock on this path."""
+    allowed = {"session_id", "owner", "request_id", "nonce", "input_hash", "context_hash",
+               "registration_id", "generation", "phase"}
+    if set(params) != allowed or type(params.get("generation")) is not int:
+        raise TextBoundaryError("LOCAL_TEXT_RELEASE_INVALID")
+    with entry["text_release_lock"]:
+        phase = entry["text_release"]
+        if (not phase or phase["closed"] or phase["acknowledged"] or phase["spent"]
+                or entry["text_stop"].is_set() or time.monotonic() >= phase["deadline"]
+                or any(params.get(key) != phase[key] for key in allowed - {"owner"})):
+            raise TextBoundaryError("LOCAL_TEXT_RELEASE_INVALID")
+        phase["acknowledged"] = True
+        entry["text_release_event"].set()
+    return {"released": True, "phase": "draft"}
+
+
+def _last_send_release(entry, params, request, deadline):
+    from agent.codex_runtime import CodexTextProtocolError
+    from hermes_cli.auth import siwc_status
+    # Last local I/O is BEFORE asking main for fresh S authority. No refresh.
+    status = siwc_status(entry["profile"])
+    if (status.get("state") != "ready"
+            or status.get("registration_id") != entry["binding"]["registration_id"]
+            or type(status.get("generation")) is not int
+            or status["generation"] != entry["binding"]["generation"]):
+        raise CodexTextProtocolError("TEXT_ACCOUNT_CHANGED")
+    with entry["text_release_lock"]:
+        # Clear first: a concurrent stop between the check and phase install
+        # must leave its wake-up set rather than have it erased afterwards.
+        entry["text_release_event"].clear()
+        if entry["text_stop"].is_set() or time.monotonic() >= deadline:
+            raise CodexTextProtocolError("TEXT_OBSERVATION_STOPPED")
+        phase = {"session_id": params["session_id"], "request_id": request,
+                 "nonce": uuid.uuid4().hex, "input_hash": params["input_hash"],
+                 "context_hash": params["context_hash"],
+                 "registration_id": entry["binding"]["registration_id"],
+                 "generation": entry["binding"]["generation"], "phase": "draft",
+                 "deadline": deadline, "acknowledged": False, "spent": False, "closed": False}
+        entry["text_release"] = phase
+    payload = {key: phase[key] for key in ("request_id", "nonce", "input_hash", "context_hash",
+                                          "registration_id", "generation", "phase")}
+    if entry["transport"].write({"jsonrpc": "2.0", "method": "event", "params": {
+            "type": "enterprise_text.release_required", "session_id": params["session_id"],
+            "payload": payload}}) is False:
+        raise CodexTextProtocolError("TEXT_RESULT_UNKNOWN")
+    entry["text_release_event"].wait(max(0, deadline - time.monotonic()))
+    # From ACK to POST: pure in-memory predicates and nonce consumption only.
+    with entry["text_release_lock"]:
+        if (entry["text_release"] is not phase or not phase["acknowledged"]
+                or phase["closed"] or phase["spent"] or entry["text_stop"].is_set()
+                or time.monotonic() >= deadline):
+            raise CodexTextProtocolError("TEXT_RELEASE_NOT_AUTHORIZED")
+        phase["spent"] = True
+
+
 def submit(entry, params):
     from hermes_cli.runtime_provider import resolve_owned_text_runtime
     from agent.codex_runtime import CodexTextProtocolError, run_siwc_text_response
@@ -294,18 +364,32 @@ def submit(entry, params):
             or not isinstance(text, str) or not 1 <= len(text) <= 26000
             or digest(instructions) != entry["binding"]["prompt_hash"]):
         raise TextBoundaryError("LOCAL_TEXT_CONTEXT_CHANGED")
+    mode = params.get("mode", "summarize")
+    if mode not in {"summarize", "knowledge_answer"}:
+        raise TextBoundaryError("LOCAL_TEXT_CONTEXT_CHANGED")
+    release_deadline = None
+    if mode == "knowledge_answer":
+        remaining = params.get("deadline_ms")
+        if (type(remaining) is not int or not 0 < remaining - time.time() * 1000 <= 180000
+                or not isinstance(params.get("context_hash"), str)
+                or not re.fullmatch(r"[a-f0-9]{64}", params["context_hash"])
+                or params.get("input_hash") != digest(text)
+                or not isinstance(params.get("session_id"), str)
+                or not params["session_id"].startswith(PREFIX + "runtime-")):
+            raise TextBoundaryError("LOCAL_TEXT_CONTEXT_CHANGED")
+        release_deadline = time.monotonic() + (remaining - time.time() * 1000) / 1000
     if not entry["text_lock"].acquire(blocking=False):
         return result(entry, request)
     try:
-        if request in entry["text_cancelled"]:
-            return {"state": "not_started", "reason": "LOCAL_TEXT_OBSERVATION_STOPPED"}
         if fact(entry, request)["state"] != "not_started":
             return result(entry, request)
-        credentials = resolve_owned_text_runtime(entry["profile"], entry["binding"]["registration_id"], entry["binding"]["generation"])
+        if request in entry["text_cancelled"]:
+            return {"state": "not_started", "reason": "LOCAL_TEXT_OBSERVATION_STOPPED"}
         entry["text_stop"].clear()
+        credentials = resolve_owned_text_runtime(entry["profile"], entry["binding"]["registration_id"], entry["binding"]["generation"])
         entry.update(text_request_id=request, text_draft=None)
         entry["text_facts"] = {"started": False, "delta_events": 0, "interrupt_requested": False}
-        if request in entry["text_cancelled"]:
+        if request in entry["text_cancelled"] or entry["text_stop"].is_set():
             return {"state": "not_started", "reason": "LOCAL_TEXT_OBSERVATION_STOPPED"}
         if not _write_fact(entry, request, {}, claim=digest(instructions + "\0" + text)):
             return result(entry, request)
@@ -338,7 +422,9 @@ def submit(entry, params):
             response = run_siwc_text_response(credentials, instructions, text,
                 interrupt_check=entry["text_stop"].is_set,
                 on_event=observe,
-                on_stream=attach)
+                on_stream=attach,
+                **({"before_send": lambda: _last_send_release(entry, params, request, release_deadline)}
+                   if mode == "knowledge_answer" else {}))
             if response.status == "completed" and response.protocol_terminal_observed and not entry["text_stop"].is_set():
                 entry["text_draft"] = response.output_text
                 _write_fact(entry, request, {"state": "received", "response_id": response.id})
@@ -351,6 +437,10 @@ def submit(entry, params):
             return {"state": "unknown", "reason": "LOCAL_TEXT_RESULT_UNKNOWN"}
         finally:
             timer.cancel()
+            with entry["text_release_lock"]:
+                if entry["text_release"] is not None:
+                    entry["text_release"]["closed"] = True
+                entry["text_release_event"].set()
             entry["text_stream"] = None
             try:
                 _write_fact(entry, request, entry["text_facts"])

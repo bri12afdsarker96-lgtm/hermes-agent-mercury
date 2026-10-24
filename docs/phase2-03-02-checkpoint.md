@@ -1,5 +1,11 @@
 # P2-03-02 阶段检查点
 
+## 2026-10-24 owned客户知识draft最后发送授权首片（限定接受）
+
+沿已登记四独立首轮/Consensus，复用原私有JsonRpc/HMAC/SessionDB/no-tools Responses consumer。actual httpx guard先核唯一POST/固定URL/完整kwargs；Python credential/UNKNOWN claim/no-refresh status、main account读取均在最后S release之前，之后只有当前owner/epoch/supported slot/stop/deadline/nonce内存核验和原HMAC ACK。私有runtime scope由root+draft+prompt hash派生，原customer/request关联不变。UNKNOWN先持久化，重复root不再POST；raw customer draft暂仍只保留私有路径，Saccept/query/UI在后续接线。
+
+Source/Security最后字节POST均限定接受本片。最终Python13通过，原receipt-4 SHA12ccc806b29d6679e516f4e3c93f2af3a2df2f972e7d76c133fa8c025be2897d，逐8文件绑定无漂移；未变Node13通过(41未选)与Electron typecheck exit0沿receipt3 SHAa35708b07f3061579dcc4db9910e9266742d4ee449ed2b5a46bb153498b09fde继承，不重复运行或累加。首轮5失败原件保留：SDK封装拒绝原因、durableUNKNOWN优先及fixture/协议断言等已按原件修正；Security实际发现clear/stop lost-wakeup，改clear→检查stop→installphase，精确交错负例0challenge/0POST通过。无真实SIWC/OAuth/JWKS/模型/native；本片不代accept/query/cache或七原生业务验收。继续施工，不因checkpoint暂停。
+
 ## 2026-10-24 浪花保护配置入口整合与客户后续合同
 
 已将独立验收6077的8文件Tools配置入口合到当前私有context保护之后，自动合并无产品冲突；所有8文件与原已审commit blob一致，原WeCom面板及contributor三个dirty文件逐字节保持。配置只在工具集按权限按需挂载，不加入智能问答；/api/langhua-config仍走受保护公共业务API，私有context默认拒绝不影响此路由。

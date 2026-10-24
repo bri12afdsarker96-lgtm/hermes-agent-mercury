@@ -127,3 +127,28 @@ def test_connection_loss_is_never_retried():
         run_siwc_text_response({"source": "owned-siwc", "base_url": "https://api.openai.com/v1",
             "api_key": "owned-fixture"}, "instructions", "input", http_transport=httpx.MockTransport(handle))
     assert len(calls) == 1
+
+
+def test_last_send_denial_is_before_http_and_never_retried():
+    calls, releases = [], []
+    def deny():
+        releases.append(1)
+        raise CodexTextProtocolError("TEXT_RELEASE_NOT_AUTHORIZED")
+    with pytest.raises(CodexTextProtocolError, match="TEXT_RELEASE_NOT_AUTHORIZED"):
+        run_siwc_text_response({"source": "owned-siwc", "base_url": "https://api.openai.com/v1",
+            "api_key": "owned-fixture"}, "instructions", "input", before_send=deny,
+            http_transport=httpx.MockTransport(lambda request: calls.append(request)))
+    assert releases == [1] and calls == []
+
+
+def test_last_send_release_runs_only_after_actual_wire_validation(monkeypatch):
+    original = httpx.Client.send
+    def changed_wire(self, request, **kwargs):
+        request.headers["OpenAI-Organization"] = "forbidden-organization"
+        return original(self, request, **kwargs)
+    monkeypatch.setattr(httpx.Client, "send", changed_wire)
+    with pytest.raises(CodexTextProtocolError, match="TEXT_PHYSICAL_REQUEST_INVALID"):
+        run_siwc_text_response({"source": "owned-siwc", "base_url": "https://api.openai.com/v1",
+            "api_key": "owned-fixture"}, "instructions", "input",
+            before_send=lambda: pytest.fail("release before wire validation"),
+            http_transport=httpx.MockTransport(lambda request: pytest.fail("physical HTTP")))

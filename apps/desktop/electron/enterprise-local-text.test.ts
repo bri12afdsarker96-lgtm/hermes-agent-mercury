@@ -494,3 +494,185 @@ it('model preflight entry coalesces concurrent checks while the first enterprise
   expect((await first).modelStatus).toBe('supported')
   expect(catalogCalls(h)).toHaveLength(1)
 })
+
+const customerSubmit: LocalTextRequest = { ...submit, mode: 'knowledge_answer',
+  customerId: '11111111-1111-1111-1111-111111111111', conversationId: '11111111-1111-1111-1111-111111111111',
+  requestId: '22222222-2222-2222-2222-222222222222', workspaceRevision: 1,
+  knowledgeQuery: 'synthetic knowledge question', replyPreferences: { tone: 'warm', length: 'balanced', address: 'nin' } }
+
+function customerHarness() {
+  const h = harness()
+  const submitted = deferred<Record<string, unknown>>(), acknowledged = deferred<void>(), stopped = deferred<void>()
+  const completed = deferred<{ state: string; draft?: string }>()
+  const order: string[] = []
+  const prepared = { ...h.context, input_hash: sha(h.context.input), expires_at: h.context.prepared_at + 180 }
+  let handler: ((event: { type: string; session_id?: string; payload?: unknown }) => void) | undefined
+  let lastSendRelease = true, ackLoss = false, forbidStatus = false
+  let releaseHook: (() => Promise<void>) | undefined
+  const original = h.client.request.getMockImplementation()!
+  const client = { ...h.client,
+    onEvent: vi.fn(listener => {handler = listener; return () => {handler = undefined}}),
+    request: vi.fn(async (method: string, params: Record<string, unknown> = {}): Promise<any> => {
+      order.push(`rpc:${method}`)
+      if (method === 'enterprise_text.capabilities') {return { ...await original(method), last_send_release: lastSendRelease }}
+      if (method === 'enterprise_text.submit') {submitted.resolve(params); return completed.promise}
+      if (method === 'enterprise_text.release') {
+        acknowledged.resolve()
+        if (ackLoss) {completed.resolve({ state: 'unknown' }); throw new Error('private ACK loss')}
+        completed.resolve({ state: 'received', draft: 'private-customer-raw-draft' })
+        return { released: true, phase: 'draft' }
+      }
+      if (method === 'enterprise_text.stop') {stopped.resolve(); completed.resolve({ state: 'unknown' }); return { state: 'unknown' }}
+      if (method === 'enterprise_text.status') {return { state: 'received', draft: 'private-customer-raw-draft' }}
+      return original(method)
+    }) }
+  h.deps.createClient = () => client
+  const originalApi = vi.mocked(h.deps.localApi).getMockImplementation()!
+  vi.mocked(h.deps.localApi).mockImplementation(async (...args) => {
+    if (args[1].startsWith('/api/providers/siwc/status')) {
+      order.push('account')
+      if (forbidStatus) {throw new Error('status after final S release')}
+    }
+    return originalApi(...args)
+  })
+  vi.mocked(h.deps.context).mockImplementation(async body => {
+    order.push(`S:${body.action}`)
+    if (body.action === 'release') {
+      await releaseHook?.()
+      return { ...prepared, instructions: undefined, input: undefined, phase_nonce: body.phase_nonce as string, phase: 'draft', single_use: true }
+    }
+    return prepared
+  })
+  const emit = (change: Record<string, unknown> = {}) => handler?.({ type: 'enterprise_text.release_required',
+    session_id: 'enterprise-text-runtime-fixture', payload: { request_id: customerSubmit.requestId, nonce: 'f'.repeat(32),
+      input_hash: prepared.input_hash, context_hash: prepared.context_hash, registration_id: choice.configuration_id,
+      generation: choice.configuration_version, phase: 'draft', ...change } })
+  return { ...h, client, submitted, acknowledged, stopped, prepared, order, emit,
+    setReleaseHook: (hook: () => Promise<void>) => {releaseHook = hook},
+    noCapability: () => {lastSendRelease = false}, loseAck: () => {ackLoss = true},
+    completeUnknown: () => {completed.resolve({ state: 'unknown' })},
+    forbidStatus: () => {forbidStatus = true}, allowStatus: () => {forbidStatus = false},
+    sends: () => client.request.mock.calls.filter(([method]) => method === 'enterprise_text.submit').length,
+    acks: () => client.request.mock.calls.filter(([method]) => method === 'enterprise_text.release').length }
+}
+
+it.each(['ordinary', 'shared'])('customer last-send %s uses original references, one phase and no post-release status or raw IPC result', async kind => {
+  const h = customerHarness()
+  const payload = kind === 'shared' ? { ...customerSubmit, workspaceRevision: undefined, customerOwnerId: 'synthetic-owner', conversationRevision: 7 } : customerSubmit
+  h.setReleaseHook(async () => {h.forbidStatus()})
+  const running = h.run(payload)
+  const params = await h.submitted.promise
+  expect(params).toMatchObject({ mode: 'knowledge_answer', input_hash: h.prepared.input_hash, context_hash: h.prepared.context_hash })
+  const privateScope = sha(canonicalTextProofPayload({ root: customerSubmit.requestId, phase: 'draft', prompt_hash: h.prepared.prompt_hash }))
+  expect(h.client.request.mock.calls.find(([method]) => method === 'session.create')![1]).toHaveProperty('conversation_id', privateScope)
+  expect(privateScope).not.toBe(customerSubmit.customerId)
+  h.emit(); h.emit()
+  await h.acknowledged.promise
+  const result = await running
+  expect(result).toMatchObject({ state: 'unknown', reason: 'LOCAL_TEXT_CUSTOMER_ACCEPT_PENDING' })
+  expect(JSON.stringify(result)).not.toContain('private-')
+  expect(h.sends()).toBe(1); expect(h.acks()).toBe(1)
+  const releaseAt = h.order.indexOf('S:release')
+  expect(h.order.slice(releaseAt + 1)).not.toContain('account')
+  const releaseBody = vi.mocked(h.deps.context).mock.calls.find(([body]) => body.action === 'release')![0]
+  expect(releaseBody).toMatchObject({ mode: 'knowledge_answer', customer_id: customerSubmit.customerId,
+    conversation_id: customerSubmit.customerId, request_id: customerSubmit.requestId, phase_nonce: 'f'.repeat(32),
+    owned_binding: { registration_id: choice.configuration_id, generation: 1 } })
+  expect(releaseBody.owned_binding).toHaveProperty('profile_scope', sha(h.session.localText!.profile))
+  expect(vi.mocked(h.deps.context).mock.calls.some(([body]) => body.action === 'accept')).toBe(false)
+  h.allowStatus()
+  expect((await h.run({ ...payload, action: 'requestStatus' })).text).toBeUndefined()
+  expect((await h.run({ ...payload, workspaceRevision: kind === 'ordinary' ? 2 : undefined,
+    conversationRevision: kind === 'shared' ? 8 : undefined })).reason).toBe('LOCAL_TEXT_REQUEST_CHANGED')
+  expect(h.sends()).toBe(1)
+})
+
+it('customer last-send requires an advertised live event capability before prepare', async () => {
+  const h = customerHarness(); h.noCapability()
+  expect((await h.run(customerSubmit)).reason).toBe('LOCAL_TEXT_RUNTIME_UPDATE_REQUIRED')
+  expect(h.sends()).toBe(0)
+  expect(vi.mocked(h.deps.context).mock.calls.some(([body]) => body.action === 'prepare')).toBe(false)
+})
+
+it.each(['stop', 'logout', 'connect', 'dispose'] as const)('customer last-send %s while S release waits invalidates the phase without ACK', async ending => {
+  const h = customerHarness(), entered = deferred<void>(), release = deferred<void>()
+  h.setReleaseHook(async () => {entered.resolve(); await release.promise})
+  const running = h.run(customerSubmit)
+  await h.submitted.promise; h.emit(); await entered.promise
+  if (ending === 'dispose') {h.session.localText!.dispose()}
+  else {await h.run({ sessionId: 'enterprise', action: ending,
+    ...(ending === 'stop' ? { conversationId: customerSubmit.conversationId, requestId: customerSubmit.requestId } : {}) })}
+  release.resolve()
+  await h.stopped.promise
+  const result = await running
+  expect(h.acks()).toBe(0)
+  expect(result.text).toBeUndefined()
+  h.emit()
+  expect(h.acks()).toBe(0)
+})
+
+it('customer last-send S denial and lost ACK never expose draft or resend the original root', async () => {
+  for (const failure of ['S', 'ACK']) {
+    const h = customerHarness()
+    if (failure === 'S') {h.setReleaseHook(async () => {throw new Error('private authority diagnostic')})}
+    else {h.loseAck()}
+    const running = h.run(customerSubmit)
+    await h.submitted.promise; h.emit()
+    await h.stopped.promise
+    expect(JSON.stringify(await running)).not.toContain('private-')
+    expect((await h.run(customerSubmit)).text).toBeUndefined()
+    expect(h.sends()).toBe(1)
+    expect(h.acks()).toBe(failure === 'S' ? 0 : 1)
+  }
+})
+
+it('customer last-send rejects foreign phase fields before any S release or ACK', async () => {
+  const h = customerHarness(), running = h.run(customerSubmit)
+  await h.submitted.promise
+  h.emit({ input_hash: '0'.repeat(64) })
+  await h.stopped.promise
+  expect((await running).text).toBeUndefined()
+  expect(h.acks()).toBe(0)
+  expect(vi.mocked(h.deps.context).mock.calls.some(([body]) => body.action === 'release')).toBe(false)
+})
+
+it('customer last-send changed account at the final local status blocks S release', async () => {
+  const h = customerHarness(), running = h.run(customerSubmit)
+  await h.submitted.promise
+  h.accountChanged(); h.emit()
+  await h.stopped.promise
+  expect((await running).text).toBeUndefined()
+  expect(h.acks()).toBe(0)
+  expect(vi.mocked(h.deps.context).mock.calls.some(([body]) => body.action === 'release')).toBe(false)
+})
+
+it('customer last-send owner loss also contains synchronous proof failure during cleanup', async () => {
+  const h = customerHarness(), entered = deferred<void>(), release = deferred<void>(), attemptedStop = deferred<void>()
+  h.setReleaseHook(async () => {entered.resolve(); await release.promise})
+  const running = h.run(customerSubmit)
+  await h.submitted.promise; h.emit(); await entered.promise
+  h.ownerChanged()
+  vi.mocked(h.deps.proof).mockImplementation(() => {attemptedStop.resolve(); throw new Error('LOCAL_TEXT_RUNTIME_UNAVAILABLE')})
+  release.resolve()
+  await attemptedStop.promise
+  h.completeUnknown()
+  expect((await running).text).toBeUndefined()
+  expect(h.acks()).toBe(0)
+})
+
+it('customer last-send reserves a held prepare once and does not reset its deadline at the response', async () => {
+  const h = customerHarness(), entered = deferred<void>(), release = deferred<void>()
+  const original = vi.mocked(h.deps.context).getMockImplementation()!
+  vi.mocked(h.deps.context).mockImplementation(async body => {
+    if (body.action === 'prepare') {entered.resolve(); await release.promise}
+    return original(body)
+  })
+  const first = h.run(customerSubmit)
+  await entered.promise
+  expect((await h.run(customerSubmit)).state).toBe('unknown')
+  expect(vi.mocked(h.deps.context).mock.calls.filter(([body]) => body.action === 'prepare')).toHaveLength(1)
+  h.expire(); release.resolve()
+  expect((await first).state).toBe('unavailable')
+  expect(h.sends()).toBe(0)
+  expect(h.client.request.mock.calls.some(([method]) => method === 'session.create')).toBe(false)
+})

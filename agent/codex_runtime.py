@@ -1428,7 +1428,7 @@ def _private_text_sdk_logs():
 
 def run_siwc_text_response(credentials: dict, instructions: str, text: str, *,
                            on_event=None, interrupt_check=None, on_stream=None,
-                           http_transport=None):
+                           http_transport=None, before_send=None):
     """One physical, no-tools request; no agent, Relay or retry wrapper."""
     import httpx
     from openai import OpenAI
@@ -1445,15 +1445,22 @@ def run_siwc_text_response(credentials: dict, instructions: str, text: str, *,
               "input": [{"role": "user", "content": text}],
               "reasoning": {"effort": "medium"}, "tools": [], "store": False, "stream": True}
     opened = 0
+    guard_error = None
     def guard(request):
-        nonlocal opened
-        if interrupt_check is not None and interrupt_check():
-            raise CodexTextProtocolError("TEXT_OBSERVATION_STOPPED")
-        opened += 1
-        if (opened != 1 or request.method != "POST" or str(request.url) != "https://api.openai.com/v1/responses"
-                or json.loads(request.content) != kwargs
-                or request.headers.get("openai-organization") or request.headers.get("openai-project")):
-            raise CodexTextProtocolError("TEXT_PHYSICAL_REQUEST_INVALID")
+        nonlocal opened, guard_error
+        try:
+            if interrupt_check is not None and interrupt_check():
+                raise CodexTextProtocolError("TEXT_OBSERVATION_STOPPED")
+            opened += 1
+            if (opened != 1 or request.method != "POST" or str(request.url) != "https://api.openai.com/v1/responses"
+                    or json.loads(request.content) != kwargs
+                    or request.headers.get("openai-organization") or request.headers.get("openai-project")):
+                raise CodexTextProtocolError("TEXT_PHYSICAL_REQUEST_INVALID")
+            if before_send is not None:
+                before_send()
+        except CodexTextProtocolError as error:
+            guard_error = error
+            raise
     try:
         with _private_text_sdk_logs():
             with httpx.Client(transport=http_transport, trust_env=False, follow_redirects=False,
@@ -1470,6 +1477,10 @@ def run_siwc_text_response(credentials: dict, instructions: str, text: str, *,
     except CodexTextProtocolError:
         raise
     except Exception as error:
+        # The SDK wraps request-hook refusals in APIConnectionError. Preserve
+        # only our bounded protocol error, never inspect/emit its raw cause.
+        if guard_error is not None:
+            raise guard_error from None
         status = getattr(error, "status_code", None)
         code = ("TEXT_AUTHORIZATION_REQUIRED" if status in {401, 403}
                 else "TEXT_MODEL_OR_REQUEST_UNAVAILABLE" if status in {400, 404, 422}
