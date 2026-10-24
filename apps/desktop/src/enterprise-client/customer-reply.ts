@@ -14,6 +14,7 @@ import { enterpriseClientErrorForStatus } from './runtime-errors'
 export interface CustomerReplyBackendChoice extends EnterpriseAssistantBackendChoice { persona_id?: string }
 
 interface CustomerReplyState {
+  ownedDraft?: OwnedCustomerDraft
   backendChoice?: CustomerReplyBackendChoice
   outcomeUnknown?: boolean
   lastRequestId?: string
@@ -38,7 +39,7 @@ export interface CustomerReplyResponse {
   backend_choice?: EnterpriseAssistantBackendChoice
   answer_text?: string
   customer_reply_options?: Array<{ kind?: string; text?: string }>
-  knowledge_grounded: boolean
+  knowledge_grounded: boolean | null
   reasoning_summary?: string
   retrieval_meta?: {
     best_similarity?: number | null
@@ -48,6 +49,65 @@ export interface CustomerReplyResponse {
     status?: string
   }
   text?: string
+}
+
+export interface OwnedCustomerDraft {
+  source: 'client_provided'
+  modelOrigin: 'unverified'
+  deliveryState: 'not_sent'
+  historical: boolean
+  resultId: string
+}
+
+interface CustomerKnowledgeRequest {
+  content: string
+  customer_id: string
+  customer_request_id: string
+  workspace_revision?: number
+  customer_owner_id?: string
+  conversation_revision?: number
+  persona_id?: string
+  reply_preferences?: { tone: 'professional' | 'warm'; length: 'concise' | 'balanced' | 'detailed'; address: 'nin' | 'ni' }
+}
+
+/** Only the private main receipt may introduce an unverified, unsent draft. */
+function ownedReceipt(value: Awaited<ReturnType<NonNullable<EnterpriseClientRuntime['localText']>>>, requestId: string) {
+  if (value.state !== 'completed' || value.requestId !== requestId || value.source !== 'client_provided' ||
+      value.model_origin !== 'unverified' || value.delivery_state !== 'not_sent' || value.result_kind !== 'draft' ||
+      value.knowledge_grounded !== null || typeof value.text !== 'string' || !value.text.trim() || value.answer_text !== value.text ||
+      typeof value.reasoning_summary !== 'string' || !Array.isArray(value.customer_reply_options) ||
+      typeof value.result_id !== 'string' || !/^[a-f0-9-]{36}$/.test(value.result_id)) {throw new EnterpriseAssistantRequestUnknown()}
+  return { response: value as CustomerReplyResponse, ownedDraft: { source: 'client_provided', modelOrigin: 'unverified',
+    deliveryState: 'not_sent', historical: value.historical === true, resultId: value.result_id } as OwnedCustomerDraft }
+}
+
+export async function requestCustomerKnowledgeReply(runtime: EnterpriseClientRuntime, request: CustomerKnowledgeRequest,
+  choice?: CustomerReplyBackendChoice, choiceProtocolSupported = false, configurationId?: string) {
+  if (choice?.backend_id === 'codex') {
+    if (!runtime.localText || choice.availability !== 'available' || choice.model !== 'gpt-6-luna' ||
+        choice.runtime_protocol !== 'codex_responses' || choice.reasoning_effort !== 'medium' ||
+        typeof choice.configuration_version !== 'number') {throw new EnterpriseAssistantRequestUnknown()}
+    const value = await runtime.localText({ action: 'submit', mode: 'knowledge_answer', customerId: request.customer_id,
+      conversationId: request.customer_id, requestId: request.customer_request_id, content: request.content,
+      workspaceRevision: request.workspace_revision, customerOwnerId: request.customer_owner_id,
+      conversationRevision: request.conversation_revision, personaId: request.persona_id,
+      replyPreferences: request.reply_preferences, choice: {backend_id:'codex',configuration_id:choice.configuration_id,
+        configuration_version:choice.configuration_version,model:'gpt-6-luna',runtime_protocol:'codex_responses',reasoning_effort:'medium',availability:'available'} })
+    if (!value.backend_choice || !assistantChoicesMatch(choice, value.backend_choice)) {throw new EnterpriseAssistantRequestUnknown()}
+    return ownedReceipt(value, request.customer_request_id)
+  }
+  if (!runtime.post) {throw new EnterpriseAssistantRequestUnknown()}
+  const response = await runtime.post<CustomerReplyResponse>('/api/tenant-ai-assist', { ...request, mode: 'knowledge_answer',
+    ...(choice && choiceProtocolSupported ? assistantChoiceRequest(choice) : { configuration_id: choice?.configuration_id ?? configurationId }) })
+  return { response, ownedDraft: undefined }
+}
+
+export async function queryCustomerKnowledgeReply(runtime: EnterpriseClientRuntime, customerId: string, requestId: string, ownerId?: string) {
+  if (!runtime.localText) {throw new EnterpriseAssistantRequestUnknown()}
+  const value = await runtime.localText({ action: 'requestStatus', mode: 'knowledge_answer', customerId,
+    conversationId: customerId, requestId, ...(ownerId ? { customerOwnerId: ownerId } : {}) })
+  if (value.state === 'unknown') {return undefined}
+  return ownedReceipt(value, requestId)
 }
 
 export type CustomerReplyStore = WritableAtom<CustomerReplyState>
@@ -87,7 +147,7 @@ export function hasUnconfirmedCustomerMemory(workspace: CustomerReplyWorkspaceSt
 
 export function updateCustomerMemoryDraft(store: CustomerReplyStore, value: string): void {
   if ($enterprisePackageInstallFrozen.get() || value.length > 4000) {return}
-  store.set({ ...store.get(), memoryDraft: value, draft: '', copiedDraft: null, customerReplyOptions: [], knowledgeGrounded: null, knowledgeTrace: undefined, reasoningSummary: undefined, requestId: null, phase: null })
+  store.set({ ...store.get(), memoryDraft: value, draft: '', ownedDraft: undefined, copiedDraft: null, customerReplyOptions: [], knowledgeGrounded: null, knowledgeTrace: undefined, reasoningSummary: undefined, requestId: null, phase: null })
 }
 
 export async function confirmCustomerMemory(workspace: CustomerReplyWorkspaceStore, store: CustomerReplyStore, remove = false): Promise<void> {
@@ -96,7 +156,7 @@ export async function confirmCustomerMemory(workspace: CustomerReplyWorkspaceSto
 
   if (note.length > 4000) {return}
   store.set({ ...store.get(), memoryNote: note, memoryDraft: note, memoryConfirmedAt: note ? new Date().toISOString() : null,
-    memoryPending: true, draft: '', copiedDraft: null, customerReplyOptions: [], knowledgeGrounded: null, knowledgeTrace: undefined, reasoningSummary: undefined, requestId: null, phase: null })
+    memoryPending: true, draft: '', ownedDraft: undefined, copiedDraft: null, customerReplyOptions: [], knowledgeGrounded: null, knowledgeTrace: undefined, reasoningSummary: undefined, requestId: null, phase: null })
 
   try {
     await flushCustomerDraftsForRequest(workspace)
@@ -246,6 +306,7 @@ export function updateCustomerReplyInput(
     ...store.get(),
     [field]: value,
     draft: '',
+    ownedDraft: undefined,
     error: null,
     customerReplyOptions: [],
     knowledgeGrounded: null,
@@ -277,7 +338,7 @@ export async function generateCustomerReply(
     store.set({ ...current, error: '此客户会话的模型配置已变化，请新建客户会话。' })
     return
   }
-  if (requestChoice && (requestChoice.backend_id !== 'tenant_model' || requestChoice.availability !== 'available')) {return}
+  if (requestChoice && (!['tenant_model', 'codex'].includes(requestChoice.backend_id) || requestChoice.availability !== 'available')) {return}
 
   // Reuse the authenticated tenant knowledge route. Customer context never
   // enters the general assistant transcript or another customer's request.
@@ -303,6 +364,7 @@ export async function generateCustomerReply(
     ...current,
     ...(requestChoice ? { backendChoice: requestChoice } : {}),
     draft: '',
+    ownedDraft: undefined,
     error: null,
     customerReplyOptions: [],
     knowledgeGrounded: null,
@@ -335,23 +397,21 @@ export async function generateCustomerReply(
       store.set({ ...store.get(), phase: 'generating', outcomeUnknown: true })
       dispatched = true
 
-      const result = await post<CustomerReplyResponse>('/api/tenant-ai-assist', {
-        ...(requestChoice && choiceProtocolSupported ? assistantChoiceRequest(requestChoice) : { configuration_id: requestChoice?.configuration_id ?? configurationId }),
+      const { response: result, ownedDraft } = await requestCustomerKnowledgeReply(runtime, {
         ...(requestChoice ? { persona_id: requestChoice.persona_id || undefined } : {}),
         content,
-        mode: 'knowledge_answer',
         customer_id: customer.id,
         customer_request_id: requestId,
         workspace_revision: revision,
         reply_preferences: preferences
-      })
+      }, requestChoice, choiceProtocolSupported, configurationId)
 
       if (retiredWorkspaces.has(workspace) || store.get().requestId !== requestId) {
         return
       }
 
       const presentation = assistantPresentationFrom(result)
-      if (!presentation.text || typeof result.knowledge_grounded !== 'boolean' ||
+      if (!presentation.text || (!ownedDraft && typeof result.knowledge_grounded !== 'boolean') ||
         (requestChoice && result.backend_choice && !assistantChoicesMatch(requestChoice, result.backend_choice)) ||
         (requestChoice && choiceProtocolSupported && !result.backend_choice)) {
         throw new EnterpriseAssistantRequestUnknown()
@@ -361,7 +421,8 @@ export async function generateCustomerReply(
         ...store.get(),
         outcomeUnknown: false,
         customerReplyOptions: presentation.customerReplyOptions,
-        draft: result.knowledge_grounded ? presentation.text : '',
+        draft: result.knowledge_grounded || ownedDraft ? presentation.text : '',
+        ownedDraft,
         knowledgeGrounded: result.knowledge_grounded,
         knowledgeTrace: presentation.knowledgeTrace,
         requestId: null,

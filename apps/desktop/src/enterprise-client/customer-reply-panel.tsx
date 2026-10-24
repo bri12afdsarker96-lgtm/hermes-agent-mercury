@@ -18,6 +18,7 @@ import {
 import { CustomerReplyFeedback } from './customer-reply-feedback'
 import { CustomerConversationPanel } from './customer-conversation-panel'
 import { AssistantResponseDetails } from './assistant-response-details'
+import { assistantPresentationFrom } from './assistant-response'
 import {
   customerDraftSyncFor,
   reloadCustomerDrafts,
@@ -272,7 +273,11 @@ function CustomerReplyPanel({
 
   return (
     <section aria-label={`${customerLabel}的回复`} className="hesc-customer-reply">
-      <CustomerConversationPanel key={customerId} runtime={runtime} customerId={customerId} disabled={frozen || !sync.loaded || busy} refreshToken={state.draft} configurationId={configurationId} backendChoice={backendChoice} unknownRequestId={state.outcomeUnknown ? state.lastRequestId : undefined} onAcknowledged={()=>store.set({...store.get(),outcomeUnknown:false,error:null})} onRecovered={(text,grounded)=>store.set({...store.get(),outcomeUnknown:false,error:null,draft:text,knowledgeGrounded:grounded})} />
+      <CustomerConversationPanel key={customerId} runtime={runtime} customerId={customerId} disabled={frozen || !sync.loaded || busy} refreshToken={state.draft} configurationId={configurationId} backendChoice={backendChoice} unknownRequestId={state.lastRequestId} onAcknowledged={()=>store.set({...store.get(),outcomeUnknown:false,error:null})} onRecovered={(text,grounded)=>store.set({...store.get(),outcomeUnknown:false,error:null,draft:text,knowledgeGrounded:grounded,ownedDraft:undefined})} onOwnedRecovered={(response,provenance)=>{
+        const presentation=assistantPresentationFrom(response)
+        store.set({...store.get(),outcomeUnknown:false,error:null,draft:presentation.text,knowledgeGrounded:null,
+          ownedDraft:provenance,reasoningSummary:presentation.reasoningSummary,customerReplyOptions:presentation.customerReplyOptions})
+      }} />
       <p className="hesc-muted-copy">
         当前客户：{customerLabel} · #{customerId.slice(-8)}
         。粘贴会话、生成并审核建议，再复制到企业微信发送；无需会话存档。
@@ -371,7 +376,8 @@ function CustomerReplyPanel({
         knowledgeTrace={state.knowledgeTrace}
         reasoningSummary={state.reasoningSummary}
       />
-      {state.knowledgeGrounded === true ? (
+      {state.ownedDraft ? <p role="status">客户端提供 · 模型来源未验证 · 未发送草稿{state.ownedDraft.historical ? ' · 已恢复历史结果，未重新验证当前知识或重新生成。' : ''}</p> : null}
+      {state.knowledgeGrounded === true || state.ownedDraft ? (
         <div className="hesc-agent-composer">
           <label htmlFor="customer-reply-draft">待审核回复（可修改）</label>
           <textarea

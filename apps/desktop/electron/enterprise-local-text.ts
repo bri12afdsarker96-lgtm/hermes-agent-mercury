@@ -46,6 +46,9 @@ interface Pending {
   accepted?: LocalTextReply
   releasePhase?: 'waiting' | 'authorizing' | 'acknowledged' | 'failed'
   releaseRequired?(event: GatewayEvent): Promise<void>
+  releaseCompletion?: Promise<void>
+  phaseNonce?: string
+  support?: ModelCheck
 }
 
 type TextClient = Pick<JsonRpcGatewayClient, 'connect' | 'request' | 'close'> & Partial<Pick<JsonRpcGatewayClient, 'onEvent'>>
@@ -91,6 +94,7 @@ export interface EnterpriseLocalTextState {
 
 const hash = (value: string) => crypto.createHash('sha256').update(value).digest('hex')
 const id = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,96}$/.test(value)
+const uuidId = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value)
 const finite = (reason: string) => new Error(reason)
 
 export function canonicalTextProofPayload(value: unknown): string {
@@ -158,8 +162,7 @@ function assertPayload(payload: LocalTextRequest) {
 }
 
 function knowledgeReferences(payload: LocalTextRequest): Record<string, unknown> {
-  const uuid = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value)
-  if (!uuid(payload.customerId) || payload.conversationId !== payload.customerId || !uuid(payload.requestId)) {throw finite('LOCAL_TEXT_ASSOCIATION_INVALID')}
+  if (!uuidId(payload.customerId) || payload.conversationId !== payload.customerId || !uuidId(payload.requestId)) {throw finite('LOCAL_TEXT_ASSOCIATION_INVALID')}
   const shared = payload.customerOwnerId !== undefined
   if (shared ? (typeof payload.customerOwnerId !== 'string' || !payload.customerOwnerId.trim() || payload.customerOwnerId.length > 256 ||
       !Number.isSafeInteger(payload.conversationRevision) || payload.conversationRevision! < 0 || payload.workspaceRevision !== undefined)
@@ -171,6 +174,45 @@ function knowledgeReferences(payload: LocalTextRequest): Record<string, unknown>
   return { customer_id: payload.customerId, ...(shared ? { customer_owner_id: payload.customerOwnerId, conversation_revision: payload.conversationRevision }
     : { workspace_revision: payload.workspaceRevision }), ...(payload.knowledgeQuery !== undefined ? { knowledge_query: payload.knowledgeQuery } : {}),
   ...(preferences ? { reply_preferences: { ...preferences } } : {}) }
+}
+
+function customerQuery(payload: LocalTextRequest): Record<string, unknown> {
+  if (!uuidId(payload.customerId) || payload.conversationId !== payload.customerId || !uuidId(payload.requestId) ||
+      (payload.customerOwnerId !== undefined && (typeof payload.customerOwnerId !== 'string' || !payload.customerOwnerId.trim() || payload.customerOwnerId.length > 256))) {throw finite('LOCAL_TEXT_ASSOCIATION_INVALID')}
+  return { action: 'query', mode: 'knowledge_answer', customer_id: payload.customerId,
+    conversation_id: payload.customerId, request_id: payload.requestId,
+    ...(payload.customerOwnerId !== undefined ? { customer_owner_id: payload.customerOwnerId } : {}) }
+}
+
+/** Only S's fixed public customer receipt crosses IPC, never a spread of S/raw. */
+function customerReceipt(value: unknown, request: Record<string, unknown>, historical: boolean, choice?: LocalTextChoice): LocalTextReply {
+  const v = value as Record<string, unknown> | null
+  if (!v || v.request_id !== request.request_id || v.conversation_id !== request.conversation_id ||
+      v.source !== 'client_provided' || v.model_origin !== 'unverified' || v.delivery_state !== 'not_sent') {throw finite('LOCAL_TEXT_CUSTOMER_RESULT_INVALID')}
+  const provenance = { source: 'client_provided', model_origin: 'unverified', delivery_state: 'not_sent', historical } as const
+  if (v.state === 'unknown') {return { state: 'unknown', reason: 'LOCAL_TEXT_RESULT_UNKNOWN', requestId: v.request_id as string, ...provenance }}
+  const options = v.customer_reply_options
+  if (v.state !== 'completed' || typeof v.text !== 'string' || !v.text.trim() || v.text.length > 32000 || v.answer_text !== v.text ||
+      typeof v.reasoning_summary !== 'string' || v.reasoning_summary.length > 800 || !Array.isArray(options) || options.length > 3 ||
+      options.some(o => !o || typeof o !== 'object' || !['current_reply', 'follow_up', 'alternative_reply'].includes(o.kind) || typeof o.text !== 'string' || !o.text.trim() || o.text.length > 320) ||
+      v.knowledge_grounded !== null || v.result_kind !== 'draft' || !uuidId(v.result_id) || typeof v.cache_hit !== 'boolean' ||
+      typeof v.accepted_at !== 'number' || !Number.isFinite(v.accepted_at) || v.accepted_at <= 0 ||
+      typeof v.owner_scope !== 'string' || !/^[a-f0-9]{64}$/.test(v.owner_scope) || v.backend_id !== 'codex' ||
+      v.model !== 'gpt-6-luna' || v.runtime_protocol !== 'codex_responses' || v.reasoning_effort !== 'medium') {throw finite('LOCAL_TEXT_CUSTOMER_RESULT_INVALID')}
+  return { state: 'completed', text: v.text, answer_text: v.text, reasoning_summary: v.reasoning_summary,
+    customer_reply_options: options.map(o => ({ kind: o.kind, text: o.text })), knowledge_grounded: null,
+    result_kind: 'draft', result_id: v.result_id, cache_hit: v.cache_hit, accepted_at: v.accepted_at,
+    requestId: v.request_id as string, ...provenance, ...(choice ? { backend_choice: choice } : {}) }
+}
+
+async function queryCustomer(payload: LocalTextRequest, deps: LocalTextDependencies,
+  expected?: { ownerScope: string; contextHash: string }): Promise<LocalTextReply> {
+  const request = customerQuery(payload)
+  deps.assertCurrent()
+  const receipt = await deps.context(request)
+  deps.assertCurrent()
+  if (expected && (receipt.owner_scope !== expected.ownerScope || receipt.context_hash !== expected.contextHash)) {throw finite('LOCAL_TEXT_CUSTOMER_RESULT_INVALID')}
+  return customerReceipt(receipt, request, true)
 }
 
 function contextRequest(pending: Pending, state: EnterpriseLocalTextState, action: string): Record<string, unknown> {
@@ -245,8 +287,9 @@ async function binding(session: EnterpriseSession, deps: LocalTextDependencies, 
         const requestId = (event.payload as { request_id?: unknown } | undefined)?.request_id
         if (typeof requestId !== 'string') {return}
         const pending = state.requests[requestId]
-        if (!pending?.releaseRequired) {return}
-        void pending.releaseRequired(event).catch(() => {
+        if (!pending?.releaseRequired || pending.releaseCompletion) {return}
+        pending.releaseCompletion = pending.releaseRequired(event)
+        void pending.releaseCompletion.catch(() => {
           pending.releasePhase = 'failed'
           pending.stopped = true
           try {
@@ -317,6 +360,8 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
   let reservation: { state: EnterpriseLocalTextState; check: ModelCheck; owns: boolean } | undefined
   try {
     assertPayload(payload)
+    // Historical recovery depends only on the current enterprise session/ACL.
+    if (payload.action === 'requestStatus' && payload.mode === 'knowledge_answer') {return await queryCustomer(payload, deps)}
     const mode = payload.mode ?? 'summarize'
     const references = payload.action === 'submit' && mode === 'knowledge_answer' ? knowledgeReferences(payload) : {}
     if (mode === 'summarize' && ['customerId', 'workspaceRevision', 'customerOwnerId', 'conversationRevision', 'knowledgeQuery', 'replyPreferences'].some(key => Object.hasOwn(payload, key))) {throw finite('LOCAL_TEXT_REQUEST_INVALID')}
@@ -480,6 +525,9 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
          typeof payload.content !== 'string' || hash(payload.content) !== pending.contentHash ||
          payload.personaId !== pending.personaId || !payload.choice || !sameChoice(payload.choice, pending.choice))))) {throw finite('LOCAL_TEXT_REQUEST_CHANGED')}
     if (pending?.inFlight) {return { state: 'unknown', reason: 'LOCAL_TEXT_RESULT_UNKNOWN', requestId }}
+    if (payload.action === 'submit' && pending?.mode === 'knowledge_answer' && pending.attempted) {
+      return { state: 'unknown', reason: 'LOCAL_TEXT_RESULT_UNKNOWN', requestId }
+    }
     if (payload.action === 'submit' && !pending) {
       const support = state.modelCheck
       if (support?.status !== 'supported' || !support.account || !sameAccount(support.account, selectedAccount)) {
@@ -499,7 +547,7 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
       // another business attempt or replace the pending release consumer.
       pending = { conversationId: payload.conversationId!, requestId, content, contentHash: hash(content), personaId: payload.personaId,
         mode, references, referenceHash: hash(canonicalTextProofPayload(references)), deadline: started + 180000, choice: selected,
-        gatewaySessionId: '', stopped: false, attempted: false, inFlight: true, releasePhase: 'waiting' }
+        gatewaySessionId: '', stopped: false, attempted: false, inFlight: true, releasePhase: 'waiting', support }
       state.requests[requestId] = pending
       const prepared = await deps.context(contextRequest(pending, state, 'prepare'))
       current()
@@ -567,6 +615,7 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
               lease.input_hash !== prepared.input_hash || lease.prepared_at !== prepared.prepared_at ||
               lease.expires_at !== prepared.expires_at || lease.phase_nonce !== body.nonce || lease.single_use !== true ||
               lease.phase !== 'draft' || lease.instructions !== undefined || lease.input !== undefined) {throw finite('LOCAL_TEXT_CONTEXT_CHANGED')}
+          request.phaseNonce = body.nonce
           const ack = await state.request<{ released: boolean; phase: string }>('enterprise_text.release', {
             owner: state.owner, session_id: request.gatewaySessionId, request_id: requestId, nonce: body.nonce,
             input_hash: body.input_hash, context_hash: body.context_hash, registration_id: body.registration_id,
@@ -586,11 +635,20 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
           deadline_ms: Math.floor(Date.now() + Math.max(0, pending.deadline - now())) } : {}) })
       current()
       pending.inFlight = false
+      if (mode === 'knowledge_answer') {
+        if (!pending.releaseCompletion) {throw finite('LOCAL_TEXT_RESULT_UNKNOWN')}
+        await pending.releaseCompletion
+        current()
+      }
       return await finish(observed, false)
     }
     if (!pending || !choiceAccountMatches(pending.choice, selectedAccount)) {throw finite('LOCAL_TEXT_RESULT_UNKNOWN')}
     if (!pending.prepared || !pending.gatewaySessionId) {return { state: 'unknown', reason: 'LOCAL_TEXT_RESULT_UNKNOWN', requestId }}
-    if (pending.completed) {return pending.completed}
+    if (pending.completed) {
+      // Repeated submit is not a historical read; only explicit S query may
+      // return a customer receipt under the current conversation ACL.
+      return pending.mode === 'knowledge_answer' ? { state: 'unknown', reason: 'LOCAL_TEXT_RESULT_UNKNOWN', requestId } : pending.completed
+    }
     const observed = await state.request<any>('enterprise_text.status', {
       owner: state.owner, session_id: pending.gatewaySessionId, request_id: requestId }, 5000)
     current()
@@ -601,10 +659,46 @@ export async function operateEnterpriseLocalText(session: EnterpriseSession, pay
       if (!pending || !pending.prepared || now() >= pending.deadline || (!explicitQuery && pending.stopped)) {throw finite('LOCAL_TEXT_RESULT_UNKNOWN')}
       const prepared = pending.prepared
       if (pending.mode === 'knowledge_answer') {
-        // S customer accept/query is a separate increment. Never substitute
-        // summary acceptance or expose a received raw customer draft to IPC.
-        return { state: observed.state === 'failed' ? 'failed' : 'unknown', requestId,
-          reason: observed.state === 'received' ? 'LOCAL_TEXT_CUSTOMER_ACCEPT_PENDING' : 'LOCAL_TEXT_RESULT_UNKNOWN' }
+        if (observed.state !== 'received' || typeof observed.draft !== 'string' || observed.draft.length > 32000 || !pending.phaseNonce) {
+          return { state: observed.state === 'failed' ? 'failed' : 'unknown', requestId, reason: 'LOCAL_TEXT_RESULT_UNKNOWN' }
+        }
+        const request = pending
+        const queryPayload: LocalTextRequest = { sessionId: payload.sessionId, action: 'requestStatus', mode: 'knowledge_answer',
+          conversationId: request.conversationId, customerId: request.conversationId, requestId,
+          ...(request.references.customer_owner_id ? { customerOwnerId: request.references.customer_owner_id as string } : {}) }
+        const stillCurrentAccount = async () => {
+          const selected = await account()
+          current()
+          if (request.stopped || !choiceAccountMatches(request.choice, selected) || state.modelCheck !== request.support || request.support?.status !== 'supported') {throw finite('LOCAL_TEXT_ACCOUNT_CHANGED')}
+        }
+        await stillCurrentAccount()
+        let accepted: Context
+        try {
+          accepted = await deps.context({ ...contextRequest(request, state, 'accept'), phase_nonce: request.phaseNonce, answer: observed.draft })
+        } catch {return { state: 'unknown', reason: 'LOCAL_TEXT_RESULT_UNKNOWN', requestId }}
+        current()
+        const result = customerReceipt(accepted, customerQuery(queryPayload), false, request.choice)
+        if (result.state !== 'completed' || accepted.owner_scope !== state.ownerScope || accepted.context_hash !== prepared.context_hash) {throw finite('LOCAL_TEXT_CUSTOMER_RESULT_INVALID')}
+        await stillCurrentAccount()
+        request.accepted = result
+        request.content = ''
+        prepared.instructions = ''; prepared.input = ''
+        try {
+          await state.request('enterprise_text.accept', { owner: state.owner, session_id: request.gatewaySessionId, request_id: requestId }, 5000)
+        } catch {return { state: 'unknown', reason: 'LOCAL_TEXT_RESULT_UNKNOWN', requestId }}
+        current()
+        await stillCurrentAccount()
+        // Local durable acknowledgement/account waits can outlive a grant.
+        // Finish with current enterprise ACL; no local I/O follows this read.
+        const final = await queryCustomer(queryPayload, deps, { ownerScope: state.ownerScope, contextHash: prepared.context_hash })
+        current()
+        const fact = (value: LocalTextReply) => canonicalTextProofPayload({ result_id: value.result_id ?? null,
+          text: value.text ?? null, reasoning_summary: value.reasoning_summary ?? null,
+          customer_reply_options: value.customer_reply_options ?? null, accepted_at: value.accepted_at ?? null })
+        if (request.stopped || state.modelCheck !== request.support || request.support?.status !== 'supported' ||
+            final.state !== 'completed' || fact(final) !== fact(result)) {throw finite('LOCAL_TEXT_CUSTOMER_RESULT_INVALID')}
+        request.completed = { ...final, backend_choice: request.choice }
+        return request.completed
       }
       const draft = observed.state === 'completed' ? pending.accepted?.text : observed.draft
       if (!['received', 'completed'].includes(observed.state) || typeof draft !== 'string') {

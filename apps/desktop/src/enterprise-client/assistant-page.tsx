@@ -362,7 +362,7 @@ function AssistantSessionPage({
   } : null
   const backendOption = backends.find(backend => backend.backend_id === backendId)
   const choiceChanged = Boolean(fixedChoice && catalogChoice && !assistantChoicesMatch(fixedChoice, catalogChoice))
-  const backendReady = Boolean((backendId === 'tenant_model' || (mode === 'summarize' && runtime?.localText)) && catalogChoice?.availability === 'available' && !choiceChanged && !outcomeUnknown)
+  const backendReady = Boolean((backendId === 'tenant_model' || (['summarize', 'customer_reply'].includes(mode) && runtime?.localText)) && catalogChoice?.availability === 'available' && !choiceChanged && !outcomeUnknown)
   const localConnected = local.state.state === 'connected' || local.state.state === 'ready'
   const localStatusLabel = local.state.modelStatus === 'checking' ? '正在检查模型'
     : local.state.modelStatus === 'supported' ? '模型目录已确认'
@@ -371,8 +371,8 @@ function AssistantSessionPage({
           : localConnected ? '本机已连接 · 模型未检查' : local.state.state === 'connecting' ? '正在连接本机账号' : '本机连接未确认'
   const unavailableReason = outcomeUnknown ? new EnterpriseAssistantRequestUnknown().message : choiceChanged
     ? assistantBackendReason('CONFIGURATION_CHANGED') : fixedChoice && !catalogChoice && backendId !== 'codex'
-      ? assistantBackendReason('CONFIGURATION_UNAVAILABLE') : backendId === 'codex' && runtime?.localText && mode !== 'summarize'
-        ? '本机账号当前支持文本摘要，请选择“文本摘要”；其它处理仍可使用企业模型。'
+      ? assistantBackendReason('CONFIGURATION_UNAVAILABLE') : backendId === 'codex' && runtime?.localText && !['summarize', 'customer_reply'].includes(mode)
+        ? '本机账号当前支持文本摘要和客户回复建议；其它处理仍可使用企业模型。'
         : assistantBackendReason(backendId === 'codex' ? runtime?.localText ? local.state.reason ?? 'LOCAL_TEXT_CONNECT_REQUIRED' : 'CODEX_LOCAL_RUNTIME_REQUIRED' : catalogChoice?.reason ?? backendOption?.reason)
   const personaId = fixedChoice?.persona_id ?? selectedPersonaId
   const choiceValue = fixedChoice?.configuration_id ?? (backendId === 'codex' ? local.state.choice?.configuration_id ?? '' : selectedConfigurationId)

@@ -8,6 +8,13 @@ const customer = '1a092929-c3ac-42cd-9fc0-9c0918b70712'
 const source = '45661688-357a-49b5-a042-a6fb5bc133d2'
 const initial = {customer_id:customer, owner_id:'seat-owner', revision:2, can_grant:true,
   events:[{id:source,kind:'customer_statement',text:'工作日联系'}], memories:[], grants:[]}
+const ownedChoice={backend_id:'codex' as const,configuration_id:'b'.repeat(32),configuration_version:1,
+  model:'gpt-6-luna',runtime_protocol:'codex_responses',reasoning_effort:'medium',availability:'available' as const}
+const original='22222222-2222-2222-2222-222222222222'
+const ownedReceipt=(requestId:string)=>({state:'completed' as const,requestId,text:'服务端已接纳的共享草稿',answer_text:'服务端已接纳的共享草稿',
+  reasoning_summary:'共享草稿核对说明',customer_reply_options:[{kind:'follow_up' as const,text:'可审核的后续提问'}],knowledge_grounded:null,
+  source:'client_provided' as const,model_origin:'unverified' as const,delivery_state:'not_sent' as const,result_kind:'draft' as const,
+  result_id:'33333333-3333-3333-3333-333333333333',backend_choice:ownedChoice,historical:true})
 
 function mount(post: ReturnType<typeof vi.fn>, props: Partial<React.ComponentProps<typeof CustomerConversationPanel>> = {}) {
   return render(<I18nProvider initialLocale="zh" configClient={null}>
@@ -23,6 +30,123 @@ function open() {
 }
 
 describe('customer history and sourced memory', () => {
+  it('owned shared ambiguity survives an available choice change until current history is explicitly acknowledged',async()=>{
+    let events:Array<Record<string,unknown>>=[...initial.events]
+    let revision=initial.revision
+    const post=vi.fn(async(_path:string,body:Record<string,unknown>)=>{
+      if(body.action==='conversation_acknowledge') {
+        events=events.map(event=>event.id===body.event_id ? {...event,acknowledged_at:1} : event)
+        revision++
+      }
+      return {...initial,revision,can_grant:false,events}
+    })
+    const localText=vi.fn(async(payload:{action:string;requestId?:string})=>{
+      if(payload.action==='submit') {
+        events=[...events,{id:payload.requestId,kind:'model_request',state:'unknown',delivery_state:'not_sent'}]
+        revision++
+      }
+      return {state:'unknown' as const}
+    })
+    const runtime={post,localText} as unknown as EnterpriseClientRuntime
+    const view=mount(post,{runtime,backendChoice:ownedChoice});open()
+    await screen.findByText('工作日联系',{selector:'p'})
+    fireEvent.change(screen.getByRole('textbox',{name:'交接引用'}),{target:{value:JSON.stringify({owner_id:'seat-owner',customer_id:customer})}})
+    fireEvent.click(screen.getByRole('button',{name:'打开交接记录'}))
+    fireEvent.change(await screen.findByLabelText('接续提问'),{target:{value:'首个结果未确认的问题'}})
+    fireEvent.click(screen.getByRole('button',{name:'生成未发送草稿'}))
+    await waitFor(()=>expect((screen.getByRole('button',{name:'查询原请求（不重新生成）'}) as HTMLButtonElement).disabled).toBe(false))
+    const firstId=localText.mock.calls.find(([payload])=>payload.action==='submit')![0].requestId
+    const changedChoice={...ownedChoice,configuration_id:'c'.repeat(32),configuration_version:2}
+    view.rerender(<I18nProvider initialLocale="zh" configClient={null}>
+      <CustomerConversationPanel customerId={customer} disabled={false} refreshToken="" configurationId="model-one" runtime={runtime} backendChoice={changedChoice}/>
+    </I18nProvider>)
+    // Re-enter nonempty text after the choice effect clears the editor. An
+    // empty editor would hide the lost-UNKNOWN bug behind input validation.
+    fireEvent.change(screen.getByLabelText('接续提问'),{target:{value:'更换配置后仍不应发送的新问题'}})
+    const generate=screen.getByRole('button',{name:'生成未发送草稿'}) as HTMLButtonElement
+    expect(generate.disabled).toBe(true)
+    fireEvent.click(generate)
+    expect(localText.mock.calls.filter(([payload])=>payload.action==='submit')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button',{name:'查询原请求（不重新生成）'}))
+    await waitFor(()=>expect(localText.mock.calls.filter(([payload])=>payload.action==='requestStatus')).toHaveLength(1))
+    expect(localText.mock.calls.find(([payload])=>payload.action==='requestStatus')![0]).toMatchObject({requestId:firstId,customerOwnerId:'seat-owner'})
+    await waitFor(()=>expect((screen.getByRole('button',{name:'刷新'}) as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(screen.getByRole('button',{name:'刷新'}))
+    fireEvent.click(await screen.findByRole('button',{name:/已核对历史，保留未确认记录/}))
+    await waitFor(()=>expect(generate.disabled).toBe(false))
+    fireEvent.click(generate)
+    await waitFor(()=>expect(localText.mock.calls.filter(([payload])=>payload.action==='submit')).toHaveLength(2))
+    const secondId=localText.mock.calls.filter(([payload])=>payload.action==='submit')[1][0].requestId
+    expect(secondId).not.toBe(firstId)
+    expect(post.mock.calls.every(([path])=>path==='/api/customer-reply-workspace')).toBe(true)
+  })
+  it('owned shared customer consumer sends original owner and revision through localText without API fallback',async()=>{
+    const post=vi.fn(async(_path:string)=>({...initial,can_grant:false}))
+    const localText=vi.fn(async payload=>ownedReceipt(payload.requestId!))
+    mount(post,{backendChoice:ownedChoice,runtime:{post,localText} as unknown as EnterpriseClientRuntime});open()
+    await screen.findByText('工作日联系',{selector:'p'})
+    fireEvent.change(screen.getByRole('textbox',{name:'交接引用'}),{target:{value:JSON.stringify({owner_id:'seat-owner',customer_id:customer})}})
+    fireEvent.click(screen.getByRole('button',{name:'打开交接记录'}))
+    fireEvent.change(await screen.findByLabelText('接续提问'),{target:{value:'接续共享客户原问题'}})
+    fireEvent.click(screen.getByRole('button',{name:'生成未发送草稿'}))
+    expect(await screen.findByText('服务端已接纳的共享草稿')).toBeTruthy()
+    expect(localText).toHaveBeenCalledOnce()
+    expect(localText.mock.calls[0][0]).toMatchObject({action:'submit',mode:'knowledge_answer',customerId:customer,conversationId:customer,
+      customerOwnerId:'seat-owner',conversationRevision:2,content:'接续共享客户原问题',choice:ownedChoice})
+    expect(post.mock.calls.every(([path])=>path==='/api/customer-reply-workspace')).toBe(true)
+    expect(screen.getByText('客户端提供 · 模型来源未验证 · 未发送草稿')).toBeTruthy()
+    expect(screen.getByText('共享草稿核对说明')).toBeTruthy()
+    expect(screen.getByText('可审核的后续提问')).toBeTruthy()
+  })
+
+  it('owned ordinary history recovers the original ID without current model readiness and excludes legacy recovery',async()=>{
+    const post=vi.fn(async()=>({...initial,events:[{id:original,kind:'model_request',state:'draft_ready'},
+      {id:'draft',kind:'model_draft',in_reply_to:original,text:'历史的未验证草稿',knowledge_grounded:null,source:'client_provided',model_origin:'unverified',delivery_state:'not_sent'}]}))
+    const localText=vi.fn(async()=>ownedReceipt(original)), recovered=vi.fn(), legacy=vi.fn()
+    const first=mount(post,{unknownRequestId:original,onRecovered:legacy,onOwnedRecovered:recovered,runtime:{post,localText} as unknown as EnterpriseClientRuntime});open()
+    await screen.findByText('历史的未验证草稿')
+    expect(screen.queryByRole('button',{name:/恢复已有草稿/})).toBeNull()
+    first.unmount()
+    mount(post,{unknownRequestId:original,onRecovered:legacy,onOwnedRecovered:recovered,runtime:{post,localText} as unknown as EnterpriseClientRuntime});open()
+    fireEvent.click(await screen.findByRole('button',{name:'查询原请求（不重新生成）'}))
+    await waitFor(()=>expect(recovered).toHaveBeenCalledOnce())
+    expect(localText).toHaveBeenCalledWith({action:'requestStatus',mode:'knowledge_answer',customerId:customer,conversationId:customer,requestId:original})
+    expect(legacy).not.toHaveBeenCalled()
+    expect(recovered.mock.calls[0][1]).toMatchObject({historical:true,modelOrigin:'unverified',deliveryState:'not_sent'})
+  })
+
+  it('owned shared history query uses the stored original ID after remount and does not submit again',async()=>{
+    const post=vi.fn(async(_path:string)=>({...initial,can_grant:false,events:[{id:original,kind:'model_request',state:'unknown'}]}))
+    const localText=vi.fn(async()=>({...ownedReceipt(original),state:'unknown' as const,text:undefined}))
+    const runtime={post,localText} as unknown as EnterpriseClientRuntime
+    const first=mount(post,{runtime,backendChoice:{...ownedChoice,availability:'unavailable'}});open();await screen.findByText('模型请求 · 结果不明')
+    first.unmount()
+    mount(post,{runtime,backendChoice:{...ownedChoice,availability:'unavailable'}});open();await screen.findByText('模型请求 · 结果不明')
+    fireEvent.change(screen.getByRole('textbox',{name:'交接引用'}),{target:{value:JSON.stringify({owner_id:'seat-owner',customer_id:customer})}})
+    fireEvent.click(screen.getByRole('button',{name:'打开交接记录'}))
+    fireEvent.click(await screen.findByRole('button',{name:'查询原请求（不重新生成）'}))
+    await waitFor(()=>expect(localText).toHaveBeenCalledOnce())
+    expect(localText).toHaveBeenCalledWith({action:'requestStatus',mode:'knowledge_answer',customerId:customer,conversationId:customer,requestId:original,customerOwnerId:'seat-owner'})
+    expect((screen.getByRole('button',{name:'生成未发送草稿'}) as HTMLButtonElement).disabled).toBe(true)
+    expect(post.mock.calls.every(([path])=>path==='/api/customer-reply-workspace')).toBe(true)
+  })
+
+  it('owned history query ignores a late result after switching the handover target',async()=>{
+    let finish!:(value:ReturnType<typeof ownedReceipt>)=>void
+    const held=new Promise<ReturnType<typeof ownedReceipt>>(resolve=>{finish=resolve})
+    const another='6f292c74-7165-49d6-9a98-92db192a95b9'
+    const post=vi.fn(async(_path,body)=>({...initial,customer_id:body.customer_id,owner_id:body.owner_id || initial.owner_id,
+      events:body.customer_id===customer ? [{id:original,kind:'model_request',state:'unknown'}] : []}))
+    const localText=vi.fn(()=>held), recovered=vi.fn()
+    const first=mount(post,{runtime:{post,localText} as unknown as EnterpriseClientRuntime,onOwnedRecovered:recovered});open()
+    fireEvent.click(await screen.findByRole('button',{name:'查询原请求（不重新生成）'}))
+    first.unmount()
+    mount(post,{customerId:another,runtime:{post,localText} as unknown as EnterpriseClientRuntime,onOwnedRecovered:recovered});open()
+    await waitFor(()=>expect(post.mock.calls.at(-1)?.[1].customer_id).toBe(another))
+    finish(ownedReceipt(original))
+    await waitFor(()=>expect(screen.queryByText('服务端已接纳的共享草稿')).toBeNull())
+    expect(recovered).not.toHaveBeenCalled()
+  })
   it('loads only on expansion and writes memory with current revision and a selected source', async () => {
     const post = vi.fn(async (_path, body) => body.action === 'conversation_read' ? initial : {...initial,revision:3})
     mount(post)

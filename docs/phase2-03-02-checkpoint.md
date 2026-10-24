@@ -1,5 +1,17 @@
 # P2-03-02 阶段检查点
 
+## 2026-10-24 owned客户结果接纳/历史查询与普通共享页面接线（限定接受）
+
+普通与共享客户复用原private localText knowledge_answer/current S历史记忆RAG，不要求tenant回答模型配置；固定受支持的个人model choice仍须原main确认，UI available声明不授调用权。原customer/request UUID持久关联保留，UNKNOWN不换ID补发；历史query在account/binding/model/summary-status之前独立走S currentACL，不依赖当前个人登录、代际、choice或180秒期限。完整回执固定client_provided/unverified/not_sent/draft且knowledge_grounded null才显示；API原grounded=false行为不改，旧恢复按钮排除owned来源，普通与共享都保留来源/历史标签和原请求查询，配置入口仍只在工具集。
+
+raw draft仅main私有链发送Saccept，带原release唯一nonce；S清洗后的answer/summary/options严格白名单投影。Saccept或本地ACK失败直接UNKNOWN，等待用户显式query；重复knowledge submit不读status/reaccept或重发，也不从completed内存绕过S当前grant。成功链等全部account/本地DB ACK完成后，再以固定Squery为最后外部等待，在投影前对owner_scope/context_hash及原result/全部clean事实，之后仅pure owner/epoch/slot/stop比较，返回historical accepted draft。此真实后置wait缺口经Source/Security独立PRE核实再修；不声称跨S/本机瞬时原子。
+
+最终UI16 passed/17未选、renderer类型exit0（receipt5 SHAcbba074cdbd1b7e9f378bb56699839042313c1eb06453d611416b59dae7841fc）；未变actual main33 passed/41未选及Electron类型exit0显式7binding继承receipt3 SHA8dabcc4f48d9312eb62f94cea044670b4313d305dfc6e262c69d40dfed6cdc20。所有9文件/原输出绑定与drift0见原件和checkpoint receipt。首轮UI测试在busy时点击原禁用handover未切换，改成真实父级卸载/重挂epoch场景；首轮类型错误含production choice缺固定字段收窄及测试literal/tuple类型，已修；第二轮两处拒权mock在记录order前抛出，实际IPC已UNKNOWN，改观测断言后main33绿。原UI15/types和更早失败保留，不累计各轮或旧guard13。
+
+root末审发现shared的choice effect清UNKNOWN，使旧history尚无本次root时可新UUID覆盖首查询目标；实际Source/Security重新核实并撤回该分支旧接受。只split effect：choice变更清显示/旧epoch但保UNKNOWN和lastRequest，customer/load变更独立reset，当前history/原query/人工ack才解除。receipt4真实红1失败/11未选在换availablechoice后重新输入非空问题仍错误解锁；最后16绿覆盖submit仍1、query首UUID，当前read/原ack后才新UUID，以及真正unmount/mount共享恢复。没有用空question造成旧实现假绿。
+
+最后9源码/测试实际Source/Security POST限定接受，root实读实现和原件；S counterpart28152d4已接受28业务/5HTTP分列。这里仍仅source/mock UI，未运行真实M-S/native七客户场景、SIWC模型或PG，不代跨新root答案复用、设备或整体Gate；无发布安装包。后续自然集成队列与真实验收保持未完成，不倒签旧startup。
+
 ## 2026-10-24 owned客户知识draft最后发送授权首片（限定接受）
 
 沿已登记四独立首轮/Consensus，复用原私有JsonRpc/HMAC/SessionDB/no-tools Responses consumer。actual httpx guard先核唯一POST/固定URL/完整kwargs；Python credential/UNKNOWN claim/no-refresh status、main account读取均在最后S release之前，之后只有当前owner/epoch/supported slot/stop/deadline/nonce内存核验和原HMAC ACK。私有runtime scope由root+draft+prompt hash派生，原customer/request关联不变。UNKNOWN先持久化，重复root不再POST；raw customer draft暂仍只保留私有路径，Saccept/query/UI在后续接线。

@@ -39,4 +39,16 @@ export interface LocalTextReply {
   backend_choice?: LocalTextChoice
   text?: string
   requestId?: string
+  answer_text?: string
+  reasoning_summary?: string
+  customer_reply_options?: Array<{ kind: 'current_reply' | 'follow_up' | 'alternative_reply'; text: string }>
+  knowledge_grounded?: boolean | null
+  source?: 'client_provided'
+  model_origin?: 'unverified'
+  delivery_state?: 'not_sent'
+  result_kind?: 'draft'
+  result_id?: string
+  cache_hit?: boolean
+  accepted_at?: number
+  historical?: boolean
 }

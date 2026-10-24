@@ -500,6 +500,13 @@ const customerSubmit: LocalTextRequest = { ...submit, mode: 'knowledge_answer',
   requestId: '22222222-2222-2222-2222-222222222222', workspaceRevision: 1,
   knowledgeQuery: 'synthetic knowledge question', replyPreferences: { tone: 'warm', length: 'balanced', address: 'nin' } }
 
+const customerAccepted = () => ({ state: 'completed', text: 'S accepted customer draft', answer_text: 'S accepted customer draft',
+  reasoning_summary: 'Safe short explanation', customer_reply_options: [{ kind: 'current_reply', text: 'Safe option' }],
+  knowledge_grounded: null, source: 'client_provided', model_origin: 'unverified', delivery_state: 'not_sent', result_kind: 'draft',
+  result_id: '33333333-3333-3333-3333-333333333333', request_id: customerSubmit.requestId, conversation_id: customerSubmit.conversationId,
+  backend_id: 'codex', model: 'gpt-6-luna', runtime_protocol: 'codex_responses', reasoning_effort: 'medium',
+  cache_hit: false, accepted_at: 100, owner_scope: 'a'.repeat(64), context_hash: 'c'.repeat(64) })
+
 function customerHarness() {
   const h = harness()
   const submitted = deferred<Record<string, unknown>>(), acknowledged = deferred<void>(), stopped = deferred<void>()
@@ -507,7 +514,7 @@ function customerHarness() {
   const order: string[] = []
   const prepared = { ...h.context, input_hash: sha(h.context.input), expires_at: h.context.prepared_at + 180 }
   let handler: ((event: { type: string; session_id?: string; payload?: unknown }) => void) | undefined
-  let lastSendRelease = true, ackLoss = false, forbidStatus = false
+  let lastSendRelease = true, ackLoss = false, forbidStatus = false, accepted = false, acceptAckLoss = false
   let releaseHook: (() => Promise<void>) | undefined
   const original = h.client.request.getMockImplementation()!
   const client = { ...h.client,
@@ -519,11 +526,13 @@ function customerHarness() {
       if (method === 'enterprise_text.release') {
         acknowledged.resolve()
         if (ackLoss) {completed.resolve({ state: 'unknown' }); throw new Error('private ACK loss')}
+        forbidStatus = false // Physical model completion follows ACK; later acceptance may read status.
         completed.resolve({ state: 'received', draft: 'private-customer-raw-draft' })
         return { released: true, phase: 'draft' }
       }
       if (method === 'enterprise_text.stop') {stopped.resolve(); completed.resolve({ state: 'unknown' }); return { state: 'unknown' }}
       if (method === 'enterprise_text.status') {return { state: 'received', draft: 'private-customer-raw-draft' }}
+      if (method === 'enterprise_text.accept' && acceptAckLoss) {throw new Error('private local accept ACK loss')}
       return original(method)
     }) }
   h.deps.createClient = () => client
@@ -541,6 +550,9 @@ function customerHarness() {
       await releaseHook?.()
       return { ...prepared, instructions: undefined, input: undefined, phase_nonce: body.phase_nonce as string, phase: 'draft', single_use: true }
     }
+    if (body.action === 'accept') {accepted = true; return { ...customerAccepted(), owner_scope: prepared.owner_scope, context_hash: prepared.context_hash } as any}
+    if (body.action === 'query') {return accepted ? { ...customerAccepted(), owner_scope: prepared.owner_scope, context_hash: prepared.context_hash } as any
+      : { state: 'unknown', request_id: body.request_id, conversation_id: body.conversation_id, source: 'client_provided', model_origin: 'unverified', delivery_state: 'not_sent' } as any}
     return prepared
   })
   const emit = (change: Record<string, unknown> = {}) => handler?.({ type: 'enterprise_text.release_required',
@@ -550,6 +562,7 @@ function customerHarness() {
   return { ...h, client, submitted, acknowledged, stopped, prepared, order, emit,
     setReleaseHook: (hook: () => Promise<void>) => {releaseHook = hook},
     noCapability: () => {lastSendRelease = false}, loseAck: () => {ackLoss = true},
+    loseAcceptAck: () => {acceptAckLoss = true},
     completeUnknown: () => {completed.resolve({ state: 'unknown' })},
     forbidStatus: () => {forbidStatus = true}, allowStatus: () => {forbidStatus = false},
     sends: () => client.request.mock.calls.filter(([method]) => method === 'enterprise_text.submit').length,
@@ -569,19 +582,21 @@ it.each(['ordinary', 'shared'])('customer last-send %s uses original references,
   h.emit(); h.emit()
   await h.acknowledged.promise
   const result = await running
-  expect(result).toMatchObject({ state: 'unknown', reason: 'LOCAL_TEXT_CUSTOMER_ACCEPT_PENDING' })
+  expect(result).toMatchObject({ state: 'completed', text: 'S accepted customer draft', knowledge_grounded: null, source: 'client_provided', model_origin: 'unverified', delivery_state: 'not_sent' })
   expect(JSON.stringify(result)).not.toContain('private-')
   expect(h.sends()).toBe(1); expect(h.acks()).toBe(1)
   const releaseAt = h.order.indexOf('S:release')
-  expect(h.order.slice(releaseAt + 1)).not.toContain('account')
+  expect(h.order.slice(releaseAt + 1,h.order.indexOf('rpc:enterprise_text.release'))).not.toContain('account')
   const releaseBody = vi.mocked(h.deps.context).mock.calls.find(([body]) => body.action === 'release')![0]
   expect(releaseBody).toMatchObject({ mode: 'knowledge_answer', customer_id: customerSubmit.customerId,
     conversation_id: customerSubmit.customerId, request_id: customerSubmit.requestId, phase_nonce: 'f'.repeat(32),
     owned_binding: { registration_id: choice.configuration_id, generation: 1 } })
   expect(releaseBody.owned_binding).toHaveProperty('profile_scope', sha(h.session.localText!.profile))
-  expect(vi.mocked(h.deps.context).mock.calls.some(([body]) => body.action === 'accept')).toBe(false)
+  expect(vi.mocked(h.deps.context).mock.calls.find(([body]) => body.action === 'accept')![0]).toMatchObject({
+    phase_nonce: releaseBody.phase_nonce, answer: 'private-customer-raw-draft', expected_context_hash: h.prepared.context_hash,
+    customer_id: customerSubmit.customerId, request_id: customerSubmit.requestId })
   h.allowStatus()
-  expect((await h.run({ ...payload, action: 'requestStatus' })).text).toBeUndefined()
+  expect((await h.run({ ...payload, action: 'requestStatus' })).text).toBe('S accepted customer draft')
   expect((await h.run({ ...payload, workspaceRevision: kind === 'ordinary' ? 2 : undefined,
     conversationRevision: kind === 'shared' ? 8 : undefined })).reason).toBe('LOCAL_TEXT_REQUEST_CHANGED')
   expect(h.sends()).toBe(1)
@@ -675,4 +690,124 @@ it('customer last-send reserves a held prepare once and does not reset its deadl
   expect((await first).state).toBe('unavailable')
   expect(h.sends()).toBe(0)
   expect(h.client.request.mock.calls.some(([method]) => method === 'session.create')).toBe(false)
+})
+
+it('customer receipt history queries old IDs without local binding, model check, content or deadline', async () => {
+  const h=harness(false)
+  vi.mocked(h.deps.context).mockResolvedValue(customerAccepted() as any)
+  h.expire();h.accountChanged()
+  const query:LocalTextRequest={sessionId:'enterprise',action:'requestStatus',mode:'knowledge_answer',
+    customerId:customerSubmit.customerId,conversationId:customerSubmit.conversationId,requestId:customerSubmit.requestId}
+  expect(await h.run(query)).toMatchObject({state:'completed',text:'S accepted customer draft',historical:true,knowledge_grounded:null})
+  expect(h.session.localText).toBeUndefined()
+  expect(h.deps.localConnection).not.toHaveBeenCalled()
+  expect(h.deps.localApi).not.toHaveBeenCalled()
+  expect(h.client.request).not.toHaveBeenCalled()
+  expect(h.deps.context).toHaveBeenCalledWith({action:'query',mode:'knowledge_answer',customer_id:query.customerId,
+    conversation_id:query.conversationId,request_id:query.requestId})
+  vi.mocked(h.deps.context).mockRejectedValue(new Error('private grant revoked'))
+  expect((await h.run(query)).text).toBeUndefined()
+  expect(h.sends()).toBe(0)
+})
+
+it('customer receipt always rechecks S ACL even after completion and never reuses a completed local memo', async () => {
+  const h=customerHarness(), running=h.run(customerSubmit)
+  await h.submitted.promise;h.emit();expect((await running).state).toBe('completed')
+  const query={...customerSubmit,action:'requestStatus' as const}
+  expect((await h.run(query)).historical).toBe(true)
+  vi.mocked(h.deps.context).mockImplementation(async body=>{if(body.action==='query') throw Error('private denied');return h.prepared})
+  const repeated=await h.run(customerSubmit)
+  expect(repeated.text).toBeUndefined();expect(repeated.state).toBe('unknown')
+  const apiCalls=vi.mocked(h.deps.localApi).mock.calls.length
+  h.expire();h.accountChanged()
+  expect((await h.run(query)).text).toBeUndefined()
+  expect(vi.mocked(h.deps.localApi).mock.calls).toHaveLength(apiCalls)
+  expect(h.sends()).toBe(1)
+})
+
+it.each(['accept-response','local-accept-ack'])('customer receipt requires explicit query after %s loss without another submit', async loss=>{
+  const h=customerHarness()
+  if(loss==='local-accept-ack') h.loseAcceptAck()
+  else {
+    const original=vi.mocked(h.deps.context).getMockImplementation()!
+    vi.mocked(h.deps.context).mockImplementation(async body=>{const value=await original(body);if(body.action==='accept') throw Error('private lost response');return value})
+  }
+  const running=h.run(customerSubmit)
+  await h.submitted.promise;h.emit()
+  expect(await running).toMatchObject({state:'unknown'})
+  expect(vi.mocked(h.deps.context).mock.calls.some(([body])=>body.action==='query')).toBe(false)
+  const acceptedCount=vi.mocked(h.deps.context).mock.calls.filter(([body])=>body.action==='accept').length
+  expect((await h.run(customerSubmit)).text).toBeUndefined()
+  expect(vi.mocked(h.deps.context).mock.calls.filter(([body])=>body.action==='accept')).toHaveLength(acceptedCount)
+  expect(h.client.request.mock.calls.some(([method])=>method==='enterprise_text.status')).toBe(false)
+  expect(await h.run({...customerSubmit,action:'requestStatus'})).toMatchObject({state:'completed',text:'S accepted customer draft',historical:true})
+  const query=vi.mocked(h.deps.context).mock.calls.find(([body])=>body.action==='query')![0]
+  expect(query).toMatchObject({request_id:customerSubmit.requestId,conversation_id:customerSubmit.customerId})
+  expect(query).not.toHaveProperty('content');expect(query).not.toHaveProperty('owned_binding')
+  expect(h.sends()).toBe(1);expect(h.acks()).toBe(1)
+})
+
+it.each(['source','model_origin','delivery_state','knowledge_grounded','result_kind','result_id'])('customer receipt rejects a missing or foreign fixed %s before raw IPC publication',async field=>{
+  const h=customerHarness(), original=vi.mocked(h.deps.context).getMockImplementation()!
+  vi.mocked(h.deps.context).mockImplementation(async body=>{
+    const value=await original(body)
+    return body.action==='accept' ? {...value,[field]:undefined} : value
+  })
+  const running=h.run(customerSubmit);await h.submitted.promise;h.emit()
+  const result=await running
+  expect(result.text).toBeUndefined();expect(JSON.stringify(result)).not.toContain('private-')
+  expect(h.sends()).toBe(1)
+})
+
+it('customer receipt held acceptance cannot publish after enterprise owner loss',async()=>{
+  const h=customerHarness(), entered=deferred<void>(), release=deferred<void>()
+  const original=vi.mocked(h.deps.context).getMockImplementation()!
+  vi.mocked(h.deps.context).mockImplementation(async body=>{if(body.action==='accept'){entered.resolve();await release.promise};return original(body)})
+  const running=h.run(customerSubmit);await h.submitted.promise;h.emit();await entered.promise
+  h.ownerChanged();release.resolve()
+  const result=await running
+  expect(result.text).toBeUndefined();expect(h.sends()).toBe(1)
+  expect(h.client.request.mock.calls.some(([method])=>method==='enterprise_text.accept')).toBe(false)
+})
+
+it.each(['local-ack','account'])('customer receipt rechecks enterprise ACL after held %s and performs no later account I/O',async boundary=>{
+  const h=customerHarness(), entered=deferred<void>(), release=deferred<void>()
+  let revoked=false, held=false
+  const originalContext=vi.mocked(h.deps.context).getMockImplementation()!
+  vi.mocked(h.deps.context).mockImplementation(async body=>{
+    if(body.action==='query' && revoked) {h.order.push('S:query-denied');throw Error('private revoked after acceptance')}
+    return originalContext(body)
+  })
+  if(boundary==='local-ack') {
+    const original=h.client.request.getMockImplementation()!
+    h.client.request.mockImplementation(async(method,params)=>{if(method==='enterprise_text.accept'){entered.resolve();await release.promise};return original(method,params)})
+  } else {
+    const original=vi.mocked(h.deps.localApi).getMockImplementation()!
+    vi.mocked(h.deps.localApi).mockImplementation(async(...args)=>{
+      if(!held && args[1].startsWith('/api/providers/siwc/status') && h.order.includes('S:accept')) {held=true;entered.resolve();await release.promise}
+      return original(...args)
+    })
+  }
+  const running=h.run(customerSubmit);await h.submitted.promise;h.emit();await entered.promise
+  expect(vi.mocked(h.deps.context).mock.calls.some(([body])=>body.action==='query')).toBe(false)
+  revoked=true;release.resolve()
+  const result=await running
+  expect(result.text).toBeUndefined();expect(result.state).toBe('unknown');expect(h.sends()).toBe(1)
+  const finalRead=h.order.lastIndexOf('S:query-denied')
+  expect(finalRead).toBeGreaterThan(h.order.indexOf('S:accept'))
+  expect(h.order.slice(finalRead+1)).not.toContain('account')
+})
+
+it.each(['owner_scope','context_hash','result_id','text','reasoning_summary','customer_reply_options','state'])('customer receipt final query rejects changed %s without falling back to the accepted memo',async field=>{
+  const h=customerHarness(), original=vi.mocked(h.deps.context).getMockImplementation()!
+  const changes:Record<string,unknown>={owner_scope:'f'.repeat(64),context_hash:'0'.repeat(64),result_id:'44444444-4444-4444-4444-444444444444',
+    text:'different clean fact',reasoning_summary:'different summary',customer_reply_options:[{kind:'current_reply',text:'different option'}],state:'unknown'}
+  vi.mocked(h.deps.context).mockImplementation(async body=>{
+    const value=await original(body)
+    return body.action==='query' ? {...value,[field]:changes[field],...(field==='text' ? {answer_text:changes.text} : {})} as any : value
+  })
+  const running=h.run(customerSubmit);await h.submitted.promise;h.emit()
+  const result=await running
+  expect(result).toMatchObject({state:'unknown'});expect(result.text).toBeUndefined();expect(h.sends()).toBe(1)
+  expect(h.order.slice(h.order.lastIndexOf('S:query')+1)).toEqual([])
 })

@@ -17,11 +17,77 @@ import { customerDraftSyncFor, startCustomerDraftSync, stopCustomerDraftSync } f
 import { updateCustomerReplyPreferences } from './enterprise-reply-preferences'
 import type { EnterpriseClientRuntime } from './runtime'
 import { enterpriseClientErrorForStatus } from './runtime-errors'
+import { CustomerReplyWorkspace } from './customer-reply-panel'
+import { I18nProvider } from '@/i18n/context'
 
 interface Reply {
   text: string
   knowledge_grounded: boolean
 }
+
+const ownedChoice={backend_id:'codex' as const,configuration_id:'b'.repeat(32),configuration_version:1,
+  model:'gpt-6-luna',runtime_protocol:'codex_responses',reasoning_effort:'medium',availability:'available'} as const
+const ownedDraft=(requestId:string)=>({state:'completed' as const,requestId,text:'经服务端接纳的客户草稿',answer_text:'经服务端接纳的客户草稿',
+  reasoning_summary:'仅供人工核对的说明',customer_reply_options:[{kind:'current_reply' as const,text:'可供选择的回复'}],knowledge_grounded:null,
+  source:'client_provided' as const,model_origin:'unverified' as const,delivery_state:'not_sent' as const,result_kind:'draft' as const,
+  result_id:'33333333-3333-3333-3333-333333333333',backend_choice:ownedChoice})
+
+it('owned customer consumer sends saved ordinary references and displays only the fixed accepted unsent receipt',async()=>{
+  const post=vi.fn(async()=>({text:'API must not run',knowledge_grounded:true}))
+  const runtime:EnterpriseClientRuntime=makeRuntime(post)
+  const localText=vi.fn(async payload=>ownedDraft(payload.requestId!))
+  runtime.localText=localText
+  const workspace=createCustomerReplyWorkspace()
+  await startWorkspace(workspace,runtime)
+  const customer=workspace.get().customers[0]!
+  updateCustomerReplyInput(customer.reply,'context','客户退款问题')
+  await generateCustomerReply(workspace,customer.reply,runtime,undefined,ownedChoice,true)
+  expect(post).not.toHaveBeenCalled()
+  expect(localText).toHaveBeenCalledOnce()
+  expect(localText.mock.calls[0][0]).toMatchObject({action:'submit',mode:'knowledge_answer',conversationId:customer.id,customerId:customer.id,
+    requestId:customer.reply.get().lastRequestId,workspaceRevision:expect.any(Number),choice:ownedChoice})
+  expect(customer.reply.get()).toMatchObject({draft:'经服务端接纳的客户草稿',knowledgeGrounded:null,outcomeUnknown:false,
+    ownedDraft:{source:'client_provided',modelOrigin:'unverified',deliveryState:'not_sent'}})
+  render(<I18nProvider initialLocale="zh" configClient={null}><CustomerReplyWorkspace workspace={workspace} runtime={runtime} ready={false} backendChoice={ownedChoice} /></I18nProvider>)
+  expect(await screen.findByDisplayValue('经服务端接纳的客户草稿')).toBeTruthy()
+  expect(screen.getByText(/客户端提供 · 模型来源未验证 · 未发送草稿/)).toBeTruthy()
+  expect(screen.getByText('仅供人工核对的说明')).toBeTruthy()
+  expect(screen.getByText('可供选择的回复')).toBeTruthy()
+})
+
+it.each(['source','model_origin','delivery_state','result_kind'])('owned customer consumer rejects a null-grounded receipt missing %s and preserves the original unknown root',async field=>{
+  const post=vi.fn(async()=>({text:'API must not run',knowledge_grounded:true}))
+  const runtime:EnterpriseClientRuntime=makeRuntime(post)
+  runtime.localText=vi.fn(async payload=>({...ownedDraft(payload.requestId!),[field]:undefined}))
+  const workspace=createCustomerReplyWorkspace();await startWorkspace(workspace,runtime)
+  const customer=workspace.get().customers[0]!
+  updateCustomerReplyInput(customer.reply,'context','原客户问题')
+  await generateCustomerReply(workspace,customer.reply,runtime,undefined,ownedChoice,true)
+  const original=customer.reply.get().lastRequestId
+  expect(customer.reply.get()).toMatchObject({draft:'',outcomeUnknown:true,lastRequestId:original})
+  await generateCustomerReply(workspace,customer.reply,runtime,undefined,ownedChoice,true)
+  expect(runtime.localText).toHaveBeenCalledOnce();expect(post).not.toHaveBeenCalled()
+})
+
+it('owned customer page can generate without an enterprise answer model when the personal model is supported',async()=>{
+  const post=vi.fn(async()=>({text:'API must not run',knowledge_grounded:true}))
+  const runtime:EnterpriseClientRuntime=makeRuntime(post), originalGet=runtime.get.bind(runtime)
+  runtime.get=vi.fn(async path=>path==='/api/tenant-ai-models' ? {configured:false,models:[],backends:[
+    {backend_id:'tenant_model',label:'企业配置模型'},{backend_id:'codex',label:'本机 ChatGPT'}]} : originalGet(path)) as EnterpriseClientRuntime['get']
+  const localText=vi.fn(async payload=>payload.action==='submit' ? ownedDraft(payload.requestId!) : {state:'ready' as const,modelStatus:'supported' as const,choice:ownedChoice})
+  runtime.localText=localText
+  render(<AssistantPage principalId="owned-seat" runtime={runtime} tenantId="owned-tenant" />)
+  fireEvent.click(screen.getByRole('button',{name:/客户回复建议/}))
+  await waitFor(()=>expect((screen.getByRole('button',{name:'新增客户'}) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.change(screen.getByLabelText('运行后端'),{target:{value:'codex'}})
+  setContext('没有企业答案模型的客户问题')
+  const generate=screen.getByRole('button',{name:'生成回复建议'})
+  await waitFor(()=>expect((generate as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(generate)
+  expect(await screen.findByDisplayValue('经服务端接纳的客户草稿')).toBeTruthy()
+  expect(localText.mock.calls.filter(([p])=>p.action==='submit')).toHaveLength(1)
+  expect(post).not.toHaveBeenCalled()
+})
 
 it('keeps customer A unknown without clearing it when concurrent customer B succeeds', async () => {
   const choice = { backend_id: 'tenant_model' as const, configuration_id: 'first', configuration_version: 3,

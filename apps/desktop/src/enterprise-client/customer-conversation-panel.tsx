@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useI18n } from '@/i18n/context'
 import { Button } from '@/components/ui/button'
-import { assistantChoiceRequest, assistantChoicesMatch, type EnterpriseAssistantBackendChoice, type EnterpriseClientRuntime } from './runtime'
+import { assistantChoicesMatch, type EnterpriseAssistantBackendChoice, type EnterpriseClientRuntime } from './runtime'
 import { assistantPresentationFrom } from './assistant-response'
-import type { CustomerReplyResponse } from './customer-reply'
+import { AssistantResponseDetails } from './assistant-response-details'
+import { queryCustomerKnowledgeReply, requestCustomerKnowledgeReply, type OwnedCustomerDraft, type CustomerReplyResponse } from './customer-reply'
 
-interface ConversationEvent { id: string; kind: string; text?: string; state?: string; delivery_state?: string; acknowledged_at?: number; in_reply_to?: string; knowledge_grounded?: boolean }
+interface ConversationEvent { id: string; kind: string; text?: string; state?: string; delivery_state?: string; source?: string; model_origin?: string; acknowledged_at?: number; in_reply_to?: string; knowledge_grounded?: boolean }
 interface Memory { id: string; text: string; version: number; active: boolean; source_ids: string[]; kind: string }
 interface Conversation {
   owner_id: string; customer_id: string; revision: number; can_grant: boolean
   events: ConversationEvent[]; memories: Memory[]; grants: string[]
 }
-interface Props { runtime: EnterpriseClientRuntime | null; customerId: string; disabled: boolean; refreshToken: string; configurationId?: string; backendChoice?: EnterpriseAssistantBackendChoice; onAcknowledged?: () => void; unknownRequestId?: string; onRecovered?: (text:string,grounded:boolean) => void }
+interface Props { runtime: EnterpriseClientRuntime | null; customerId: string; disabled: boolean; refreshToken: string; configurationId?: string; backendChoice?: EnterpriseAssistantBackendChoice; onAcknowledged?: () => void; unknownRequestId?: string; onRecovered?: (text:string,grounded:boolean) => void; onOwnedRecovered?: (response:CustomerReplyResponse,provenance:OwnedCustomerDraft) => void }
 const unresolved = (events: ConversationEvent[]) => events.filter(e => e.kind === 'model_request' && ['pending','unknown'].includes(e.state ?? '') && !e.acknowledged_at)
 
 const words = {
@@ -22,7 +23,7 @@ const words = {
 }
 
 /** Customer data stays on the existing authenticated, encrypted workspace API. */
-export function CustomerConversationPanel({runtime, customerId, disabled, refreshToken, configurationId, backendChoice, onAcknowledged, unknownRequestId, onRecovered}: Props) {
+export function CustomerConversationPanel({runtime, customerId, disabled, refreshToken, configurationId, backendChoice, onAcknowledged, unknownRequestId, onRecovered, onOwnedRecovered}: Props) {
   const {locale} = useI18n()
   const w = words[locale as keyof typeof words] ?? words.en
   const [open,setOpen] = useState(false), [data,setData] = useState<Conversation | null>(null)
@@ -33,6 +34,7 @@ export function CustomerConversationPanel({runtime, customerId, disabled, refres
   const [subject,setSubject] = useState(''), [busy,setBusy] = useState(false), [error,setError] = useState(false)
   const [count,setCount] = useState(40)
   const [question,setQuestion] = useState(''), [answer,setAnswer] = useState(''), [unknown,setUnknown] = useState(false)
+  const [lastRequest,setLastRequest] = useState<string>(), [ownedResult,setOwnedResult] = useState<Awaited<ReturnType<typeof queryCustomerKnowledgeReply>>>()
   const epoch = useRef(0), saving = useRef(false)
   const load = useCallback(async () => {
     if (!runtime?.post) return
@@ -45,7 +47,8 @@ export function CustomerConversationPanel({runtime, customerId, disabled, refres
     } catch {if (version === epoch.current) {setData(null); setError(true)}}
   }, [runtime,target,owner])
   const choiceKey = JSON.stringify(backendChoice ?? configurationId)
-  useEffect(() => {setQuestion('');setAnswer('');setUnknown(false);return()=>{epoch.current++}}, [load,choiceKey])
+  useEffect(() => {setQuestion('');setAnswer('');setOwnedResult(undefined);return()=>{epoch.current++}}, [load,choiceKey])
+  useEffect(() => {setLastRequest(undefined);setUnknown(false)}, [load])
   useEffect(() => {setData(null);setMemory('');setMemoryId('');setMemoryKind('fact');setSource(''); if(open && !disabled) void load(); return () => {epoch.current++}}, [load,open,disabled,refreshToken])
   const change = async (fields: Record<string, unknown>) => {
     if (!runtime?.post || !data || disabled || saving.current) return
@@ -70,24 +73,43 @@ export function CustomerConversationPanel({runtime, customerId, disabled, refres
   const blocked = unknown || Boolean(data && unresolved(data.events).length)
   const failedLabel = ({zh:'调用前失败',en:'Failed before model call',ja:'モデル呼出し前の失敗','zh-hant':'呼叫前失敗'} as Record<string,string>)[locale]!
   const completed = !owner && unknownRequestId && data?.events.some(e=>e.id === unknownRequestId && e.state === 'draft_ready')
-    ? data.events.find(e=>e.kind === 'model_draft' && e.in_reply_to === unknownRequestId) : undefined
+    ? data.events.find(e=>e.kind === 'model_draft' && e.in_reply_to === unknownRequestId && e.source !== 'client_provided') : undefined
   const recoverLabel = ({zh:'已核对原请求结果，恢复已有草稿（不重新生成）',en:'Original result reviewed: recover the existing draft (no regeneration)',ja:'元の結果を確認済み：既存の下書きを復元（再生成なし）','zh-hant':'已核對原請求結果，恢復既有草稿（不重新產生）'} as Record<string,string>)[locale]!
   const knownBeforeCall = !owner && unknownRequestId && data && (!data.events.some(e=>e.id === unknownRequestId) || data.events.some(e=>e.id === unknownRequestId && e.state === 'failed'))
   const acknowledgeBeforeCall = ({zh:'已核对历史，允许新提问（不重发原请求）',en:'History reviewed: allow a new question (no replay of the original)',ja:'履歴確認済み：新しい質問を許可（元の要求は再送しません）','zh-hant':'已核對歷史，允許新提問（不重發原請求）'} as Record<string,string>)[locale]!
   const generate = async () => {
-    if(!data || !runtime?.post || busy || saving.current || disabled || blocked || !question.trim() || (backendChoice && (backendChoice.backend_id !== 'tenant_model' || backendChoice.availability !== 'available'))) return
-    saving.current=true;setBusy(true);setUnknown(true);setAnswer('')
+    if(!data || !runtime?.post || busy || saving.current || disabled || blocked || !question.trim() || (backendChoice && (!['tenant_model','codex'].includes(backendChoice.backend_id) || backendChoice.availability !== 'available'))) return
+    saving.current=true;setBusy(true);setUnknown(true);setAnswer('');setOwnedResult(undefined)
+    const version=++epoch.current
+    const requestId=crypto.randomUUID()
+    setLastRequest(requestId)
+    try {
+      const result = await requestCustomerKnowledgeReply(runtime, {content:question,customer_id:target,customer_owner_id:data.owner_id,
+        conversation_revision:data.revision,customer_request_id:requestId}, backendChoice, true, configurationId)
+      const reply=result.response
+      const presentation = assistantPresentationFrom(reply)
+      if(!presentation.text || (!result.ownedDraft && typeof reply.knowledge_grounded !== 'boolean') || (backendChoice && (!reply.backend_choice || !assistantChoicesMatch(backendChoice,reply.backend_choice)))) throw Error()
+      if(epoch.current===version) {setAnswer(presentation.text);setOwnedResult(result.ownedDraft ? result : undefined);setUnknown(false);setQuestion('');await load()}
+    } catch { /* Keep an ambiguous request blocked; history is the read-only recovery. */ }
+    finally {saving.current=false;setBusy(false)}
+  }
+  const originalRequest=(!owner ? unknownRequestId : undefined) ?? lastRequest ?? data?.events.slice().reverse().find(e=>e.kind==='model_request')?.id
+  const queryLabel=({zh:'查询原请求（不重新生成）',en:'Query original request (no regeneration)',ja:'元の要求を確認（再生成なし）','zh-hant':'查詢原請求（不重新產生）'} as Record<string,string>)[locale]!
+  const ownedLabel=({zh:'客户端提供 · 模型来源未验证 · 未发送草稿',en:'Client provided · Model origin unverified · Unsent draft',ja:'クライアント提供 · モデル由来は未検証 · 未送信の下書き','zh-hant':'用戶端提供 · 模型來源未驗證 · 未傳送草稿'} as Record<string,string>)[locale]!
+  const historyLabel=({zh:'已恢复历史结果；未重新验证当前知识或重新生成。',en:'Historical result recovered; no current-knowledge validation or regeneration.',ja:'履歴の結果を復元しました。現在の知識の再検証・再生成は行いません。','zh-hant':'已恢復歷史結果；未重新驗證目前知識或重新產生。'} as Record<string,string>)[locale]!
+  const query = async () => {
+    if(!runtime?.localText || !originalRequest || disabled || busy || saving.current) return
+    saving.current=true;setBusy(true)
     const version=++epoch.current
     try {
-      const reply = await runtime.post<CustomerReplyResponse>('/api/tenant-ai-assist', {
-        ...(backendChoice ? assistantChoiceRequest(backendChoice) : {configuration_id:configurationId}),
-        mode:'knowledge_answer',content:question,customer_id:target,customer_owner_id:data.owner_id,
-        conversation_revision:data.revision,customer_request_id:crypto.randomUUID()
-      })
-      const presentation = assistantPresentationFrom(reply)
-      if(!presentation.text || typeof reply.knowledge_grounded !== 'boolean' || (backendChoice && (!reply.backend_choice || !assistantChoicesMatch(backendChoice,reply.backend_choice)))) throw Error()
-      if(epoch.current===version) {setAnswer(presentation.text);setUnknown(false);setQuestion('');await load()}
-    } catch { /* Keep an ambiguous request blocked; history is the read-only recovery. */ }
+      const result=await queryCustomerKnowledgeReply(runtime,target,originalRequest,owner || undefined)
+      if(version!==epoch.current) return
+      if(result) {
+        const presentation=assistantPresentationFrom(result.response)
+        setAnswer(presentation.text);setOwnedResult(result);setUnknown(false);setError(false)
+        if(!owner) onOwnedRecovered?.(result.response,result.ownedDraft)
+      } else {setUnknown(true)}
+    } catch {if(version===epoch.current) setError(true)}
     finally {saving.current=false;setBusy(false)}
   }
   return <details className="web-disclosure" onToggle={event => setOpen(event.currentTarget.open)}>
@@ -99,12 +121,14 @@ export function CustomerConversationPanel({runtime, customerId, disabled, refres
       <output aria-label={w[11]}>{JSON.stringify({owner_id:data.owner_id,customer_id:data.customer_id})}</output>
       <ol aria-label={w[0]}>{data.events.slice(-count).map(e => <li key={e.id}>
         <strong>{kind(e.kind)}{e.delivery_state === 'not_sent' ? ` · ${w[21]}` : ''}{e.state === 'unknown' ? ` · ${w[22]}` : e.state === 'pending' ? ` · ${w[23]}` : e.state === 'failed' ? ` · ${failedLabel}` : ''}</strong>
+        {e.kind === 'model_draft' && e.source === 'client_provided' ? <p>{ownedLabel}</p> : null}
         {e.text ? <p>{e.text}</p> : null}
       </li>)}</ol>
       {data.events.length > count ? <Button variant="text" onClick={() => setCount(count+40)}>{w[24]}</Button> : null}
       {unresolved(data.events).map(e=><Button key={e.id} disabled={disabled || busy} variant="secondary" onClick={()=>void change({action:'conversation_acknowledge',event_id:e.id})}>{acknowledge}</Button>)}
       {completed?.text ? <Button disabled={disabled || busy} variant="secondary" onClick={()=>onRecovered?.(completed.text!,completed.knowledge_grounded === true)}>{recoverLabel}</Button> : null}
       {knownBeforeCall ? <Button disabled={disabled || busy} variant="secondary" onClick={()=>onAcknowledged?.()}>{acknowledgeBeforeCall}</Button> : null}
+      {runtime?.localText && originalRequest ? <Button disabled={disabled || busy} variant="secondary" onClick={()=>void query()}>{queryLabel}</Button> : null}
       <fieldset disabled={disabled || busy}>
         <label>{w[1]}<textarea maxLength={12000} value={statement} onChange={e => setStatement(e.target.value)} /></label>
         <Button disabled={!statement.trim()} onClick={() => void change({action:'conversation_record',text:statement,event_id:crypto.randomUUID(),kind:'customer_statement'})}>{w[2]}</Button>
@@ -121,8 +145,9 @@ export function CustomerConversationPanel({runtime, customerId, disabled, refres
           <Button disabled={!subject.trim()} onClick={() => void change({action:'conversation_grant',subject_id:subject.trim(),allow:false})}>{w[10]}</Button></> : null}
       </fieldset>
       {owner ? <><label>{shared[0]}<textarea maxLength={12000} value={question} disabled={busy || disabled || blocked} onChange={e=>setQuestion(e.target.value)} /></label>
-        <Button disabled={busy || disabled || blocked || !question.trim() || (backendChoice && (backendChoice.backend_id !== 'tenant_model' || backendChoice.availability !== 'available'))} onClick={()=>void generate()}>{shared[1]}</Button>
-        {blocked ? <p role="status">{shared[2]}</p> : null}{answer ? <p>{answer}</p> : null}</> : null}
+        <Button disabled={busy || disabled || blocked || !question.trim() || (backendChoice && (!['tenant_model','codex'].includes(backendChoice.backend_id) || backendChoice.availability !== 'available'))} onClick={()=>void generate()}>{shared[1]}</Button>
+        {blocked ? <p role="status">{shared[2]}</p> : null}{answer ? <p>{answer}</p> : null}
+        {ownedResult ? <><p role="status">{ownedLabel}</p>{ownedResult.ownedDraft.historical ? <p>{historyLabel}</p> : null}<AssistantResponseDetails {...assistantPresentationFrom(ownedResult.response)} /></> : null}</> : null}
     </> : null}
     <label>{w[11]}<input value={reference} onChange={e => setReference(e.target.value)} /></label>
     <Button disabled={disabled || busy} onClick={() => {try {const parsed=JSON.parse(reference);if(typeof parsed.owner_id!=='string'||typeof parsed.customer_id!=='string') throw Error();setData(null);setOwner(parsed.owner_id);setTarget(parsed.customer_id);void (owner===parsed.owner_id&&target===parsed.customer_id ? load() : Promise.resolve())}catch{setError(true)}}}>{w[12]}</Button>
