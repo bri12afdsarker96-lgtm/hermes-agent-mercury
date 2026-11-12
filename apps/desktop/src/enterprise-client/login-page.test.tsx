@@ -137,6 +137,30 @@ describe('EnterpriseLoginPage', () => {
     }
   })
 
+  it('allows login without VPN setup when pre-release access is disabled', async () => {
+    const onLogin = vi.fn()
+    const command = vi.fn()
+    const status = vi.fn(async () => ({ enabled: false, stage: 'unavailable', message: '' }))
+    const descriptor = Object.getOwnPropertyDescriptor(window, 'hermesDesktop')
+    Object.defineProperty(window, 'hermesDesktop', {
+      configurable: true,
+      value: { enterprise: { preReleaseAccess: { status, command } } }
+    })
+    try {
+      render(<EnterpriseLoginPage busy={false} error={null} onLogin={onLogin} onOpenLogs={vi.fn()} status="等待登录企业服务" />)
+      await waitFor(() => expect(status).toHaveBeenCalled())
+      expect(screen.queryByRole('button', { name: '安装 OpenVPN Connect' })).toBeNull()
+      fireEvent.change(screen.getByLabelText('登录账号'), { target: { value: 'acceptance.user' } })
+      fireEvent.change(screen.getByLabelText('登录密码'), { target: { value: 'password123' } })
+      fireEvent.click(screen.getByRole('button', { name: '登录企业工作台' }))
+      expect(onLogin).toHaveBeenCalledWith('acceptance.user', 'password123', false)
+      expect(command).not.toHaveBeenCalled()
+    } finally {
+      if (descriptor) Object.defineProperty(window, 'hermesDesktop', descriptor)
+      else Reflect.deleteProperty(window, 'hermesDesktop')
+    }
+  })
+
   it('makes the connecting state non-repeatable', () => {
     render(<EnterpriseLoginPage busy error={null} onLogin={vi.fn()} onOpenLogs={vi.fn()} status="正在连接企业服务" />)
 

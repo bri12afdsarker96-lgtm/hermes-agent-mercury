@@ -1,0 +1,59 @@
+{
+  "version": "0.20.12",
+  "installer": "Hermes-企业助手-0.20.12-x64.exe",
+  "size": 257058491,
+  "sha256": "abce71a874c19bac113b512a0af146e9c455df0d5e95e4ae5d4c29f361e75319",
+  "sha512": "qaeXErdtEZ8LC3aT1voBqK2XYNNw8zl2pcG5KFAGa8rphyocdb3+3W+C1VUu974tJbzOxUxw0vXen569ZU9KcQ==",
+  "asarSha256": "d3f6aa3a0061773cf76d3f530d5259573caea33bc603668752ad202dd28edcf6",
+  "nsisPayloadVerified": true,
+  "compared": [
+    {
+      "file": "dist/index.html",
+      "sha256": "aba7998ba63b9fa0b38fd15a79ff60aa54ef72ca08a2338d3d56fcf5ef71c764"
+    },
+    {
+      "file": "dist/electron-main.mjs",
+      "sha256": "d346ec97e2bae42a26af10ad794b186481d382f4f6ba446a84046efae94ea41d"
+    },
+    {
+      "file": "dist/electron-preload.js",
+      "sha256": "39f1ec96d7aea2c556980166defa6059cff5a7c472c6d4169f9c39b338a4ea8d"
+    },
+    {
+      "file": "dist/assets/index-DGOBMD7U.js",
+      "sha256": "1bad339508b618b47389b03af1b10b57fb09eec49caf33bb7eb786f1e752a863"
+    },
+    {
+      "file": "dist/assets/bundle-mjs-C2DBaZm2.js",
+      "sha256": "4e9b91df298dd080054afbcbe7d3570c67a6c77d99efba8e9daf6c8330a3783f"
+    },
+    {
+      "file": "dist/assets/vendor-react-Bjs0c7ga.js",
+      "sha256": "36c5e79b41a07bf05df98a9b42f2b955d09b1b0b19ea94590e986b7391e7cfa0"
+    },
+    {
+      "file": "dist/assets/vendor-md-QeJfHs6o.js",
+      "sha256": "3b7c1853b31ee6697524abad76d0097c3c22c591eb4ec6d338024f9246d0f2b4"
+    },
+    {
+      "file": "dist/assets/error-boundary-WoqmlnJa.js",
+      "sha256": "34777646248378ee5fd29a7b6c546d0fe5c9be63572713e32f13e35e2c6f8327"
+    },
+    {
+      "file": "dist/assets/context-Zj9f8A7c.js",
+      "sha256": "133a87194683feb356bdc1195419bc7b75f1e9d2f91260f0b8fff73390d07bf4"
+    },
+    {
+      "file": "dist/assets/renderer-loop-pause-7i-B4ve1.js",
+      "sha256": "0ba2c606d30ceecf8239ff26d83f40a77693258e42297a4e37a01ab000a4d0fe"
+    },
+    {
+      "file": "dist/assets/chunk-BO2N2NFS-C4SvrVRq.js",
+      "sha256": "6b58ede3dd7eb167c981587528cd7665791284a62bac2d6d51c2c9b1d102b97d"
+    },
+    {
+      "file": "dist/assets/index-0gtGJwwf.css",
+      "sha256": "7dda0bdda1e773b90798a2c009f12031026121fc2314c30b6cb5eb4dd4717bda"
+    }
+  ]
+}

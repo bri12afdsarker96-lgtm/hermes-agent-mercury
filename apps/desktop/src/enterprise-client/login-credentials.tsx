@@ -17,6 +17,7 @@ export function CopyLoginText({ text, label }: { text: string; label: string }) 
 }
 
 interface LoginCredentialsProps {
+  title?: string
   login: string
   password: string
   hideLabel: string
@@ -24,9 +25,9 @@ interface LoginCredentialsProps {
 }
 
 /** Only the newly issued login is copied; never tokens or the account directory. */
-export function LoginCredentials({ login, password, hideLabel, onHide }: LoginCredentialsProps) {
+export function LoginCredentials({ login, password, hideLabel, onHide, title = '账号已创建，初始密码仅显示本次' }: LoginCredentialsProps) {
   return <div className="hesc-provisioning-token">
-    <strong>账号已创建，初始密码仅显示本次</strong>
+    <strong>{title}</strong>
     <div className="hesc-credential-row"><code className="hesc-selectable">账号：{login}</code><CopyLoginText label="复制账号" text={login} /></div>
     <div className="hesc-credential-row"><code className="hesc-selectable">初始密码：{password}</code><CopyLoginText label="复制密码" text={password} /></div>
     <div className="hesc-credential-row">

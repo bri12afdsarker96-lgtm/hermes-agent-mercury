@@ -1,0 +1,613 @@
+diff --git a/apps/desktop/assets/enterprise-deployment.json b/apps/desktop/assets/enterprise-deployment.json
+index 2864d8d50..ab18d30a2 100644
+--- a/apps/desktop/assets/enterprise-deployment.json
++++ b/apps/desktop/assets/enterprise-deployment.json
+@@ -2,7 +2,7 @@
+   "schema_version": 1,
+   "enterprise_api_origin": "https://ppbb096.site",
+   "pre_release_access": {
+-    "enabled": true,
++    "enabled": false,
+     "openvpn_profile_name": "Hermes 内部预发布"
+   }
+ }
+diff --git a/apps/desktop/package.json b/apps/desktop/package.json
+index 97982c7a7..889662368 100644
+--- a/apps/desktop/package.json
++++ b/apps/desktop/package.json
+@@ -2,7 +2,7 @@
+   "name": "hermes",
+   "productName": "Hermes-企业助手",
+   "private": true,
+-  "version": "0.20.9",
++  "version": "0.20.12",
+   "description": "Hermes-企业助手 — enterprise desktop.",
+   "author": "Nous Research",
+   "repository": {
+diff --git a/apps/desktop/src/enterprise-client/login-credentials.tsx b/apps/desktop/src/enterprise-client/login-credentials.tsx
+index 80d7a9937..9e6307f61 100644
+--- a/apps/desktop/src/enterprise-client/login-credentials.tsx
++++ b/apps/desktop/src/enterprise-client/login-credentials.tsx
+@@ -17,6 +17,7 @@ export function CopyLoginText({ text, label }: { text: string; label: string })
+ }
+ 
+ interface LoginCredentialsProps {
++  title?: string
+   login: string
+   password: string
+   hideLabel: string
+@@ -24,9 +25,9 @@ interface LoginCredentialsProps {
+ }
+ 
+ /** Only the newly issued login is copied; never tokens or the account directory. */
+-export function LoginCredentials({ login, password, hideLabel, onHide }: LoginCredentialsProps) {
++export function LoginCredentials({ login, password, hideLabel, onHide, title = '账号已创建，初始密码仅显示本次' }: LoginCredentialsProps) {
+   return <div className="hesc-provisioning-token">
+-    <strong>账号已创建，初始密码仅显示本次</strong>
++    <strong>{title}</strong>
+     <div className="hesc-credential-row"><code className="hesc-selectable">账号：{login}</code><CopyLoginText label="复制账号" text={login} /></div>
+     <div className="hesc-credential-row"><code className="hesc-selectable">初始密码：{password}</code><CopyLoginText label="复制密码" text={password} /></div>
+     <div className="hesc-credential-row">
+diff --git a/apps/desktop/src/enterprise-client/login-page.test.tsx b/apps/desktop/src/enterprise-client/login-page.test.tsx
+index 93e747bd7..c2123807c 100644
+--- a/apps/desktop/src/enterprise-client/login-page.test.tsx
++++ b/apps/desktop/src/enterprise-client/login-page.test.tsx
+@@ -137,6 +137,30 @@ describe('EnterpriseLoginPage', () => {
+     }
+   })
+ 
++  it('allows login without VPN setup when pre-release access is disabled', async () => {
++    const onLogin = vi.fn()
++    const command = vi.fn()
++    const status = vi.fn(async () => ({ enabled: false, stage: 'unavailable', message: '' }))
++    const descriptor = Object.getOwnPropertyDescriptor(window, 'hermesDesktop')
++    Object.defineProperty(window, 'hermesDesktop', {
++      configurable: true,
++      value: { enterprise: { preReleaseAccess: { status, command } } }
++    })
++    try {
++      render(<EnterpriseLoginPage busy={false} error={null} onLogin={onLogin} onOpenLogs={vi.fn()} status="等待登录企业服务" />)
++      await waitFor(() => expect(status).toHaveBeenCalled())
++      expect(screen.queryByRole('button', { name: '安装 OpenVPN Connect' })).toBeNull()
++      fireEvent.change(screen.getByLabelText('登录账号'), { target: { value: 'acceptance.user' } })
++      fireEvent.change(screen.getByLabelText('登录密码'), { target: { value: 'password123' } })
++      fireEvent.click(screen.getByRole('button', { name: '登录企业工作台' }))
++      expect(onLogin).toHaveBeenCalledWith('acceptance.user', 'password123', false)
++      expect(command).not.toHaveBeenCalled()
++    } finally {
++      if (descriptor) Object.defineProperty(window, 'hermesDesktop', descriptor)
++      else Reflect.deleteProperty(window, 'hermesDesktop')
++    }
++  })
++
+   it('makes the connecting state non-repeatable', () => {
+     render(<EnterpriseLoginPage busy error={null} onLogin={vi.fn()} onOpenLogs={vi.fn()} status="正在连接企业服务" />)
+ 
+diff --git a/apps/desktop/src/enterprise-client/platform-accounts-panel.test.tsx b/apps/desktop/src/enterprise-client/platform-accounts-panel.test.tsx
+new file mode 100644
+index 000000000..1cf7a36a8
+--- /dev/null
++++ b/apps/desktop/src/enterprise-client/platform-accounts-panel.test.tsx
+@@ -0,0 +1,52 @@
++import { fireEvent, render, screen, waitFor } from '@testing-library/react'
++import { describe, expect, it, vi } from 'vitest'
++
++import { PlatformAccountsPanel } from './platform-accounts-panel'
++import type { EnterpriseClientRuntime } from './runtime'
++
++describe('PlatformAccountsPanel', () => {
++  it('requires confirmation, sends a tenant-scoped reset and preserves credentials if the audit read fails', async () => {
++    let failActivity = false
++    const get = vi.fn(async (path: string) => {
++      if (path === '/api/platform-activity') {
++        if (failActivity) { throw new Error('audit unavailable') }
++        return { events: [] }
++      }
++      return { principals: [{ principal_id: 'admin-a', name: '管理员', login_name: 'a.admin' }] }
++    })
++    const post = vi.fn(async () => {
++      failActivity = true
++      return { principal_id: 'admin-a', login_name: 'a.admin', temporary_password: 'test-once-password' }
++    })
++    const runtime = { get, post, disconnect: vi.fn() } as unknown as EnterpriseClientRuntime
++    render(<PlatformAccountsPanel runtime={runtime} tenants={[{ tenant_id: 'a', name: '企业 A' }]} />)
++    fireEvent.change(screen.getByLabelText('管理企业'), { target: { value: 'a' } })
++    fireEvent.click(await screen.findByRole('button', { name: '重置密码' }))
++    expect(post).not.toHaveBeenCalled()
++    fireEvent.click(screen.getByRole('button', { name: '取消' }))
++    expect(post).not.toHaveBeenCalled()
++    fireEvent.click(screen.getByRole('button', { name: '重置密码' }))
++    fireEvent.click(screen.getByRole('button', { name: '确认重置密码' }))
++    await waitFor(() => expect(post).toHaveBeenCalledWith('/api/platform-administrator-reset', { tenant_id: 'a', principal_id: 'admin-a', confirmed: true }))
++    expect(await screen.findByText('初始密码：test-once-password')).toBeTruthy()
++    expect(await screen.findByText('密码已重置，操作记录暂时无法刷新。请先保存一次性密码。')).toBeTruthy()
++    fireEvent.click(screen.getByRole('button', { name: '已安全保存，隐藏凭据' }))
++    expect(screen.queryByText('初始密码：test-once-password')).toBeNull()
++  })
++
++  it('discards administrator results from a previously selected tenant', async () => {
++    let resolveOld!: (value: unknown) => void
++    const get = vi.fn((path: string) => {
++      if (path === '/api/platform-activity') { return Promise.resolve({ events: [] }) }
++      if (path.endsWith('=a')) { return new Promise(resolve => { resolveOld = resolve }) }
++      return Promise.resolve({ principals: [{ principal_id: 'b', login_name: 'b.admin' }] })
++    })
++    const runtime = { get, disconnect: vi.fn() } as unknown as EnterpriseClientRuntime
++    render(<PlatformAccountsPanel runtime={runtime} tenants={[{ tenant_id: 'a', name: 'A' }, { tenant_id: 'b', name: 'B' }]} />)
++    fireEvent.change(screen.getByLabelText('管理企业'), { target: { value: 'a' } })
++    fireEvent.change(screen.getByLabelText('管理企业'), { target: { value: 'b' } })
++    expect(await screen.findByText('b.admin')).toBeTruthy()
++    resolveOld({ principals: [{ principal_id: 'a', login_name: 'a.admin' }] })
++    await waitFor(() => expect(screen.queryByText('a.admin')).toBeNull())
++  })
++})
+diff --git a/apps/desktop/src/enterprise-client/platform-accounts-panel.tsx b/apps/desktop/src/enterprise-client/platform-accounts-panel.tsx
+new file mode 100644
+index 000000000..5c351c71f
+--- /dev/null
++++ b/apps/desktop/src/enterprise-client/platform-accounts-panel.tsx
+@@ -0,0 +1,113 @@
++import { useEffect, useRef, useState } from 'react'
++
++import { EnterpriseModalDialog } from './enterprise-design-system'
++import { LoginCredentials } from './login-credentials'
++import type { EnterpriseClientRuntime } from './runtime'
++
++interface Administrator {
++  principal_id: string
++  name?: string
++  login_name?: string
++  temporary_password?: string
++}
++
++interface Activity {
++  ts?: string | number
++  type?: string
++  tenant_id?: string
++  new_limit?: number
++  new_status?: string
++}
++
++const activityLabels: Record<string, string> = {
++  'tenant.created': '开通企业',
++  'tenant.status_changed': '调整企业状态',
++  'tenant.operator_seat_limit_updated': '调整坐席容量',
++  'tenant.ai_config_platform_assisted': '协助配置企业 AI',
++  'platform.admin_password_reset': '重置企业管理员密码'
++}
++
++export function PlatformAccountsPanel({ runtime, tenants }: {
++  runtime: EnterpriseClientRuntime | null
++  tenants: Array<{ tenant_id?: string; name?: string }>
++}) {
++  const [tenantId, setTenantId] = useState('')
++  const [administrators, setAdministrators] = useState<Administrator[]>([])
++  const [events, setEvents] = useState<Activity[]>([])
++  const [error, setError] = useState('')
++  const [loading, setLoading] = useState(false)
++  const [revision, setRevision] = useState(0)
++  const [pending, setPending] = useState<Administrator | null>(null)
++  const [credentials, setCredentials] = useState<Administrator | null>(null)
++  const [submitting, setSubmitting] = useState(false)
++  const generation = useRef(0)
++
++  useEffect(() => {
++    let active = true
++    generation.current += 1
++    setSubmitting(false)
++    setCredentials(null)
++    setPending(null)
++    setAdministrators([])
++    setEvents([])
++    setError('')
++    if (!runtime) { return }
++    setLoading(true)
++    void Promise.all([
++      tenantId ? runtime.get<{ principals: Administrator[] }>(`/api/platform-administrators?tenant_id=${encodeURIComponent(tenantId)}`) : Promise.resolve({ principals: [] }),
++      runtime.get<{ events: Activity[] }>('/api/platform-activity')
++    ]).then(([accounts, activity]) => {
++      if (!active) { return }
++      if (!Array.isArray(accounts.principals) || !Array.isArray(activity.events)) { throw new Error('平台管理接口返回异常，请刷新重试') }
++      setAdministrators(accounts.principals)
++      setEvents(activity.events)
++    }).catch(reason => {
++      if (active) { setError(reason instanceof Error ? reason.message : '平台管理信息读取失败') }
++    }).finally(() => { if (active) { setLoading(false) } })
++    return () => { active = false; generation.current += 1 }
++  }, [runtime, tenantId, revision])
++
++  async function resetPassword() {
++    if (!runtime?.post || !pending || submitting) { return }
++    setSubmitting(true)
++    setCredentials(null)
++    setError('')
++    const current = generation.current
++    try {
++      const result = await runtime.post<Administrator>('/api/platform-administrator-reset', {
++        tenant_id: tenantId, principal_id: pending.principal_id, confirmed: true
++      })
++      if (current !== generation.current) { return }
++      setCredentials(result)
++      setPending(null)
++      // Refresh activity separately: a failed audit read must not hide the one-time password.
++      try {
++        const activity = await runtime.get<{ events: Activity[] }>('/api/platform-activity')
++        if (current !== generation.current) { return }
++        if (!Array.isArray(activity.events)) { throw new Error('invalid activity') }
++        setEvents(activity.events)
++      } catch { if (current === generation.current) { setError('密码已重置，操作记录暂时无法刷新。请先保存一次性密码。') } }
++    } catch (reason) {
++      if (current !== generation.current) { return }
++      setError(reason instanceof Error ? reason.message : '密码重置未完成，请核实账号状态后重试')
++      setPending(null)
++    } finally { if (current === generation.current) { setSubmitting(false) } }
++  }
++
++  return <article className="hesc-card hesc-platform-card">
++    <h2 className="hesc-section-title">企业管理员与平台操作记录</h2>
++    <div className="hesc-inline-action">
++      <label>管理企业<select disabled={submitting} value={tenantId} onChange={event => setTenantId(event.target.value)}><option value="">请选择企业</option>{tenants.map(tenant => <option key={tenant.tenant_id} value={tenant.tenant_id}>{tenant.name ?? tenant.tenant_id}</option>)}</select></label>
++      <button className="hesc-action" disabled={!runtime || loading || submitting} type="button" onClick={() => setRevision(value => value + 1)}>刷新管理信息</button>
++    </div>
++    {error ? <p role="alert">{error}</p> : null}
++    {loading ? <p role="status">正在读取管理信息…</p> : null}
++    {!loading && !error && tenantId && administrators.length === 0 ? <p>该企业暂无启用的管理员账号。</p> : null}
++    {administrators.length > 0 ? <div className="hesc-table-wrap"><table className="hesc-table"><thead><tr><th>管理员</th><th>登录账号</th><th>账号维护</th></tr></thead><tbody>{administrators.map(admin => <tr key={admin.principal_id}><td>{admin.name}</td><td>{admin.login_name ?? admin.name}</td><td><button className="hesc-action" disabled={submitting || !runtime?.post} type="button" onClick={() => setPending(admin)}>重置密码</button></td></tr>)}</tbody></table></div> : null}
++    {credentials?.temporary_password ? <LoginCredentials title="密码已重置，新密码仅显示本次" login={credentials.login_name ?? credentials.name ?? ''} password={credentials.temporary_password} hideLabel="已安全保存，隐藏凭据" onHide={() => setCredentials(null)} /> : null}
++    <h3>近期平台操作</h3><p className="hesc-muted-copy">展示当前日志最近范围内最多 100 条企业开通、状态、容量、AI 协助和管理员重置记录。</p>
++    {!loading && !error && events.length === 0 ? <p>当前日志范围内暂无平台操作记录。</p> : null}
++    {events.length > 0 ? <div className="hesc-table-wrap hesc-scroll-region"><table className="hesc-table"><thead><tr><th>时间</th><th>操作</th><th>企业</th><th>变更结果</th></tr></thead><tbody>{events.map((event, index) => <tr key={index}><td>{typeof event.ts === 'number' ? new Date(event.ts * 1000).toLocaleString() : event.ts ?? '—'}</td><td>{activityLabels[event.type ?? ''] ?? '平台操作'}</td><td>{tenants.find(tenant => tenant.tenant_id === event.tenant_id)?.name ?? event.tenant_id ?? '—'}</td><td>{event.new_limit != null ? `坐席上限 ${event.new_limit}` : event.new_status === 'active' ? '已启用' : event.new_status === 'paused' || event.new_status === 'suspended' ? '已暂停' : event.new_status === 'deleted' ? '已删除' : '已完成'}</td></tr>)}</tbody></table></div> : null}
++    {pending ? <EnterpriseModalDialog label="重置企业管理员密码" onClose={() => { if (!submitting) { setPending(null) } }}><h2>重置企业管理员密码</h2><p>确认重置 {pending.login_name ?? pending.name} 的密码？旧密码及现有登录会失效，新密码仅显示一次，首次登录必须修改。</p><div className="hesc-dialog-actions"><button className="hesc-action" disabled={submitting} onClick={() => setPending(null)} type="button">取消</button><button className="hesc-action hesc-action-danger" disabled={submitting} onClick={() => void resetPassword()} type="button">确认重置密码</button></div></EnterpriseModalDialog> : null}
++  </article>
++}
+diff --git a/apps/desktop/src/enterprise-client/platform-page.test.tsx b/apps/desktop/src/enterprise-client/platform-page.test.tsx
+index 0cc28ca32..0240408c4 100644
+--- a/apps/desktop/src/enterprise-client/platform-page.test.tsx
++++ b/apps/desktop/src/enterprise-client/platform-page.test.tsx
+@@ -1,13 +1,44 @@
+-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
++import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+ import { describe, expect, it, vi } from 'vitest'
+ 
+ import { PlatformPage } from './platform-page'
+ import type { EnterpriseClientRuntime } from './runtime'
+ 
+ describe('PlatformPage', () => {
++  it('shows authoritative seat use, unknown counts, filtering and a refreshed capacity', async () => {
++    let occupied = 24
++    const get = vi.fn(async (path: string) => path === '/api/platform-activity' ? { events: [] } : ({ tenants: [
++      { name: '早鸟科技', tenant_id: 'early', status: 'active', active_operator_count: occupied, operator_seat_limit: 40 },
++      { name: '空企业', tenant_id: 'empty', status: 'paused', active_operator_count: 0, operator_seat_limit: 10 },
++      { name: '旧接口企业', tenant_id: 'legacy', status: 'active', operator_seat_limit: 10 }
++    ] }))
++    const runtime = { get, disconnect: vi.fn() } as unknown as EnterpriseClientRuntime
++    render(<PlatformPage runtime={runtime} />)
++    expect(await screen.findByText('24 / 40')).toBeTruthy()
++    expect(screen.getByText('0 / 10')).toBeTruthy()
++    expect(screen.getByText('统计不可用 / 10')).toBeTruthy()
++    const table = screen.getByRole('table')
++    expect(within(table).getByText('16')).toBeTruthy()
++    fireEvent.change(screen.getByLabelText('搜索企业'), { target: { value: 'early' } })
++    expect(within(table).queryByText('空企业')).toBeNull()
++    fireEvent.change(screen.getByLabelText('搜索企业'), { target: { value: '' } })
++    fireEvent.change(screen.getByLabelText('企业状态'), { target: { value: 'paused' } })
++    expect(within(table).queryByText('早鸟科技')).toBeNull()
++    fireEvent.change(screen.getByLabelText('企业状态'), { target: { value: 'all' } })
++    occupied = 25
++    fireEvent.click(screen.getByRole('button', { name: '刷新企业统计' }))
++    expect(await screen.findByText('25 / 40')).toBeTruthy()
++    get.mockRejectedValueOnce(new Error('服务暂不可用'))
++    fireEvent.click(screen.getByRole('button', { name: '刷新企业统计' }))
++    expect(await screen.findByText('服务暂不可用')).toBeTruthy()
++    expect(screen.getByText('读取失败')).toBeTruthy()
++    fireEvent.click(screen.getByRole('button', { name: '重新读取' }))
++    await waitFor(() => expect(screen.queryByText('读取失败')).toBeNull())
++  })
++
+   it('uses only the super-admin tenant endpoint and creates a tenant through the fenced runtime', async () => {
+-    const get = vi.fn(async <T,>() => (
+-      { tenants: [{ name: '早鸟科技', status: 'active', tenant_id: 'tenant-earlybird' }] } as T
++    const get = vi.fn(async <T,>(path: string) => (
++      (path === '/api/platform-activity' ? { events: [] } : { tenants: [{ name: '早鸟科技', status: 'active', tenant_id: 'tenant-earlybird' }] }) as T
+     ))
+ 
+     const post = vi.fn(async <T,>() => (
+@@ -39,8 +70,8 @@ describe('PlatformPage', () => {
+   })
+ 
+   it('issues a tenant administrator login and lets the operator hide the one-time password', async () => {
+-    const get = vi.fn(async <T,>() => (
+-      { tenants: [{ name: '早鸟科技', status: 'active', tenant_id: 'tenant-earlybird' }] } as T
++    const get = vi.fn(async <T,>(path: string) => (
++      (path === '/api/platform-activity' ? { events: [] } : { tenants: [{ name: '早鸟科技', status: 'active', tenant_id: 'tenant-earlybird' }] }) as T
+     ))
+ 
+     const post = vi.fn(async <T,>(path: string) => (
+diff --git a/apps/desktop/src/enterprise-client/platform-page.tsx b/apps/desktop/src/enterprise-client/platform-page.tsx
+index 4222c6a19..0bfc0ab3d 100644
+--- a/apps/desktop/src/enterprise-client/platform-page.tsx
++++ b/apps/desktop/src/enterprise-client/platform-page.tsx
+@@ -1,5 +1,6 @@
+ import { LoginCredentials } from './login-credentials'
+-import { useEffect, useMemo, useState } from 'react'
++import { PlatformAccountsPanel } from './platform-accounts-panel'
++import { useEffect, useMemo, useRef, useState } from 'react'
+ 
+ import { EnterpriseModalDialog } from './enterprise-design-system'
+ import type { EnterpriseClientRuntime } from './runtime'
+@@ -71,6 +72,14 @@ export function PlatformPage({ runtime }: { runtime: EnterpriseClientRuntime | n
+   const [state, setState] = useState<LoadState>('unavailable')
+   const [submitting, setSubmitting] = useState(false)
+   const [tenants, setTenants] = useState<Tenant[]>([])
++  const [search, setSearch] = useState('')
++  const [statusFilter, setStatusFilter] = useState('all')
++  const refreshGeneration = useRef(0)
++  const visibleTenants = tenants.filter(tenant =>
++    (statusFilter === 'all' || (statusFilter === 'active' ? tenant.status === 'active' : tenant.status !== 'active')) &&
++    `${tenant.name ?? ''} ${tenant.tenant_id ?? ''}`.toLowerCase().includes(search.trim().toLowerCase())
++  )
++
+ 
+   const selectedTenant = useMemo(
+     () => tenants.find(tenant => tenant.tenant_id === selectedTenantId) ?? null,
+@@ -80,7 +89,10 @@ export function PlatformPage({ runtime }: { runtime: EnterpriseClientRuntime | n
+   async function refreshPlatform() {
+     if (!runtime) {return}
+ 
++    const generation = ++refreshGeneration.current
+     const tenantData = await runtime.get<TenantListResponse>('/api/tenants')
++    if (generation !== refreshGeneration.current) {return}
++
+ 
+     const nextTenants = tenantData.tenants ?? []
+     setTenants(nextTenants)
+@@ -91,6 +103,18 @@ export function PlatformPage({ runtime }: { runtime: EnterpriseClientRuntime | n
+     })))
+   }
+ 
++  async function reloadPlatform() {
++    setState('loading')
++    setError(null)
++    try {
++      await refreshPlatform()
++      setState('ready')
++    } catch (reason) {
++      setState('error')
++      setError(errorText(reason, '企业统计读取失败，请重试'))
++    }
++  }
++
+   useEffect(() => {
+     let mounted = true
+ 
+@@ -111,7 +135,7 @@ export function PlatformPage({ runtime }: { runtime: EnterpriseClientRuntime | n
+       setError(errorText(reason, 'cannot load platform governance'))
+     })
+ 
+-    return () => { mounted = false }
++    return () => { mounted = false; refreshGeneration.current += 1 }
+   }, [runtime])
+ 
+   useEffect(() => {
+@@ -234,7 +258,7 @@ export function PlatformPage({ runtime }: { runtime: EnterpriseClientRuntime | n
+         <span className="hesc-status" data-tone={state === 'ready' ? 'success' : state === 'error' ? 'error' : 'warning'}>{stateLabel(state)}</span>
+       </header>
+ 
+-      {error ? <div className="hesc-error" role="status"><div><strong>平台治理操作未完成</strong><span>{error}</span></div><button className="hesc-action" onClick={() => void refreshPlatform()} type="button">重新读取</button></div> : null}
++      {error ? <div className="hesc-error" role="status"><div><strong>平台治理操作未完成</strong><span>{error}</span></div><button className="hesc-action" onClick={() => void reloadPlatform()} type="button">重新读取</button></div> : null}
+       {notice ? <p className="hesc-success-copy" role="status">{notice}</p> : null}
+ 
+       <div className="hesc-grid hesc-platform-provision-grid">
+@@ -256,16 +280,24 @@ export function PlatformPage({ runtime }: { runtime: EnterpriseClientRuntime | n
+         </article>
+       </div>
+ 
+-      <article className="hesc-card hesc-platform-card"><div className="hesc-section-heading"><div><h2 className="hesc-section-title">企业租户与坐席容量</h2><p className="hesc-muted-copy">表格固定高度并独立滚动；企业数量增加不会挤出窗口或遮挡操作。</p></div></div>
++      <article className="hesc-card hesc-platform-card"><div className="hesc-section-heading"><div><h2 className="hesc-section-title">企业租户与坐席容量</h2><p className="hesc-muted-copy">坐席占用统计启用的操作员账号；主管和企业管理员不占用操作员配额。</p></div></div>
++        <div className="hesc-inline-action">
++          <label>搜索企业<input value={search} onChange={event => setSearch(event.target.value)} placeholder="企业名称或租户标识" /></label>
++          <label>企业状态<select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="all">全部</option><option value="active">已启用</option><option value="paused">已暂停</option></select></label>
++          <button className="hesc-action" disabled={!runtime || submitting || state === 'loading'} type="button" onClick={() => void reloadPlatform()}>刷新企业统计</button>
++        </div>
++        {state === 'ready' ? <p className="hesc-muted-copy">共 {tenants.length} 家企业，已启用 {tenants.filter(tenant => tenant.status === 'active').length} 家；当前显示 {visibleTenants.length} 家。</p> : null}
+         {state === 'loading' ? <p className="hesc-muted-copy">正在读取企业租户…</p> : null}
++        {tenants.length > 0 && visibleTenants.length === 0 ? <p>没有符合条件的企业。</p> : null}
+         {state === 'ready' && tenants.length === 0 ? <p className="hesc-muted-copy">当前尚未开通企业租户。</p> : null}
+-        {tenants.length > 0 ? <div className="hesc-table-wrap hesc-scroll-region"><table className="hesc-table hesc-platform-table"><thead><tr><th scope="col">企业</th><th scope="col">租户标识</th><th scope="col">状态</th><th scope="col">坐席占用</th><th scope="col">调整上限</th><th scope="col">生命周期</th></tr></thead><tbody>{tenants.map((tenant, index) => {
++        {tenants.length > 0 ? <div className="hesc-table-wrap hesc-scroll-region"><table className="hesc-table hesc-platform-table"><thead><tr><th scope="col">企业</th><th scope="col">租户标识</th><th scope="col">状态</th><th scope="col">坐席占用</th><th scope="col">剩余坐席</th><th scope="col">调整上限</th><th scope="col">生命周期</th></tr></thead><tbody>{visibleTenants.map((tenant, index) => {
+           const id = tenant.tenant_id ?? `tenant-${index}`
+ 
+-          return <tr key={id}><td><button className="hesc-text-action" type="button" onClick={() => void runtime?.get<Tenant & { uploaded_document_count: number; uploaded_bytes: number; parsed_chunk_count: number }>(`/api/platform-tenant-usage?tenant_id=${encodeURIComponent(id)}`).then(setUsage).catch(reason => setError(errorText(reason, "企业用量暂时不可用")))}>{tenant.name ?? "—"}</button></td><td>{tenant.tenant_id ?? '—'}</td><td><span className="hesc-status" data-tone={tenant.status === 'active' ? 'success' : 'warning'}>{tenantStatus(tenant.status)}</span></td><td>{tenant.active_operator_count ?? 0} / {tenant.operator_seat_limit ?? 10}</td><td><div className="hesc-inline-action"><input aria-label={`${tenant.name ?? id} 的坐席上限`} disabled={submitting} min="1" onChange={event => setSeatEdits(current => ({ ...current, [id]: event.target.value }))} type="number" value={seatEdits[id] ?? String(tenant.operator_seat_limit ?? 10)} /><button className="hesc-action" disabled={submitting || !tenant.tenant_id} onClick={() => void updateSeatLimit(tenant)} type="button">保存</button></div></td><td><div className="hesc-inline-action">{tenant.status === 'active' ? <button className="hesc-action" disabled={submitting} onClick={() => setPendingAction({ kind: 'pause', tenant })} type="button">暂停</button> : <button className="hesc-action" disabled={submitting} onClick={() => setPendingAction({ kind: 'resume', tenant })} type="button">启用</button>}<button className="hesc-action hesc-action-danger" disabled={submitting} onClick={() => setPendingAction({ kind: 'delete', tenant })} type="button">删除</button></div></td></tr>
++          return <tr key={id}><td><button className="hesc-text-action" type="button" onClick={() => void runtime?.get<Tenant & { uploaded_document_count: number; uploaded_bytes: number; parsed_chunk_count: number }>(`/api/platform-tenant-usage?tenant_id=${encodeURIComponent(id)}`).then(setUsage).catch(reason => setError(errorText(reason, "企业用量暂时不可用")))}>{tenant.name ?? "—"}</button></td><td>{tenant.tenant_id ?? '—'}</td><td><span className="hesc-status" data-tone={tenant.status === 'active' ? 'success' : 'warning'}>{tenantStatus(tenant.status)}</span></td><td>{tenant.active_operator_count ?? '统计不可用'} / {tenant.operator_seat_limit ?? '—'}</td><td>{tenant.active_operator_count != null && tenant.operator_seat_limit != null ? Math.max(0, tenant.operator_seat_limit - tenant.active_operator_count) : '—'}</td><td><div className="hesc-inline-action"><input aria-label={`${tenant.name ?? id} 的坐席上限`} disabled={submitting} min="1" onChange={event => setSeatEdits(current => ({ ...current, [id]: event.target.value }))} type="number" value={seatEdits[id] ?? String(tenant.operator_seat_limit ?? 10)} /><button className="hesc-action" disabled={submitting || !tenant.tenant_id} onClick={() => void updateSeatLimit(tenant)} type="button">保存</button></div></td><td><div className="hesc-inline-action">{tenant.status === 'active' ? <button className="hesc-action" disabled={submitting} onClick={() => setPendingAction({ kind: 'pause', tenant })} type="button">暂停</button> : <button className="hesc-action" disabled={submitting} onClick={() => setPendingAction({ kind: 'resume', tenant })} type="button">启用</button>}<button className="hesc-action hesc-action-danger" disabled={submitting} onClick={() => setPendingAction({ kind: 'delete', tenant })} type="button">删除</button></div></td></tr>
+         })}</tbody></table></div> : null}
+       </article>
+ 
++      <PlatformAccountsPanel runtime={runtime} tenants={tenants} />
+       <div className="hesc-grid hesc-platform-governance-grid">
+         <article className="hesc-card"><h2 className="hesc-section-title">企业 AI 协助配置</h2><p className="hesc-muted-copy">企业管理员自行配置为默认流程。仅在企业明确授权时，平台才可代为保存；密钥只驻留服务器加密存储，不能回显。</p>
+           <div className="hesc-provisioning-form">
+diff --git a/apps/desktop/src/enterprise-client/wecom-seat-binding-panel.test.tsx b/apps/desktop/src/enterprise-client/wecom-seat-binding-panel.test.tsx
+index e7db5b07a..3bc142248 100644
+--- a/apps/desktop/src/enterprise-client/wecom-seat-binding-panel.test.tsx
++++ b/apps/desktop/src/enterprise-client/wecom-seat-binding-panel.test.tsx
+@@ -7,7 +7,7 @@ import { WeComSeatBindingPanel } from './wecom-seat-binding-panel'
+ describe('WeComSeatBindingPanel', () => {
+   it('lets a signed-in member create only their own one-time WeCom binding code', async () => {
+     const post = vi.fn(async () => ({code: 'BINDCODE', expires_in: 600, instruction: '请向企业微信自建应用发送：BIND BINDCODE'}))
+-    const runtime = {post, disconnect: vi.fn()} as unknown as EnterpriseClientRuntime
++    const runtime = {post, get: vi.fn(async () => ({bound: false, pending: true})), disconnect: vi.fn()} as unknown as EnterpriseClientRuntime
+ 
+     render(<WeComSeatBindingPanel runtime={runtime} />)
+     fireEvent.click(screen.getByRole('button', {name: '绑定我的企业微信'}))
+@@ -15,4 +15,29 @@ describe('WeComSeatBindingPanel', () => {
+     expect(await screen.findByText(/BIND BINDCODE/)).toBeTruthy()
+     expect(post).toHaveBeenCalledWith('/api/wecom-seat-binding', {})
+   })
++
++  it('shows the verified account from the server on first load and after refresh', async () => {
++    const get = vi.fn(async () => ({bound: true, pending: false, account_id: 'verified-user', app_config_ref: 'app-a'}))
++    const runtime = {get, post: vi.fn(), disconnect: vi.fn()} as unknown as EnterpriseClientRuntime
++    render(<WeComSeatBindingPanel runtime={runtime} />)
++    expect(await screen.findByText('企业微信绑定成功')).toBeTruthy()
++    expect(screen.getByText(/UserID.*verified-user/)).toBeTruthy()
++    fireEvent.click(screen.getByRole('button', {name: '刷新绑定状态'}))
++    expect(get).toHaveBeenCalledWith('/api/wecom-seat-binding')
++    expect(runtime.post).not.toHaveBeenCalled()
++  })
++
++  it('does not treat issuing a code as a successful binding', async () => {
++    const get = vi.fn(async () => ({bound: false, pending: true}))
++    const post = vi.fn(async () => ({code: 'ABC', expires_in: 600, instruction: 'BIND ABC'}))
++    const runtime = {get, post, disconnect: vi.fn()} as unknown as EnterpriseClientRuntime
++    render(<WeComSeatBindingPanel runtime={runtime} />)
++    fireEvent.click(screen.getByRole('button', {name: '绑定我的企业微信'}))
++    await screen.findByText(/BIND ABC/)
++    expect(screen.queryByText('企业微信绑定成功')).toBeNull()
++    get.mockResolvedValue({bound: true, pending: false, account_id: 'new-user', app_config_ref: 'app-a'} as never)
++    fireEvent.click(screen.getByRole('button', {name: '刷新绑定状态'}))
++    expect(await screen.findByText(/UserID.*new-user/)).toBeTruthy()
++    expect(screen.queryByText(/BIND ABC/)).toBeNull()
++  })
+ })
+diff --git a/apps/desktop/src/enterprise-client/wecom-seat-binding-panel.tsx b/apps/desktop/src/enterprise-client/wecom-seat-binding-panel.tsx
+index 97de024a4..adb0730c0 100644
+--- a/apps/desktop/src/enterprise-client/wecom-seat-binding-panel.tsx
++++ b/apps/desktop/src/enterprise-client/wecom-seat-binding-panel.tsx
+@@ -1,4 +1,4 @@
+-import { useState } from 'react'
++import { useEffect, useRef, useState } from 'react'
+ 
+ import type { EnterpriseClientRuntime } from './runtime'
+ 
+@@ -8,6 +8,13 @@ interface BindingCode {
+   instruction: string
+ }
+ 
++interface BindingStatus {
++  bound: boolean
++  pending: boolean
++  account_id: string | null
++  app_config_ref: string | null
++}
++
+ function errorText(reason: unknown): string {
+   return reason instanceof Error && reason.message ? reason.message : '暂时无法创建企业微信绑定码。'
+ }
+@@ -17,20 +24,79 @@ export function WeComSeatBindingPanel({ runtime }: { runtime?: EnterpriseClientR
+   const [binding, setBinding] = useState<BindingCode | null>(null)
+   const [busy, setBusy] = useState(false)
+   const [error, setError] = useState('')
++  const [status, setStatus] = useState<BindingStatus | null>(null)
++  const [refresh, setRefresh] = useState(0)
++  const [expiresAt, setExpiresAt] = useState(0)
++  const epoch = useRef(0)
++
++  // eslint-disable-next-line no-restricted-syntax -- Lifecycle cancellation counter; no atom or reactive value is mirrored into this ref.
++  useEffect(() => {
++    epoch.current += 1
++    setBinding(null)
++    setStatus(null)
++    setError('')
++    setBusy(false)
++
++    return () => {epoch.current += 1}
++  }, [runtime])
++
++  useEffect(() => {
++    if (!runtime) {return}
++    let active = true
++    let timer: ReturnType<typeof setTimeout> | undefined
++
++    async function check(): Promise<void> {
++      try {
++        const next = await runtime!.get<BindingStatus>('/api/wecom-seat-binding')
++
++        if (!active) {return}
++        setStatus(next)
++        setError('')
++
++        if (next.bound && !next.pending) {
++          setBinding(null)
++
++          return
++        }
++      } catch (reason) {
++        if (!active) {return}
++        setError(reason instanceof Error ? reason.message : '无法查询绑定状态，请刷新重试。')
++      }
++
++      if (active && binding && Date.now() < expiresAt) {
++        timer = setTimeout(() => void check(), 3000)
++      } else if (active && binding) {
++        setBinding(null)
++        setError('绑定码已过期，请重新获取后发送。')
++      }
++    }
++
++    void check()
++
++    return () => {active = false;
++
++ if (timer) {clearTimeout(timer)}}
++  }, [runtime, binding, expiresAt, refresh])
+ 
+   async function issueBinding(): Promise<void> {
+     if (!runtime?.post || busy) {
+       return
+     }
++
+     setBusy(true)
+     setError('')
++    const requestEpoch = epoch.current
++
+     try {
+       const result = await runtime.post<BindingCode>('/api/wecom-seat-binding', {})
++
++      if (requestEpoch !== epoch.current) {return}
+       setBinding(result)
++      setExpiresAt(Date.now() + result.expires_in * 1000)
+     } catch (reason) {
+-      setError(errorText(reason))
++      if (requestEpoch === epoch.current) {setError(errorText(reason))}
+     } finally {
+-      setBusy(false)
++      if (requestEpoch === epoch.current) {setBusy(false)}
+     }
+   }
+ 
+@@ -38,13 +104,19 @@ export function WeComSeatBindingPanel({ runtime }: { runtime?: EnterpriseClientR
+     <div className="hesc-section-heading">
+       <div>
+         <h2 className="hesc-section-title">企业微信直达提醒</h2>
+-        <p className="hesc-muted-copy">绑定本人企业微信后，自己创建的提醒会同时保留网页、客户端与企业微信私信通知；绑定码不会保存或回显在浏览器中。</p>
++        <p className="hesc-muted-copy">绑定本人企业微信后，自己创建的提醒将向该账号发送私信。绑定码仅用于本次验证，请在有效期内发送。</p>
+       </div>
+-      <span className="hesc-status" data-tone={binding ? 'success' : 'warning'}>{binding ? '绑定码已创建' : '待绑定'}</span>
++      <span className="hesc-status" data-tone={error ? 'warning' : status?.bound ? 'success' : 'warning'}>{error ? '状态待确认' : status?.bound ? '已绑定' : status === null ? '正在查询绑定状态' : binding ? '等待企业微信验证' : '未绑定'}</span>
+     </div>
+     <button className="hesc-action" disabled={busy || !runtime?.post} onClick={() => void issueBinding()} type="button">
+-      {busy ? '正在创建绑定码…' : '绑定我的企业微信'}
++      {busy ? '正在创建绑定码…' : status?.bound ? '更换绑定账号' : '绑定我的企业微信'}
+     </button>
++    <button className="hesc-action hesc-action-secondary" disabled={!runtime} onClick={() => setRefresh(value => value + 1)} type="button">刷新绑定状态</button>
++    {status?.bound ? <div className="hesc-success-copy" role="status">
++      <strong>{error ? '上次确认的绑定账号（当前状态查询失败）' : status.pending ? '当前已绑定，等待验证新账号' : '企业微信绑定成功'}</strong>
++      <p>已绑定账号（UserID）：{status.account_id}</p>
++      <p>所属应用：{status.app_config_ref}。你创建的到期提醒将发送到此账号。</p>
++    </div> : null}
+     {binding ? <p role="status">{binding.instruction}（{binding.expires_in} 秒内有效）</p> : null}
+     {error ? <p className="hesc-error-copy" role="alert">{error}</p> : null}
+   </article>
+diff --git a/package-lock.json b/package-lock.json
+index 01d5a250c..10f826043 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -65,7 +65,7 @@
+     },
+     "apps/desktop": {
+       "name": "hermes",
+-      "version": "0.20.9",
++      "version": "0.20.12",
+       "dependencies": {
+         "@assistant-ui/core": "0.2.23",
+         "@assistant-ui/react": "0.14.24",

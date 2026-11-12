@@ -1,5 +1,6 @@
 import { LoginCredentials } from './login-credentials'
-import { useEffect, useMemo, useState } from 'react'
+import { PlatformAccountsPanel } from './platform-accounts-panel'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { EnterpriseModalDialog } from './enterprise-design-system'
 import type { EnterpriseClientRuntime } from './runtime'
@@ -71,6 +72,14 @@ export function PlatformPage({ runtime }: { runtime: EnterpriseClientRuntime | n
   const [state, setState] = useState<LoadState>('unavailable')
   const [submitting, setSubmitting] = useState(false)
   const [tenants, setTenants] = useState<Tenant[]>([])
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const refreshGeneration = useRef(0)
+  const visibleTenants = tenants.filter(tenant =>
+    (statusFilter === 'all' || (statusFilter === 'active' ? tenant.status === 'active' : tenant.status !== 'active')) &&
+    `${tenant.name ?? ''} ${tenant.tenant_id ?? ''}`.toLowerCase().includes(search.trim().toLowerCase())
+  )
+
 
   const selectedTenant = useMemo(
     () => tenants.find(tenant => tenant.tenant_id === selectedTenantId) ?? null,
@@ -80,7 +89,10 @@ export function PlatformPage({ runtime }: { runtime: EnterpriseClientRuntime | n
   async function refreshPlatform() {
     if (!runtime) {return}
 
+    const generation = ++refreshGeneration.current
     const tenantData = await runtime.get<TenantListResponse>('/api/tenants')
+    if (generation !== refreshGeneration.current) {return}
+
 
     const nextTenants = tenantData.tenants ?? []
     setTenants(nextTenants)
@@ -89,6 +101,18 @@ export function PlatformPage({ runtime }: { runtime: EnterpriseClientRuntime | n
 
       return [id, current[id] ?? String(tenant.operator_seat_limit ?? 10)]
     })))
+  }
+
+  async function reloadPlatform() {
+    setState('loading')
+    setError(null)
+    try {
+      await refreshPlatform()
+      setState('ready')
+    } catch (reason) {
+      setState('error')
+      setError(errorText(reason, '企业统计读取失败，请重试'))
+    }
   }
 
   useEffect(() => {
@@ -111,7 +135,7 @@ export function PlatformPage({ runtime }: { runtime: EnterpriseClientRuntime | n
       setError(errorText(reason, 'cannot load platform governance'))
     })
 
-    return () => { mounted = false }
+    return () => { mounted = false; refreshGeneration.current += 1 }
   }, [runtime])
 
   useEffect(() => {
@@ -234,7 +258,7 @@ export function PlatformPage({ runtime }: { runtime: EnterpriseClientRuntime | n
         <span className="hesc-status" data-tone={state === 'ready' ? 'success' : state === 'error' ? 'error' : 'warning'}>{stateLabel(state)}</span>
       </header>
 
-      {error ? <div className="hesc-error" role="status"><div><strong>平台治理操作未完成</strong><span>{error}</span></div><button className="hesc-action" onClick={() => void refreshPlatform()} type="button">重新读取</button></div> : null}
+      {error ? <div className="hesc-error" role="status"><div><strong>平台治理操作未完成</strong><span>{error}</span></div><button className="hesc-action" onClick={() => void reloadPlatform()} type="button">重新读取</button></div> : null}
       {notice ? <p className="hesc-success-copy" role="status">{notice}</p> : null}
 
       <div className="hesc-grid hesc-platform-provision-grid">
@@ -256,16 +280,24 @@ export function PlatformPage({ runtime }: { runtime: EnterpriseClientRuntime | n
         </article>
       </div>
 
-      <article className="hesc-card hesc-platform-card"><div className="hesc-section-heading"><div><h2 className="hesc-section-title">企业租户与坐席容量</h2><p className="hesc-muted-copy">表格固定高度并独立滚动；企业数量增加不会挤出窗口或遮挡操作。</p></div></div>
+      <article className="hesc-card hesc-platform-card"><div className="hesc-section-heading"><div><h2 className="hesc-section-title">企业租户与坐席容量</h2><p className="hesc-muted-copy">坐席占用统计启用的操作员账号；主管和企业管理员不占用操作员配额。</p></div></div>
+        <div className="hesc-inline-action">
+          <label>搜索企业<input value={search} onChange={event => setSearch(event.target.value)} placeholder="企业名称或租户标识" /></label>
+          <label>企业状态<select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="all">全部</option><option value="active">已启用</option><option value="paused">已暂停</option></select></label>
+          <button className="hesc-action" disabled={!runtime || submitting || state === 'loading'} type="button" onClick={() => void reloadPlatform()}>刷新企业统计</button>
+        </div>
+        {state === 'ready' ? <p className="hesc-muted-copy">共 {tenants.length} 家企业，已启用 {tenants.filter(tenant => tenant.status === 'active').length} 家；当前显示 {visibleTenants.length} 家。</p> : null}
         {state === 'loading' ? <p className="hesc-muted-copy">正在读取企业租户…</p> : null}
+        {tenants.length > 0 && visibleTenants.length === 0 ? <p>没有符合条件的企业。</p> : null}
         {state === 'ready' && tenants.length === 0 ? <p className="hesc-muted-copy">当前尚未开通企业租户。</p> : null}
-        {tenants.length > 0 ? <div className="hesc-table-wrap hesc-scroll-region"><table className="hesc-table hesc-platform-table"><thead><tr><th scope="col">企业</th><th scope="col">租户标识</th><th scope="col">状态</th><th scope="col">坐席占用</th><th scope="col">调整上限</th><th scope="col">生命周期</th></tr></thead><tbody>{tenants.map((tenant, index) => {
+        {tenants.length > 0 ? <div className="hesc-table-wrap hesc-scroll-region"><table className="hesc-table hesc-platform-table"><thead><tr><th scope="col">企业</th><th scope="col">租户标识</th><th scope="col">状态</th><th scope="col">坐席占用</th><th scope="col">剩余坐席</th><th scope="col">调整上限</th><th scope="col">生命周期</th></tr></thead><tbody>{visibleTenants.map((tenant, index) => {
           const id = tenant.tenant_id ?? `tenant-${index}`
 
-          return <tr key={id}><td><button className="hesc-text-action" type="button" onClick={() => void runtime?.get<Tenant & { uploaded_document_count: number; uploaded_bytes: number; parsed_chunk_count: number }>(`/api/platform-tenant-usage?tenant_id=${encodeURIComponent(id)}`).then(setUsage).catch(reason => setError(errorText(reason, "企业用量暂时不可用")))}>{tenant.name ?? "—"}</button></td><td>{tenant.tenant_id ?? '—'}</td><td><span className="hesc-status" data-tone={tenant.status === 'active' ? 'success' : 'warning'}>{tenantStatus(tenant.status)}</span></td><td>{tenant.active_operator_count ?? 0} / {tenant.operator_seat_limit ?? 10}</td><td><div className="hesc-inline-action"><input aria-label={`${tenant.name ?? id} 的坐席上限`} disabled={submitting} min="1" onChange={event => setSeatEdits(current => ({ ...current, [id]: event.target.value }))} type="number" value={seatEdits[id] ?? String(tenant.operator_seat_limit ?? 10)} /><button className="hesc-action" disabled={submitting || !tenant.tenant_id} onClick={() => void updateSeatLimit(tenant)} type="button">保存</button></div></td><td><div className="hesc-inline-action">{tenant.status === 'active' ? <button className="hesc-action" disabled={submitting} onClick={() => setPendingAction({ kind: 'pause', tenant })} type="button">暂停</button> : <button className="hesc-action" disabled={submitting} onClick={() => setPendingAction({ kind: 'resume', tenant })} type="button">启用</button>}<button className="hesc-action hesc-action-danger" disabled={submitting} onClick={() => setPendingAction({ kind: 'delete', tenant })} type="button">删除</button></div></td></tr>
+          return <tr key={id}><td><button className="hesc-text-action" type="button" onClick={() => void runtime?.get<Tenant & { uploaded_document_count: number; uploaded_bytes: number; parsed_chunk_count: number }>(`/api/platform-tenant-usage?tenant_id=${encodeURIComponent(id)}`).then(setUsage).catch(reason => setError(errorText(reason, "企业用量暂时不可用")))}>{tenant.name ?? "—"}</button></td><td>{tenant.tenant_id ?? '—'}</td><td><span className="hesc-status" data-tone={tenant.status === 'active' ? 'success' : 'warning'}>{tenantStatus(tenant.status)}</span></td><td>{tenant.active_operator_count ?? '统计不可用'} / {tenant.operator_seat_limit ?? '—'}</td><td>{tenant.active_operator_count != null && tenant.operator_seat_limit != null ? Math.max(0, tenant.operator_seat_limit - tenant.active_operator_count) : '—'}</td><td><div className="hesc-inline-action"><input aria-label={`${tenant.name ?? id} 的坐席上限`} disabled={submitting} min="1" onChange={event => setSeatEdits(current => ({ ...current, [id]: event.target.value }))} type="number" value={seatEdits[id] ?? String(tenant.operator_seat_limit ?? 10)} /><button className="hesc-action" disabled={submitting || !tenant.tenant_id} onClick={() => void updateSeatLimit(tenant)} type="button">保存</button></div></td><td><div className="hesc-inline-action">{tenant.status === 'active' ? <button className="hesc-action" disabled={submitting} onClick={() => setPendingAction({ kind: 'pause', tenant })} type="button">暂停</button> : <button className="hesc-action" disabled={submitting} onClick={() => setPendingAction({ kind: 'resume', tenant })} type="button">启用</button>}<button className="hesc-action hesc-action-danger" disabled={submitting} onClick={() => setPendingAction({ kind: 'delete', tenant })} type="button">删除</button></div></td></tr>
         })}</tbody></table></div> : null}
       </article>
 
+      <PlatformAccountsPanel runtime={runtime} tenants={tenants} />
       <div className="hesc-grid hesc-platform-governance-grid">
         <article className="hesc-card"><h2 className="hesc-section-title">企业 AI 协助配置</h2><p className="hesc-muted-copy">企业管理员自行配置为默认流程。仅在企业明确授权时，平台才可代为保存；密钥只驻留服务器加密存储，不能回显。</p>
           <div className="hesc-provisioning-form">

@@ -1,0 +1,13 @@
+{
+  "apps/desktop/assets/enterprise-deployment.json": "69d852c5a96970171748634825c2b275070821a2b7552862247cba327e8545cb",
+  "apps/desktop/package.json": "e5540b7eb6b18bce6dd64d11f2ac5304b43c2c066ecf1e94f030f1aebaa9f4ac",
+  "apps/desktop/src/enterprise-client/login-credentials.tsx": "9dd92b0e43a9e2458aebc41d9e7e18d1d79c99c386bafa239a8333d4f7040ca5",
+  "apps/desktop/src/enterprise-client/login-page.test.tsx": "72210135ad132ac1cb5b8e1e23e70c66f07d0798c7a86b32ec5c46a13dccbc10",
+  "apps/desktop/src/enterprise-client/platform-page.test.tsx": "07cdcdc5759e0813333004cdc3f5ef49543f79b208ec5220b6ef568be02fc97b",
+  "apps/desktop/src/enterprise-client/platform-page.tsx": "b4c6f68f44580a0f42b8e93752d598c828a65d9713571a2a3dd7f0d720d98c0b",
+  "apps/desktop/src/enterprise-client/wecom-seat-binding-panel.test.tsx": "4224ace076b4711928860174d765d0c676a0f84504547dfb0654be2b21074c24",
+  "apps/desktop/src/enterprise-client/wecom-seat-binding-panel.tsx": "148dea960fde4c905c599e577613051d107ec8aa527be98416fc442bcec6ae76",
+  "apps/desktop/src/enterprise-client/platform-accounts-panel.test.tsx": "174e66e9af6775553be962a66aacee43a2d08d49d15f7c503dbbc1280472bc7a",
+  "apps/desktop/src/enterprise-client/platform-accounts-panel.tsx": "ed7b493161688db0ff89faa11cca90f1dae6349872fcec977629591a87038e0e",
+  "package-lock.json": "e2df57c45d188f3fa14466647c623903e380f0bf0ea7826e28b4f64f1344da1d"
+}
