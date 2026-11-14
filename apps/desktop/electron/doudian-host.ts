@@ -223,6 +223,7 @@ export class DoudianHost {
   }
   private protocolFailure() {
     this.fail('DOUDIAN_PROTOCOL_ERROR')
+    this.child.stdin.end()
     this.child.kill()
   }
   request(method: string, params: Record<string, string> = {}): Promise<unknown> {

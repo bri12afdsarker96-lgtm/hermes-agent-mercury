@@ -110,7 +110,7 @@ describe('original payment session and tenant authority', () => {
     expect(deps.authorizePayment).not.toHaveBeenCalled()
   })
   it.each([true, false])('refuses legacy paymentAuthorization events without replying, allowed=%s', async allowed => {
-    const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() })
+    const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), kill: vi.fn() })
     spawn.mockReturnValue(child)
     const messages: string[] = []
     child.stdin.on('data', value => messages.push(value.toString()))
@@ -118,6 +118,7 @@ describe('original payment session and tenant authority', () => {
     child.stdout.write(JSON.stringify({ event: 'paymentAuthorization', authorizationId: 'a'.repeat(32), amount: '3.00', allowed }) + '\n')
     await vi.waitFor(() => expect(child.stdin.writableEnded).toBe(true))
     expect(messages).toHaveLength(0)
+    expect(child.kill).toHaveBeenCalledOnce()
     await expect(host.request('status')).rejects.toThrow('DOUDIAN_HOST_LOST')
   })
 })
