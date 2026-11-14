@@ -141,7 +141,7 @@ it('the review window does not invent workbook controls', async () => {
   expect(screen.queryByTestId('doudian-workbench')).toBeNull()
 })
 
-it('the review entry defaults to the native workbench and can fall back to the original window', async () => {
+it('the review entry uses the integrated workbench without opening the original window', async () => {
   const review = fixture('review')
   render(
     <I18nProvider initialLocale="zh" configClient={null}>
@@ -149,8 +149,9 @@ it('the review entry defaults to the native workbench and can fall back to the o
     </I18nProvider>
   )
   await screen.findByTestId('doudian-workbench')
-  fireEvent.click(screen.getByRole('button', { name: '原版窗口' }))
-  await screen.findByRole('button', { name: '打开订单截图' })
+  expect(screen.queryByRole('button', { name: '原版窗口' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '打开订单截图' })).toBeNull()
+  expect(review.doudian.mock.calls.some(([request]) => request.action === 'openReview')).toBe(false)
 })
 
 it('a late open from the old account cannot keep the new account busy or replace its task', async () => {
