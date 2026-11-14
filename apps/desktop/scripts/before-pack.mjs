@@ -62,6 +62,7 @@ import path from 'node:path'
 import { Arch } from 'electron-builder'
 import { stageNodePty, stageGetWindows } from './stage-native-deps.mjs'
 import { stageOpenVpnConnect } from './stage-openvpn-connect.mjs'
+import { verifyStagedModule } from './verify-doudian-package.mjs'
 
 export function cleanStaleAppOutDir(appOutDir) {
   if (!appOutDir || typeof appOutDir !== 'string') {
@@ -111,15 +112,16 @@ export function preserveRollbackBackup(appOutDir, productExeName = 'HermesEnterp
   }
 }
 
-export default async function beforePack(context) {
+export default async function beforePack(context, { localVerification = false } = {}) {
   const appOutDir = context && context.appOutDir
   const platformName = context && context.electronPlatformName
   if (platformName === 'win32') {
+    await verifyStagedModule(path.join(context.packager?.projectDir || path.resolve(import.meta.dirname, '..'), 'build', 'doudian'))
     // The published NSIS installer includes the reviewed vendor MSI so a
     // pre-release tester does not have to find a separate installer. This is
     // intentionally a package-time fetch: source checkout stays reproducible
     // without committing a third-party binary.
-    await stageOpenVpnConnect()
+    if (!localVerification) await stageOpenVpnConnect()
   }
   try {
     // Windows: keep the previous working build as rollback material for the

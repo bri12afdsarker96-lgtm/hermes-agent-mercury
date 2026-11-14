@@ -3,6 +3,46 @@ import { defineFieldCopy } from '@/app/settings/field-copy'
 import { defineLocale } from './define-locale'
 
 export const ja = defineLocale({
+  doudian: {
+    "title": "抖店ワークベンチ",
+    "refresh": "更新",
+    "manageShops": "認証 / 店舗管理",
+    "moduleVersion": "実行モジュール",
+    "shop": "店舗",
+    "selectShop": "店舗を選択",
+    "chooseWorkbook": "ブックのコピーを選択",
+    "noWorkbook": "ブック未選択",
+    "prepare": "ブックを確認",
+    "task": "レビューのキャプチャ",
+    "saved": "ブックに保存済み",
+    "stop": "停止",
+    "confirmStart": "キャプチャと書き込みを確認",
+    "progress": "実行記録",
+    "desktopOnly": "Windows デスクトップ版で利用できます。",
+    "moduleMissing": "ローカルキャプチャモジュールが未インストールです。",
+    "moduleInvalid": "モジュール検証に失敗しました。検証済みモジュールを再インストールしてください。",
+    "windowsOnly": "Windows が必要です。",
+    "forbidden": "現在の企業アカウントでは利用できません。",
+    "ownerChanged": "アカウントまたは企業が変更されました。再度開いてください。",
+    "hostLost": "実行プロセスが切断されました。ブックを確認してからアプリを再起動してください。タスクは再送していません。",
+    "resultUnknown": "結果を確認できません。再送せず状態を確認してください。",
+    "licenseRequired": "「認証 / 店舗管理」でモジュールを認証してください。",
+    "busy": "タスクまたは店舗操作が実行中です。",
+    "workbookBusy": "このブックは別のタスクが処理中です。",
+    "failed": "操作失敗",
+    "dependenciesMissing": "システム Chrome と Excel または WPS が必要です。",
+    "states": {
+      "idle": "待機",
+      "preparing": "ブックを確認中",
+      "awaiting_confirmation": "確認待ち",
+      "running": "キャプチャ中",
+      "stopping": "停止・保存中",
+      "stopped": "停止済み",
+      "completed": "終了。保存済み行とスキップした行を確認してください",
+      "failed": "失敗。保存済み結果は保持されています",
+      "unknown": "結果未確認"
+    }
+  },
   common: {
     apply: '適用',
     back: '戻る',

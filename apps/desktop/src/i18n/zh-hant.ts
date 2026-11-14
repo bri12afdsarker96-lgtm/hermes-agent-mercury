@@ -3,6 +3,46 @@ import { defineFieldCopy } from '@/app/settings/field-copy'
 import { defineLocale } from './define-locale'
 
 export const zhHant = defineLocale({
+  doudian: {
+    "title": "抖店工作台",
+    "refresh": "重新整理",
+    "manageShops": "授權 / 店鋪管理",
+    "moduleVersion": "執行模組",
+    "shop": "店鋪",
+    "selectShop": "請選擇店鋪",
+    "chooseWorkbook": "選擇活頁簿副本",
+    "noWorkbook": "未選擇活頁簿",
+    "prepare": "檢查待回填表格",
+    "task": "評價截圖",
+    "saved": "已儲存回填",
+    "stop": "停止",
+    "confirmStart": "確認截圖並回填",
+    "progress": "執行紀錄",
+    "desktopOnly": "僅支援 Windows 桌面用戶端。",
+    "moduleMissing": "尚未安裝本機截圖執行模組。",
+    "moduleInvalid": "執行模組完整性檢查失敗，請重新安裝已驗證模組。",
+    "windowsOnly": "評價截圖僅支援 Windows。",
+    "forbidden": "目前企業帳號無權使用此工作台。",
+    "ownerChanged": "帳號或企業已變更，請重新開啟工作台。",
+    "hostLost": "截圖程序已中斷。請先核對活頁簿，再重新啟動軟體；未自動重播任務。",
+    "resultUnknown": "結果尚未確認，請查詢任務狀態，勿重複提交。",
+    "licenseRequired": "請透過「授權 / 店鋪管理」完成截圖模組授權。",
+    "busy": "任務或店鋪操作仍在執行。",
+    "workbookBusy": "此活頁簿正在由其他任務處理。",
+    "failed": "操作失敗",
+    "dependenciesMissing": "需要系統 Chrome 及 Excel 或 WPS。",
+    "states": {
+      "idle": "閒置",
+      "preparing": "正在檢查表格",
+      "awaiting_confirmation": "等待確認",
+      "running": "正在截圖",
+      "stopping": "正在停止並儲存",
+      "stopped": "已停止",
+      "completed": "任務結束，請核對已儲存與略過紀錄",
+      "failed": "任務失敗，已儲存結果保留",
+      "unknown": "結果待確認"
+    }
+  },
   common: {
     apply: '套用',
     back: '返回',

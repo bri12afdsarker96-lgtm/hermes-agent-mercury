@@ -1,6 +1,7 @@
 import type { GatewayWsUrlResult } from '@hermes/shared'
 import type { TranslucencyState } from '@hermes/shared/translucency'
 
+import type { DoudianReply, DoudianRequest } from '../electron/doudian-types'
 import type { EnterprisePackageUpdateState } from '../electron/enterprise-package-updater-types'
 
 import type { WakeIndicatorState } from './lib/wake-indicator'
@@ -185,6 +186,7 @@ declare global {
        * `{ path, method, body }`. Optional: absent outside the desktop shell.
        */
       enterprise?: {
+        doudian?: (payload: DoudianRequest) => Promise<DoudianReply>
         /** Local package updates are available independently of login and role. */
         packageUpdate?: {
           status(): Promise<EnterprisePackageUpdateState>

@@ -2,9 +2,41 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { test } from 'vitest'
+import { createHash } from 'node:crypto'
+import net from 'node:net'
+import childProcess from 'node:child_process'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
+
+vi.mock('./stage-openvpn-connect.mjs', () => ({ stageOpenVpnConnect: vi.fn(async () => 'offline-vendor-fixture.msi') }))
+import { stageOpenVpnConnect } from './stage-openvpn-connect.mjs'
 
 import beforePack, { cleanStaleAppOutDir, preserveRollbackBackup } from '../scripts/before-pack.mjs'
+import beforeLocalPack from './before-pack-localprep.mjs'
+
+beforeEach(() => {
+  vi.mocked(stageOpenVpnConnect).mockClear()
+  const forbidden = () => { throw new Error('R30 offline test forbids network or child-process download') }
+  vi.stubGlobal('fetch', vi.fn(forbidden))
+  vi.spyOn(net.Socket.prototype, 'connect').mockImplementation(forbidden)
+  vi.spyOn(childProcess, 'execFile').mockImplementation(forbidden)
+})
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+function stagedFixture(projectDir) {
+  const root = path.join(projectDir, 'build', 'doudian')
+  const files = {}
+  for (const relative of ['DoudianAutomationTool.exe', 'inference/offline/model.bin']) {
+    const content = Buffer.from(`synthetic fixture: ${relative}`)
+    const target = path.join(root, relative)
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.writeFileSync(target, content)
+    files[relative] = createHash('sha256').update(content).digest('hex')
+  }
+  fs.writeFileSync(path.join(root, 'manifest.json'), JSON.stringify({
+    protocol: 1, integration: 'hermes-review-v1', files
+  }))
+  return root
+}
 
 test('cleanStaleAppOutDir removes a populated unpacked directory', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-before-pack-'))
@@ -124,9 +156,14 @@ test('beforePack on win32 preserves the previous build instead of wiping it', as
     fs.mkdirSync(appOutDir, { recursive: true })
     fs.writeFileSync(path.join(appOutDir, 'HermesEnterpriseAssistant.exe'), 'MZ-working', 'utf8')
 
+    stagedFixture(tempRoot)
+
     // No packager info in the context → default 'HermesEnterpriseAssistant.exe' product name.
     // node-pty staging is skipped because arch is not a number here.
-    await beforePack({ appOutDir, electronPlatformName: 'win32' })
+    await beforePack({ appOutDir, electronPlatformName: 'win32', packager: { projectDir: tempRoot } })
+    expect(stageOpenVpnConnect).toHaveBeenCalledTimes(1)
+    expect(fetch).not.toHaveBeenCalled()
+    expect(childProcess.execFile).not.toHaveBeenCalled()
 
     assert.equal(fs.existsSync(appOutDir), false)
     assert.equal(
@@ -136,6 +173,38 @@ test('beforePack on win32 preserves the previous build instead of wiping it', as
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true })
   }
+})
+
+test('win32 hook rejects missing nested assets before vendor staging or rollback changes', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-before-pack-'))
+  try {
+    const moduleRoot = stagedFixture(tempRoot)
+    fs.rmSync(path.join(moduleRoot, 'inference', 'offline', 'model.bin'))
+    const appOutDir = path.join(tempRoot, 'win-unpacked')
+    fs.mkdirSync(appOutDir)
+    fs.writeFileSync(path.join(appOutDir, 'HermesEnterpriseAssistant.exe'), 'MZ-working')
+    await assert.rejects(beforePack({ appOutDir, electronPlatformName: 'win32',
+      packager: { projectDir: tempRoot } }), /missing: inference\/offline\/model.bin/)
+    assert.equal(fs.readFileSync(path.join(appOutDir, 'HermesEnterpriseAssistant.exe'), 'utf8'), 'MZ-working')
+    expect(stageOpenVpnConnect).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
+  } finally { fs.rmSync(tempRoot, { recursive: true, force: true }) }
+})
+
+test('local hook verifies the same module but never stages the VPN installer', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-local-before-pack-'))
+  try {
+    stagedFixture(tempRoot)
+    await beforeLocalPack({ appOutDir: '', electronPlatformName: 'win32', packager: { projectDir: tempRoot } })
+    expect(stageOpenVpnConnect).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
+  } finally { fs.rmSync(tempRoot, { recursive: true, force: true }) }
+})
+
+test('R30 guard rejects fetch, sockets and downloader subprocesses', async () => {
+  assert.throws(() => fetch('https://invalid.example'), /forbids network/)
+  assert.throws(() => new net.Socket().connect(443, 'invalid.example'), /forbids network/)
+  assert.throws(() => childProcess.execFile('powershell.exe'), /forbids network/)
 })
 
 test('beforePack on linux keeps the plain wipe (no .bak)', async () => {

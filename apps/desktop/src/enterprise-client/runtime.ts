@@ -4,6 +4,8 @@
  * public origin scopes presentation preferences, never request routing.
  */
 
+import type { DoudianReply, DoudianRequest } from '../../electron/doudian-types'
+
 import {
   EnterpriseClientError,
   enterpriseClientErrorForStatus,
@@ -73,6 +75,7 @@ export interface EnterpriseMultipartUpload {
 }
 
 export interface EnterpriseClientRuntime {
+  doudian?: (payload: Omit<DoudianRequest, 'sessionId'>) => Promise<DoudianReply>
   /** Non-secret scope for this device's per-seat presentation preferences. */
   serverOrigin?: string
   speech?: {
@@ -261,6 +264,10 @@ function enterpriseRuntimeFromSession(
 
   return {
     serverOrigin: new URL(connected.baseUrl).origin,
+    doudian: enterpriseBridge.doudian ? async payload => {
+      if (disconnected) { return { ok: false, error: 'DOUDIAN_OWNER_CHANGED' } }
+      return enterpriseBridge.doudian!({ ...payload, sessionId })
+    } : undefined,
     speech: enterpriseBridge.speech ? {
       async status() {
         if (disconnected) {return { available: false }}

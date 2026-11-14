@@ -22,6 +22,7 @@
 import path from 'node:path'
 
 import { stampExeIdentity } from './set-exe-identity.mjs'
+import { verifyPackagedModule } from './verify-doudian-package.mjs'
 
 export default async function afterPack(context) {
   if (context.electronPlatformName !== 'win32') {
@@ -31,6 +32,9 @@ export default async function afterPack(context) {
   const productName = context.packager?.appInfo?.productFilename || 'Hermes'
   const exe = path.join(context.appOutDir, `${productName}.exe`)
   const desktopRoot = path.resolve(import.meta.dirname, '..')
+
+  await verifyPackagedModule(path.join(context.packager?.projectDir || desktopRoot, 'build', 'doudian'),
+    path.join(context.appOutDir, 'resources', 'doudian'))
 
   try {
     await stampExeIdentity(exe, desktopRoot)

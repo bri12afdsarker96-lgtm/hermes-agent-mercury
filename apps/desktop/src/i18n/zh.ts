@@ -3,6 +3,46 @@ import { defineFieldCopy } from '@/app/settings/field-copy'
 import type { Translations } from './types'
 
 export const zh: Translations = {
+  doudian: {
+    "title": "抖店工作台",
+    "refresh": "刷新",
+    "manageShops": "授权 / 店铺管理",
+    "moduleVersion": "执行模块",
+    "shop": "店铺",
+    "selectShop": "请选择店铺",
+    "chooseWorkbook": "选择工作簿副本",
+    "noWorkbook": "未选择工作簿",
+    "prepare": "检查待回填表格",
+    "task": "评价截图",
+    "saved": "已保存回填",
+    "stop": "停止",
+    "confirmStart": "确认截图并回填",
+    "progress": "执行记录",
+    "desktopOnly": "仅支持 Windows 桌面客户端。",
+    "moduleMissing": "尚未安装本机截图执行模块。",
+    "moduleInvalid": "执行模块完整性校验失败，请重新安装已验证模块。",
+    "windowsOnly": "评价截图仅支持 Windows。",
+    "forbidden": "当前企业账号无权使用此工作台。",
+    "ownerChanged": "账号或企业已变化，请重新打开工作台。",
+    "hostLost": "截图进程已断开。请先核对工作簿，再重启软件；没有自动重放任务。",
+    "resultUnknown": "结果暂未确认，请查询任务状态，不要重复提交。",
+    "licenseRequired": "请通过“授权 / 店铺管理”完成截图模块授权。",
+    "busy": "任务或店铺操作仍在执行。",
+    "workbookBusy": "该工作簿正在被其他任务处理。",
+    "failed": "操作失败",
+    "dependenciesMissing": "需要系统 Chrome 和 Excel 或 WPS。",
+    "states": {
+      "idle": "空闲",
+      "preparing": "正在检查表格",
+      "awaiting_confirmation": "等待确认",
+      "running": "正在截图",
+      "stopping": "正在停止并保存",
+      "stopped": "已停止",
+      "completed": "任务结束，请核对已保存与跳过记录",
+      "failed": "任务失败，已保存结果保留",
+      "unknown": "结果待确认"
+    }
+  },
   common: {
     apply: '应用',
     back: '返回',

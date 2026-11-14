@@ -13,6 +13,7 @@ import { build } from 'esbuild'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdirSync } from 'node:fs'
+import { localDeploymentPlugin } from './local-deployment.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
@@ -29,6 +30,14 @@ const external = ['electron', 'node-pty', 'get-windows', 'fs']
 // behaves like a packaged build. Dev bundles (`--dev`) leave the env alone
 // so HERMES_DESKTOP_DEV_SERVER / source-tree resolution keep working.
 const isDev = process.argv.includes('--dev')
+const localIndex = process.argv.indexOf('--local-deployment')
+if (localIndex >= 0) throw new Error('Local verification bundling is unavailable until 0.20.12 runtime isolation is integrated and verified')
+if (localIndex >= 0 && (!process.argv[localIndex + 1] || isDev)) {
+  throw new Error('--local-deployment requires a file and cannot be used with --dev')
+}
+const plugins = localIndex < 0 ? [] : [await localDeploymentPlugin(
+  resolve(process.argv[localIndex + 1]), resolve(root, 'assets/enterprise-deployment.json')
+)]
 const define = isDev
   ? {}
   : { 'process.env.HERMES_DESKTOP_IS_PACKAGED': JSON.stringify(true) }
@@ -42,6 +51,7 @@ await build({
   target: 'node20',
   outfile: mainOut,
   external,
+  plugins,
   banner: {
     js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
   },

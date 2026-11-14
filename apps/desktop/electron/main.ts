@@ -1,5 +1,7 @@
 import { execFile, execFileSync, spawn } from 'node:child_process'
 import crypto from 'node:crypto'
+import { assertDoudianCapability, DoudianController, doudianScope } from './doudian-host'
+import type { DoudianRequest } from './doudian-types'
 import fs from 'node:fs'
 import http from 'node:http'
 import https from 'node:https'
@@ -13562,6 +13564,56 @@ ipcMain.handle('hermes:api', async (_event, request) => {
 // `fetchJson` engine (no browser Origin — the server's strict-Origin / no-CORS
 // posture stays intact). Consumed by the independent client's runtime adapter.
 const enterpriseSessions = new EnterpriseSessionStore()
+
+const doudianControllers = new Map<number, { sessionId: string; controller: DoudianController; current(): boolean }>()
+const doudianFenceTimer = setInterval(() => {
+  for (const [senderId, entry] of doudianControllers) {
+    if (!entry.current()) { entry.controller.close(); doudianControllers.delete(senderId) }
+  }
+}, 1000)
+doudianFenceTimer.unref()
+app.on('before-quit', () => {
+  clearInterval(doudianFenceTimer)
+  for (const entry of doudianControllers.values()) entry.controller.close()
+  doudianControllers.clear()
+})
+ipcMain.handle('hermes:enterprise:doudian', async (event, payload: DoudianRequest) => {
+  if (!isEnterpriseUpdateSender(event)) return { ok: false, error: 'DOUDIAN_FORBIDDEN' }
+  const session = enterpriseSessions.resolve(event.sender.id, payload?.sessionId)
+  if (!session) return { ok: false, error: 'DOUDIAN_OWNER_CHANGED' }
+  let entry = doudianControllers.get(event.sender.id)
+  if (entry && entry.sessionId !== session.sessionId) {
+    entry.controller.close(); doudianControllers.delete(event.sender.id); entry = undefined
+  }
+  if (!entry) {
+    const current = () => isEnterpriseUpdateSender(event) && enterpriseSessions.resolve(event.sender.id, session.sessionId) === session
+    const controller = new DoudianController({
+      platform: process.platform,
+      root: app.isPackaged ? path.join(process.resourcesPath, 'doudian') : path.join(app.getAppPath(), 'build', 'doudian'),
+      isCurrent: current,
+      async authorize(action) {
+        const active = await refreshedEnterpriseSession(event.sender.id, session.sessionId)
+        if (!active || !current()) throw new Error('DOUDIAN_OWNER_CHANGED')
+        const identity = await fetchJson(resolveEnterpriseUrl(active.baseUrl, '/api/whoami'), '', {
+          bearer: active.token, headers: { Origin: new URL(active.baseUrl).origin }, method: 'GET', timeoutMs: 15000
+        })
+        if (!current()) throw new Error('DOUDIAN_OWNER_CHANGED')
+        assertDoudianCapability(identity, action)
+        return doudianScope(active.baseUrl, identity)
+      },
+      async chooseWorkbook() {
+        const selection = await dialog.showOpenDialog(mainWindow, {
+          title: '选择截图或打款工作簿副本', properties: ['openFile'],
+          filters: [{ name: 'Excel / WPS', extensions: ['xlsx', 'xls'] }]
+        })
+        return selection.canceled ? null : selection.filePaths[0] ?? null
+      }
+    })
+    entry = { sessionId: session.sessionId, controller, current }
+    doudianControllers.set(event.sender.id, entry)
+  }
+  return entry.controller.operate(payload)
+})
 const enterpriseSpeech = new EnterpriseSpeech()
 const enterpriseSpeechSenders = new WeakSet<WebContents>()
 app.on('before-quit', () => enterpriseSpeech.stopAll())

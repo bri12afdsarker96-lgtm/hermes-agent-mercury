@@ -8,6 +8,8 @@
  */
 
 export type EnterpriseWorkspaceId =
+  | 'review-capture'
+  | 'payment'
   | 'ai_config'
   | 'assistant'
   | 'knowledge_qa'
@@ -26,6 +28,7 @@ export type EnterpriseWorkspaceId =
 export interface EnterpriseRoleSnapshot {
   effective_permissions?: readonly string[]
   role?: string
+  product_capabilities?: Record<string, { enabled?: boolean; status?: string }>
 }
 
 export interface EnterpriseWorkspaceDefinition {
@@ -241,9 +244,16 @@ export function enterpriseWorkspaces(snapshot: EnterpriseRoleSnapshot | undefine
     entries.splice(1, 0,
       { id: 'assistant', label: '企业 AI 助手', glyph: 'AI', description: '直接提问，结合企业知识解答问题' },
       )
+    entries.splice(1, 0,
+      { id: 'review-capture', label: '订单截图', glyph: '02', description: '订单评价截图与工作簿回填' },
+      { id: 'payment', label: '小额打款', glyph: '03', description: '打开原版打款窗口' })
     entries.push({ id: 'receivables', label: '应收款跟进', glyph: '款', description: '创建和处理本人应收款', requiredPermissions: ['reminder.read'] })
     entries.push({ id: 'overdue', label: '逾期未处理', glyph: '期', description: '查看权限范围内的逾期待办', requiredPermissions: ['reminder.read'] })
   }
   return entries.filter((workspace, index) => entries.findIndex(item => item.id === workspace.id) === index)
     .filter(workspace => hasAnyPermission(snapshot?.effective_permissions, workspace.requiredPermissions))
+    .filter(workspace => {
+      const capability = workspace.id === 'review-capture' ? 'doudian_review' : workspace.id === 'payment' ? 'doudian_payment' : undefined
+      return !capability || (snapshot?.product_capabilities?.[capability]?.enabled === true && snapshot.product_capabilities[capability].status === 'LIVE')
+    })
 }

@@ -28,6 +28,17 @@ afterEach(() => {
 })
 
 describe('Enterprise client runtime adapter', () => {
+  it('binds doudian requests to the session and refuses them after disconnect', async () => {
+    const bridge = installBridge()
+    const doudian = vi.fn(async () => ({ ok: true }))
+    Object.assign(bridge, { doudian })
+    const runtime = await connectEnterpriseClient()
+    await runtime.doudian!({ action: 'capabilities' })
+    expect(doudian).toHaveBeenCalledWith({ action: 'capabilities', sessionId: 'opaque-session' })
+    await runtime.disconnect()
+    await expect(runtime.doudian!({ action: 'openPayment' })).resolves.toEqual({ ok: false, error: 'DOUDIAN_OWNER_CHANGED' })
+    expect(doudian).toHaveBeenCalledTimes(1)
+  })
   it('retries transient reads once but never replays writes', async () => {
     const bridge = installBridge()
     const failure = { code: 'http', kind: 'error' as const, message: 'unavailable', status: 503 }

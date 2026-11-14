@@ -49,6 +49,36 @@ interface AuxTaskCopy {
 }
 
 export interface Translations {
+  doudian: {
+    title: string
+    refresh: string
+    manageShops: string
+    moduleVersion: string
+    shop: string
+    selectShop: string
+    chooseWorkbook: string
+    noWorkbook: string
+    prepare: string
+    task: string
+    saved: string
+    stop: string
+    confirmStart: string
+    progress: string
+    desktopOnly: string
+    moduleMissing: string
+    moduleInvalid: string
+    windowsOnly: string
+    forbidden: string
+    ownerChanged: string
+    hostLost: string
+    resultUnknown: string
+    licenseRequired: string
+    busy: string
+    workbookBusy: string
+    failed: string
+    dependenciesMissing: string
+    states: Record<'idle' | 'preparing' | 'awaiting_confirmation' | 'running' | 'stopping' | 'stopped' | 'completed' | 'failed' | 'unknown', string>
+  }
   common: {
     apply: string
     back: string

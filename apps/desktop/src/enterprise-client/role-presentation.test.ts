@@ -8,6 +8,17 @@ import {
 } from './role-presentation'
 
 describe('enterprise role presentation', () => {
+  it('shows each doudian entry only for enabled live tenant capabilities', () => {
+    for (const role of ['operator', 'supervisor', 'tenant_admin']) {
+      const product_capabilities = { doudian_review: { enabled: true, status: 'LIVE' }, doudian_payment: { enabled: true, status: 'LIVE' } }
+      expect(enterpriseWorkspaces({ role, product_capabilities }).slice(0, 3).map(item => item.id)).toEqual(['workbench', 'review-capture', 'payment'])
+      product_capabilities.doudian_review.status = 'DISABLED'
+      expect(enterpriseWorkspaces({ role, product_capabilities }).map(item => item.id)).not.toContain('review-capture')
+      expect(enterpriseWorkspaces({ role, product_capabilities }).map(item => item.id)).toContain('payment')
+      expect(enterpriseWorkspaces({ role }).map(item => item.id)).not.toContain('payment')
+    }
+    expect(enterpriseWorkspaces({ role: 'super_admin', effective_permissions: ['*'], product_capabilities: { doudian_review: { enabled: true, status: 'LIVE' } } }).map(item => item.id)).not.toContain('review-capture')
+  })
   it('exposes receivables only for tenant roles with reminder read permission', () => {
     for (const role of ['operator', 'supervisor', 'tenant_admin']) {
       expect(enterpriseWorkspaces({role, effective_permissions:['reminder.read']}).map(item => item.id)).toContain('receivables')

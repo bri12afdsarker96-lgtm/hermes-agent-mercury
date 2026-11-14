@@ -3,6 +3,46 @@ import { FIELD_DESCRIPTIONS, FIELD_LABELS } from '@/app/settings/constants'
 import type { Translations } from './types'
 
 export const en: Translations = {
+  doudian: {
+    "title": "Doudian workbench",
+    "refresh": "Refresh",
+    "manageShops": "Authorize / manage shops",
+    "moduleVersion": "Module",
+    "shop": "Shop",
+    "selectShop": "Select a shop",
+    "chooseWorkbook": "Choose workbook copy",
+    "noWorkbook": "No workbook selected",
+    "prepare": "Check workbook",
+    "task": "Review capture",
+    "saved": "Saved to workbook",
+    "stop": "Stop",
+    "confirmStart": "Confirm capture and backfill",
+    "progress": "Execution log",
+    "desktopOnly": "Available in the Windows desktop app.",
+    "moduleMissing": "The local capture module is not installed.",
+    "moduleInvalid": "Capture module integrity check failed. Reinstall the verified module.",
+    "windowsOnly": "Review capture requires Windows.",
+    "forbidden": "The current enterprise account cannot use this workbench.",
+    "ownerChanged": "The account or enterprise changed. Reopen the workbench.",
+    "hostLost": "The capture process disconnected. Verify the workbook before restarting the app; nothing was replayed.",
+    "resultUnknown": "The result is not confirmed. Check task status; do not submit again.",
+    "licenseRequired": "Authorize the capture module through Authorize / manage shops.",
+    "busy": "A task or shop operation is still active.",
+    "workbookBusy": "This workbook is already being processed.",
+    "failed": "Operation failed",
+    "dependenciesMissing": "System Chrome and Excel or WPS are required.",
+    "states": {
+      "idle": "Idle",
+      "preparing": "Checking workbook",
+      "awaiting_confirmation": "Awaiting confirmation",
+      "running": "Capturing",
+      "stopping": "Stopping and saving",
+      "stopped": "Stopped",
+      "completed": "Finished; review saved rows and skipped records",
+      "failed": "Failed; saved rows retained",
+      "unknown": "Result unconfirmed"
+    }
+  },
   common: {
     apply: 'Apply',
     back: 'Back',

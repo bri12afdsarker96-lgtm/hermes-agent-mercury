@@ -40,6 +40,7 @@
     "dist:win": "npm run build && npm run builder -- --win",
     "dist:win:msi": "npm run build && npm run builder -- --win msi",
     "dist:win:nsis": "npm run build && npm run builder -- --win nsis",
+    "dist:win:doudian-local": "node scripts/pack-doudian-nsis.mjs",
     "dist:linux": "npm run build && npm run builder -- --linux AppImage deb rpm",
     "perf": "node scripts/perf/run.mjs",
     "update:shim": "bash ../../scripts/desktop-update/repro.sh shim",
@@ -214,6 +215,11 @@
     "beforePack": "scripts/before-pack.mjs",
     "afterPack": "scripts/after-pack.mjs",
     "extraResources": [
+      {
+        "from": "build/doudian",
+        "to": "doudian",
+        "filter": ["**/*"]
+      },
       {
         "from": "build/install-stamp.json",
         "to": "install-stamp.json"
