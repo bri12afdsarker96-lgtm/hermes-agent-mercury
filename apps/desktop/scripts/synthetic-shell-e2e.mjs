@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,17 +8,35 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { build as esbuild } from 'esbuild'
 import { _electron as electron } from 'playwright'
+import { defaultFixtureSource, prepareFixtures } from '../synthetic-shell-test/prepare-fixtures.mjs'
 
 const desktop=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'), repo=path.resolve(desktop,'../..')
-const source=path.join(desktop,'synthetic-shell-test'), output=path.join(repo,'results','synthetic-shell-e2e')
-await mkdir(output,{recursive:true})
-await viteBuild({configFile:false,root:source,base:'./',cacheDir:path.join(output,'vite-cache'),plugins:[react(),tailwindcss()],resolve:{alias:{'@':path.join(desktop,'src')},dedupe:['react','react-dom']},build:{outDir:path.join(output,'renderer'),emptyOutDir:false},logLevel:'warn'})
-await esbuild({entryPoints:[path.join(source,'main.ts')],outfile:path.join(output,'main.cjs'),platform:'node',format:'cjs',bundle:true,external:['electron'],logLevel:'warning'})
-await esbuild({entryPoints:[path.join(desktop,'electron','preload.ts')],outfile:path.join(output,'preload.cjs'),platform:'node',format:'cjs',bundle:true,external:['electron'],logLevel:'warning'})
+const source=path.join(desktop,'synthetic-shell-test'), runs=path.join(repo,'results','synthetic-shell-e2e')
+await mkdir(runs,{recursive:true})
+const output=await mkdtemp(path.join(runs,'run-'))
+const fixtureSource=process.env.HERMES_SYNTHETIC_FIXTURE_SOURCE || defaultFixtureSource
+await writeFile(path.join(output,'run-info.json'),JSON.stringify({hermesHead:execFileSync('git',['rev-parse','HEAD'],{cwd:repo,encoding:'utf8'}).trim(),fixtureSource,startedAt:new Date().toISOString(),mode:'synthetic-test-only'},null,2))
+try {
+  await prepareFixtures(fixtureSource,path.join(output,'fixtures'))
+} catch(error) {
+  await writeFile(path.join(output,'failure.txt'),String(error.stack || error))
+  console.error(`Fixture preparation failed; evidence: ${output}`)
+  throw error
+}
+try {
+  await viteBuild({configFile:false,root:source,base:'./',cacheDir:path.join(output,'vite-cache'),plugins:[react(),tailwindcss()],resolve:{alias:{'@':path.join(desktop,'src')},dedupe:['react','react-dom']},build:{outDir:path.join(output,'renderer'),emptyOutDir:false},logLevel:'warn'})
+  await esbuild({entryPoints:[path.join(source,'main.ts')],outfile:path.join(output,'main.cjs'),platform:'node',format:'cjs',bundle:true,external:['electron'],logLevel:'warning'})
+  await esbuild({entryPoints:[path.join(desktop,'electron','preload.ts')],outfile:path.join(output,'preload.cjs'),platform:'node',format:'cjs',bundle:true,external:['electron'],logLevel:'warning'})
+} catch(error) {
+  await writeFile(path.join(output,'failure.txt'),String(error.stack || error))
+  console.error(`Build failed; evidence: ${output}`)
+  throw error
+}
 const env=Object.fromEntries(['SystemRoot','WINDIR','SystemDrive','TEMP','TMP','COMSPEC','PATHEXT'].filter(key=>process.env[key]).map(key=>[key,process.env[key]]))
-env.PATH=path.join(process.env.SystemRoot,'System32'); env.HERMES_SYNTHETIC_FIXTURES=path.join(repo,'results')
+env.PATH=path.join(process.env.SystemRoot,'System32'); env.HERMES_SYNTHETIC_FIXTURES=path.join(output,'fixtures')
 const binary=path.join(desktop,'node_modules','electron','dist','electron.exe')
 let app,page,requests=0
+const pageErrors=[]
 const probe=http.createServer((_req,res)=>{requests++;res.end('unexpected')})
 await new Promise(resolve=>probe.listen(0,'127.0.0.1',resolve))
 try {
@@ -26,11 +44,13 @@ try {
   const settings=await app.evaluate(({app,BrowserWindow})=>({disabled:app.commandLine.hasSwitch('no-sandbox'),prefs:BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences()}))
   if(settings.disabled || !settings.prefs.sandbox || !settings.prefs.contextIsolation) throw new Error('Unsafe Electron renderer settings')
   page=await app.firstWindow()
+  page.on('pageerror',error=>pageErrors.push(error.message))
   await page.getByText('合成测试 · 模拟登录与假店铺 · 不连接真实店铺 · 不发生真实付款').waitFor()
   await page.getByLabel('登录账号').fill('synthetic'); await page.getByLabel('登录密码').fill('synthetic')
   await page.screenshot({path:path.join(output,'01-login.png')})
   await page.getByRole('button',{name:'登录企业工作台'}).click()
   await page.getByTestId('enterprise-client-workbench').waitFor({timeout:20000})
+  if (await page.getByText('打开原版打款窗口').count()) throw new Error('Obsolete payment navigation copy is present')
   await page.screenshot({path:path.join(output,'02-workbench.png')})
   const nav=page.getByRole('navigation',{name:'企业客户端主导航'})
   await nav.getByRole('button',{name:'订单截图'}).click()
@@ -43,6 +63,7 @@ try {
   await page.getByText('任务结束，请核对已保存与跳过记录',{exact:true}).waitFor({timeout:15000})
   await page.screenshot({path:path.join(output,'04-review-complete.png')})
   await nav.getByRole('button',{name:'小额打款'}).click()
+  if (await page.getByText('打开原版打款窗口').count()) throw new Error('Obsolete payment navigation copy is present')
   await page.getByRole('button',{name:'选择工作簿'}).click(); await page.getByText('synthetic.xlsx').waitFor()
   await page.getByLabel('金额',{exact:true}).fill('3.25'); await page.getByLabel('起始行',{exact:true}).fill('2')
   await page.getByRole('button',{name:'检查并准备'}).click()
@@ -66,10 +87,15 @@ try {
   const auditPath=path.join(state.root,'audit.jsonl'), audit=(await readFile(auditPath,'utf8')).trim().split(/\r?\n/).map(JSON.parse)
   const calls=(await readFile(path.join(state.root,'fixture','calls.txt'),'utf8')).trim().split(/\r?\n/), saved=JSON.parse(await readFile(path.join(state.root,'fixture','persisted.json'),'utf8'))
   if(audit.some(x=>x.channel==='host'&&['openPayment','openReview'].includes(x.method)) || audit.filter(x=>x.channel==='host'&&x.method==='startPayment').length!==1 || JSON.stringify(calls)!==JSON.stringify(['confirm','second-confirm']) || !saved['2']?.includes('需人工核验') || saved['3']!==undefined) throw new Error('Synthetic evidence mismatch')
+  if(pageErrors.length) throw new Error(`Renderer errors: ${pageErrors.join('; ')}`)
   for(const [from,to] of [[auditPath,'audit.jsonl'],[path.join(state.root,'review-trace.jsonl'),'review-trace.jsonl'],[path.join(state.root,'fixture','calls.txt'),'payment-calls.txt'],[path.join(state.root,'fixture','persisted.json'),'payment-persisted.json']]) await copyFile(from,path.join(output,to))
   console.log(`PASS synthetic login + real enterprise shell + review + payment paused_review; output=${output}`)
 } catch(error) {
   if(page) await page.screenshot({path:path.join(output,'failure.png')}).catch(()=>{})
+  const root=app ? await app.evaluate(()=>process.env.HERMES_SYNTHETIC_ROOT).catch(()=>undefined) : undefined
+  if(root) for(const [from,to] of [[path.join(root,'audit.jsonl'),'failure-audit.jsonl'],[path.join(root,'review-trace.jsonl'),'failure-review-trace.jsonl'],[path.join(root,'fixture','calls.txt'),'failure-payment-calls.txt']]) await copyFile(from,path.join(output,to)).catch(()=>{})
+  await writeFile(path.join(output,'failure.txt'),String(error.stack || error)).catch(()=>{})
+  console.error(`Run failed; evidence: ${output}`)
   throw error
 } finally {
   if(app) await app.close().catch(()=>{})

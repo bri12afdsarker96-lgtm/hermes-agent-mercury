@@ -7,25 +7,21 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { DoudianController, DoudianHost } from '../electron/doudian-host'
 import type { DoudianRequest } from '../electron/doudian-types'
+import pins from './fixtures.json'
 
 const fixtures = process.env.HERMES_SYNTHETIC_FIXTURES
 if (!fixtures || !path.isAbsolute(fixtures)) throw new Error('Synthetic fixture root required')
 const root = mkdtempSync(path.join(os.tmpdir(), 'hermes-payment-pipe-'))
 app.setPath('userData', path.join(root, 'electron-data'))
-const hashes = {
-  review: ['HermesHostIsolationTests.exe', '3829549718230374fbdaa993c164477286afd2edd8678e491af572cdf6832c05'],
-  payment: ['PaymentHostEngine.exe', 'c78a46f2e790bd111a7df5e14fd8814f91ec09ef99dbffa1fea81a5a0bb1f0a1'],
-  dll: ['Newtonsoft.Json.dll', 'e1e27af7b07eeedf5ce71a9255f0422816a6fc5849a483c6714e1b472044fa9d']
-}
 function copyPinned(kind: 'review' | 'payment') {
   const dir = path.join(root, kind); mkdirSync(dir)
-  for (const [name, expected] of [hashes[kind], hashes.dll]) {
-    const from = path.join(fixtures!, `td-final-${kind}-fixture`, name), to = path.join(dir, name)
+  for (const {file: name, sha256: expected} of [pins[kind], pins.dll]) {
+    const from = path.join(fixtures!, pins[kind].directory, name), to = path.join(dir, name)
     if (createHash('sha256').update(readFileSync(from)).digest('hex') !== expected) throw new Error(`Fixture hash mismatch: ${kind}/${name}`)
     copyFileSync(from, to)
     if (createHash('sha256').update(readFileSync(to)).digest('hex') !== expected) throw new Error(`Fixture copy mismatch: ${kind}/${name}`)
   }
-  return path.join(dir, hashes[kind][0])
+  return path.join(dir, pins[kind].file)
 }
 const executables = { review: copyPinned('review'), payment: copyPinned('payment') }
 const reviewWorkbook = path.join(root, 'review-synthetic.xlsx'); writeFileSync(reviewWorkbook, 'synthetic test only')

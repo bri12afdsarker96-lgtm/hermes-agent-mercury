@@ -1,0 +1,5 @@
+{
+  "review": { "directory": "td-final-review-fixture", "file": "HermesHostIsolationTests.exe", "sha256": "3829549718230374fbdaa993c164477286afd2edd8678e491af572cdf6832c05" },
+  "payment": { "directory": "td-final-payment-fixture", "file": "PaymentHostEngine.exe", "sha256": "c78a46f2e790bd111a7df5e14fd8814f91ec09ef99dbffa1fea81a5a0bb1f0a1" },
+  "dll": { "file": "Newtonsoft.Json.dll", "sha256": "e1e27af7b07eeedf5ce71a9255f0422816a6fc5849a483c6714e1b472044fa9d" }
+}
