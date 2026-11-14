@@ -47,7 +47,7 @@ function fixture() {
       }
 
       if (method === 'capabilities') {
-        return { protocol: 1, version: '1.0.54', authorized: true, chrome: true, spreadsheet: true }
+        return { protocol: 1, version: '1.0.54', authorized: true, licenseVerification: 'verified-v1', chrome: true, spreadsheet: true }
       }
 
       if (method === 'prepare') {
@@ -155,7 +155,7 @@ describe.runIf(process.platform === 'win32')('Windows controller flow (synthetic
     const original = f.host.request.getMockImplementation()!
     let marker: unknown = 1
     f.host.request.mockImplementation(async (method: string) => method === 'capabilities'
-      ? { protocol: 1, version: '1.0.54', reviewOptions: marker }
+      ? { protocol: 1, version: '1.0.54', authorized: true, licenseVerification: 'verified-v1', reviewOptions: marker }
       : original(method))
     const opts = { workbookId, shopId, startRow: '7', maxRows: '13', concurrency: '4' }
     for (const value of [undefined, null, '1', 0, 2]) {
@@ -179,7 +179,7 @@ describe.runIf(process.platform === 'win32')('Windows controller flow (synthetic
     const shopId = 'b'.repeat(32)
     expect((await f.call('prepare', { workbookId, shopId })).ok).toBe(true)
     expect(f.host.request).toHaveBeenCalledWith('prepare', { shopId, workbook: file })
-    expect(f.host.request.mock.calls.filter(([method]) => method === 'capabilities')).toHaveLength(0)
+    expect(f.host.request.mock.calls.filter(([method]) => method === 'capabilities')).toHaveLength(1)
   })
   it('accepts only a native-selected workbook and separates prepare from start', async () => {
     const f = fixture(),
@@ -233,12 +233,10 @@ describe.runIf(process.platform === 'win32')('Windows controller flow (synthetic
     const f = fixture()
     await f.call('capabilities')
     let finish!: (value: any) => void
-    f.host.request.mockImplementationOnce(
-      () =>
-        new Promise(resolve => {
-          finish = resolve
-        })
-    )
+    const original = f.host.request.getMockImplementation()!
+    f.host.request.mockImplementation(method => method === 'status'
+      ? new Promise(resolve => { finish = resolve })
+      : original(method))
     const pending = f.call('status')
     await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
     f.deps.isCurrent.mockReturnValue(false)
@@ -258,12 +256,10 @@ describe.runIf(process.platform === 'win32')('Windows controller flow (synthetic
     const f = fixture()
     await f.call('capabilities')
     let finish!: (value: any) => void
-    f.host.request.mockImplementationOnce(
-      () =>
-        new Promise(resolve => {
-          finish = resolve
-        })
-    )
+    const original = f.host.request.getMockImplementation()!
+    f.host.request.mockImplementation(method => method === 'manageShops'
+      ? new Promise(resolve => { finish = resolve })
+      : original(method))
     const first = f.call('manageShops')
     await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
     expect((await f.call('manageShops')).error).toBe('TASK_BUSY')
