@@ -66,7 +66,7 @@ export function assertDoudianCapability(identity: unknown, action: DoudianReques
   const review = capabilities?.doudian_review
   const payment = capabilities?.doudian_payment
   const enabled = (value: typeof review) => value?.enabled === true && value.status === 'LIVE'
-  const allowed = ['openReview', 'shops', 'manageShops', 'prepare', 'start'].includes(action) ? enabled(review)
+  const allowed = ['openReview', 'shops', 'manageShops', 'prepare', 'start', 'shopManagementList', 'shopManagementAdd', 'shopManagementRename', 'shopManagementPin', 'shopManagementMove', 'shopManagementPrepareDelete', 'shopManagementDelete', 'shopLoginStart', 'shopCheckStart', 'shopOperationStatus', 'shopLoginConfirm', 'shopLoginFinishFeige', 'shopOperationCancel'].includes(action) ? enabled(review)
     : ['openPayment', 'preparePayment', 'startPayment'].includes(action) ? enabled(payment)
       : ['capabilities', 'chooseWorkbook', 'status', 'activateLicense', 'resumeLicense', 'licenseStatus'].includes(action) ? enabled(review) || enabled(payment)
         : false
@@ -267,17 +267,19 @@ export class DoudianController {
   private taskId?: string
   private taskKind?: DoudianTask['kind']
   private taskState?: DoudianTask['state']
+  private shopOperation?: { taskId: string; shopId: string; kind: 'shop-login' | 'shop-check' }
   constructor(private deps: DoudianDependencies) {}
   close() {
     this.lost = true
     this.host?.close()
     this.files.clear()
+    this.shopOperation = undefined
   }
   private current() {
     if (this.lost || !this.deps.isCurrent()) {
       this.close()
 
-      return bad('DOUDIAN_OWNER_CHANGED')
+      throw new Error('DOUDIAN_OWNER_CHANGED')
     }
   }
   async operate(request: DoudianRequest): Promise<DoudianReply> {
@@ -297,6 +299,19 @@ export class DoudianController {
         openFeige: [],
         shops: [],
         manageShops: [],
+        shopManagementList: [],
+        shopManagementAdd: [],
+        shopManagementRename: ['shopId', 'alias'],
+        shopManagementPin: ['shopId', 'pinned'],
+        shopManagementMove: ['shopId', 'direction'],
+        shopManagementPrepareDelete: ['shopId'],
+        shopManagementDelete: ['shopId', 'confirmation'],
+        shopLoginStart: ['shopId'],
+        shopCheckStart: ['shopId'],
+        shopOperationStatus: ['taskId'],
+        shopLoginConfirm: ['taskId', 'decision'],
+        shopLoginFinishFeige: ['taskId'],
+        shopOperationCancel: ['taskId'],
         chooseWorkbook: [],
         activateLicense: ['licenseCode'],
         resumeLicense: [],
@@ -318,13 +333,17 @@ export class DoudianController {
         Object.keys(request).some(key => !['sessionId', 'action', ...allowed, ...optional].includes(key)) ||
         allowed.some(key => typeof request[key as keyof DoudianRequest] !== 'string') ||
         optional.some(key => Object.hasOwn(request, key) && typeof request[key] !== 'string') ||
-        ['shopId', 'workbookId', 'taskId'].some(key => allowed.includes(key) && !validId(request[key as keyof DoudianRequest]))
+        ['shopId', 'workbookId', 'taskId', 'confirmation'].some(key => allowed.includes(key) && !validId(request[key as keyof DoudianRequest])) ||
+        (request.action === 'shopManagementRename' && (request.alias!.length > 80 || /[\x00-\x1f\x7f]/.test(request.alias!))) ||
+        (request.action === 'shopManagementPin' && !['true', 'false'].includes(request.pinned!)) ||
+        (request.action === 'shopManagementMove' && !['up', 'down'].includes(request.direction!)) ||
+        (request.action === 'shopLoginConfirm' && !['confirm', 'reject'].includes(request.decision!))
       ) {
         return bad('DOUDIAN_INVALID_REQUEST')
       }
 
-      // Stop is always available to the same fenced session, even during an enterprise network outage.
-      if (request.action !== 'stop') {
+      // Cancellation remains available to the same fenced session during an enterprise network outage.
+      if (request.action !== 'stop' && request.action !== 'shopOperationCancel') {
         const owner = await this.deps.authorize(request.action)
         this.current()
 
@@ -340,6 +359,7 @@ export class DoudianController {
       if (request.action === 'stop' && (!this.host || !this.taskId || request.taskId !== this.taskId)) {
         return bad('TASK_NOT_FOUND')
       }
+      if (request.action === 'shopOperationCancel' && (!this.host || !this.shopOperation || request.taskId !== this.shopOperation.taskId)) return bad('TASK_NOT_FOUND')
 
       if (this.exclusive) {
         return bad('TASK_BUSY')
@@ -383,12 +403,14 @@ export class DoudianController {
             return bad('INVALID_LICENSE_INPUT')
           }
         }
-        if (['manageShops', 'prepare', 'start', 'preparePayment', 'startPayment', 'openReview', 'openPayment'].includes(request.action)) {
+        if (request.action.startsWith('shopManagement') || ['shopLoginStart', 'shopCheckStart', 'shopLoginConfirm', 'shopLoginFinishFeige', 'manageShops', 'prepare', 'start', 'preparePayment', 'startPayment', 'openReview', 'openPayment'].includes(request.action)) {
           checkedCapabilities = (await this.host.request('capabilities')) as DoudianReply['capabilities']
           this.current()
           if (checkedCapabilities?.authorized !== true || checkedCapabilities.licenseVerification !== 'verified-v1') {
             return bad('LICENSE_REQUIRED')
           }
+          if (request.action.startsWith('shopManagement') && checkedCapabilities.shopManagement !== 1) return bad('SHOP_MANAGEMENT_UNSUPPORTED')
+          if (['shopLoginStart', 'shopCheckStart', 'shopLoginConfirm', 'shopLoginFinishFeige'].includes(request.action) && checkedCapabilities.shopOperations !== 1) return bad('SHOP_OPERATION_UNSUPPORTED')
         }
 
         if (request.action === 'openPayment') {
@@ -438,6 +460,9 @@ export class DoudianController {
 
         if (request.action === 'activateLicense') {
           args = { licenseCode: request.licenseCode!.trim() }
+        } else if (request.action.startsWith('shopManagement') || ['shopLoginStart', 'shopCheckStart', 'shopOperationStatus', 'shopLoginConfirm', 'shopLoginFinishFeige', 'shopOperationCancel'].includes(request.action)) {
+          if (['shopOperationStatus', 'shopLoginConfirm', 'shopLoginFinishFeige', 'shopOperationCancel'].includes(request.action) && request.taskId !== this.shopOperation?.taskId) return bad('TASK_NOT_FOUND')
+          for (const key of allowed) args[key] = request[key as keyof DoudianRequest] as string
         } else if (request.action === 'prepare') {
           const file = this.files.get(request.workbookId!)
 
@@ -524,6 +549,56 @@ export class DoudianController {
           return { ok: true }
         }
 
+        if (request.action === 'shopManagementList') {
+          if (!Array.isArray(result)) return bad('DOUDIAN_PROTOCOL_ERROR')
+          const managedShops: NonNullable<DoudianReply['managedShops']> = []
+          for (const item of result) {
+            if (!item || !validId(item.id) || typeof item.name !== 'string' ||
+              !(item.alias === null || typeof item.alias === 'string') || typeof item.pinned !== 'boolean' ||
+              !Number.isSafeInteger(item.sortOrder) || typeof item.pendingLogin !== 'boolean' ||
+              typeof item.pendingDeletion !== 'boolean' || !(item.status === null || typeof item.status === 'string')) return bad('DOUDIAN_PROTOCOL_ERROR')
+            if (['verifiedName', 'platformId', 'feigeStatus', 'checkedAt', 'feigeCheckedAt'].some(key => !(item[key] === null || typeof item[key] === 'string'))) return bad('DOUDIAN_PROTOCOL_ERROR')
+            managedShops.push({ id: item.id, name: item.name, alias: item.alias, pinned: item.pinned,
+              sortOrder: item.sortOrder, pendingLogin: item.pendingLogin, pendingDeletion: item.pendingDeletion, status: item.status,
+              verifiedName: item.verifiedName, platformId: item.platformId, feigeStatus: item.feigeStatus, checkedAt: item.checkedAt, feigeCheckedAt: item.feigeCheckedAt })
+          }
+          return { ok: true, managedShops }
+        }
+        if (['shopManagementAdd', 'shopManagementRename', 'shopManagementPin', 'shopManagementMove'].includes(request.action)) {
+          const mutation = result as { id?: unknown; updated?: unknown } | null
+          if (request.action === 'shopManagementAdd') {
+            if (!validId(mutation?.id)) return bad('DOUDIAN_PROTOCOL_ERROR')
+            return { ok: true, shopMutation: { id: mutation!.id as string } }
+          }
+          if (mutation?.updated !== true) return bad('DOUDIAN_PROTOCOL_ERROR')
+          return { ok: true, shopMutation: { updated: true } }
+        }
+        if (request.action === 'shopManagementPrepareDelete') {
+          const token = result as { confirmation?: unknown; expiresSeconds?: unknown; effect?: unknown } | null
+          if (!validId(token?.confirmation) || token?.expiresSeconds !== 120 || token.effect !== 'delete_local_profiles_and_list_keep_history') return bad('DOUDIAN_PROTOCOL_ERROR')
+          return { ok: true, shopDeleteConfirmation: { confirmation: token.confirmation as string, expiresSeconds: 120, effect: token.effect } }
+        }
+        if (['shopLoginStart', 'shopCheckStart', 'shopOperationStatus', 'shopLoginConfirm', 'shopLoginFinishFeige', 'shopOperationCancel'].includes(request.action)) {
+          const value = result as DoudianReply['shopOperation']
+          const textOrNull = (v: unknown) => v === null || typeof v === 'string'
+          const identity = (v: unknown): v is { name: string | null; platformId: string | null } => !!v && typeof v === 'object' && textOrNull((v as { name?: unknown }).name) && textOrNull((v as { platformId?: unknown }).platformId)
+          if (!value || !validId(value.taskId) || !validId(value.shopId) || !['shop-login', 'shop-check'].includes(value.kind) ||
+              !['running', 'awaiting_confirmation', 'stopping', 'completed', 'stopped', 'failed'].includes(value.state) ||
+              !['opening_browser', 'waiting_for_login', 'confirm_identity', 'verifying_identity', 'feige', 'checking', 'closing', 'rejected', 'done'].includes(value.phase) ||
+              !(value.candidate === null || identity(value.candidate)) || !identity(value.bound) || !textOrNull(value.merchantStatus) ||
+              !textOrNull(value.feigeStatus) || !textOrNull(value.error) || typeof value.bindingSaved !== 'boolean') return bad('DOUDIAN_PROTOCOL_ERROR')
+          if (request.action === 'shopLoginStart' || request.action === 'shopCheckStart') {
+            if (value.shopId !== request.shopId || value.kind !== (request.action === 'shopLoginStart' ? 'shop-login' : 'shop-check')) return bad('DOUDIAN_PROTOCOL_ERROR')
+            this.shopOperation = { taskId: value.taskId, shopId: value.shopId, kind: value.kind }
+          } else if (!this.shopOperation || value.taskId !== this.shopOperation.taskId || value.shopId !== this.shopOperation.shopId || value.kind !== this.shopOperation.kind) return bad('DOUDIAN_PROTOCOL_ERROR')
+          this.taskId = value.taskId
+          this.taskKind = value.kind
+          this.taskState = value.state
+          return { ok: true, shopOperation: { taskId: value.taskId, shopId: value.shopId, kind: value.kind, state: value.state, phase: value.phase,
+            candidate: value.candidate && { name: value.candidate.name, platformId: value.candidate.platformId }, bound: { name: value.bound.name, platformId: value.bound.platformId },
+            merchantStatus: value.merchantStatus, feigeStatus: value.feigeStatus, bindingSaved: value.bindingSaved, error: value.error } }
+        }
+
         const task = result as DoudianTask
 
         if (
@@ -548,8 +623,8 @@ export class DoudianController {
         const expectedKind = request.action === 'prepare' || request.action === 'start' ? 'review' :
           request.action === 'preparePayment' || request.action === 'startPayment' ? 'payment' :
           request.action === 'openPayment' ? 'payment-window' : request.action === 'openReview' ? 'review-window' :
-          request.action === 'openFeige' ? 'feige-window' : undefined
-        const kindValid = ['review', 'payment', 'payment-window', 'review-window', 'feige-window'].includes(task.kind ?? '')
+          request.action === 'openFeige' ? 'feige-window' : request.action === 'shopManagementDelete' ? 'shop-delete' : undefined
+        const kindValid = ['review', 'payment', 'payment-window', 'review-window', 'feige-window', 'shop-delete', 'shop-login', 'shop-check'].includes(task.kind ?? '')
         const wrongStatusOwner = request.action === 'status' && this.taskId &&
           (task.taskId !== this.taskId || task.kind !== this.taskKind)
         if (!kindValid || (task.state !== 'idle' && !validId(task.taskId)) ||

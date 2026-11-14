@@ -10,6 +10,7 @@ import { FolderOpen, LogIn, Play, RefreshCw, Square } from '@/lib/icons'
 import type { DoudianReply, DoudianRequest, DoudianShop, DoudianTask } from '../../electron/doudian-types'
 
 import { useDoudianEntryCopy } from './doudian-entry-copy'
+import { DoudianShopManagement } from './doudian-shop-management'
 import { authorizationErrors, DoudianEntryStatus } from './doudian-entry-state'
 import type { EnterpriseClientRuntime } from './runtime'
 
@@ -35,10 +36,11 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
   const [maxRows, setMaxRows] = useState('0')
   const [concurrency, setConcurrency] = useState('1')
   const [optionsChanged, setOptionsChanged] = useState(false)
+  const [managingShops, setManagingShops] = useState(false)
   const lifecycle = useMemo(() => ({ runtime, alive: true, inFlight: false }), [runtime])
   const [owner, setOwner] = useState(runtime)
   const service = runtime.doudian
-  const locked = busy || active(task) || task?.state === 'awaiting_confirmation' || unknown
+  const locked = managingShops || busy || active(task) || task?.state === 'awaiting_confirmation' || unknown
   const optionsSupported = capabilities?.reviewOptions === 1
   const validRange = /^\d+$/.test(startRow) && Number(startRow) >= 1 && Number(startRow) <= 1000000 &&
     /^\d+$/.test(maxRows) && Number(maxRows) <= 1000000
@@ -163,6 +165,7 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
     setMaxRows('0')
     setConcurrency('1')
     setOptionsChanged(false)
+    setManagingShops(false)
     setOwner(runtime)
     void action(refresh)
 
@@ -234,14 +237,8 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
           {copy.refresh}
         </Button>
         <Button
-          disabled={locked || !capabilities}
-          onClick={() =>
-            void action(async () => {
-              if (await call({ action: 'manageShops' })) {
-                await refresh()
-              }
-            })
-          }
+          disabled={locked || !capabilities?.authorized || capabilities.shopManagement !== 1}
+          onClick={() => setManagingShops(value => !value)}
           variant="secondary"
         >
           <LogIn />
@@ -254,6 +251,7 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
           </span>
         ) : null}
       </div>
+      {managingShops ? <DoudianShopManagement onChanged={refresh} onClose={() => setManagingShops(false)} operationsSupported={capabilities?.shopOperations === 1} runtime={runtime} /> : null}
       {error ? (
         <p className="text-(--ui-text-primary)" role="alert">
           {errorText(error)}
