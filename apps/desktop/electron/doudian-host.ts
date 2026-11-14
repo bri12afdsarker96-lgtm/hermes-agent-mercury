@@ -149,14 +149,14 @@ export class DoudianHost {
   private buffer = ''
   private decoder = new StringDecoder('utf8')
   private closed = false
-  constructor(executable: string) {
-    this.child = spawn(executable, ['--hermes-review-host'], {
+  constructor(executable: string, spawnHost: typeof spawn = spawn) {
+    this.child = spawnHost(executable, ['--hermes-review-host'], {
       shell: false,
       // The host creates the original WinForms windows in this process.
       windowsHide: false,
       cwd: path.dirname(executable),
       stdio: 'pipe'
-    })
+    }) as ChildProcessWithoutNullStreams
     this.child.stderr.resume()
     this.child.stdout.on('data', data => this.receive(this.decoder.write(data)))
     this.child.on('error', () => this.fail('DOUDIAN_HOST_LOST'))
@@ -167,7 +167,7 @@ export class DoudianHost {
     this.buffer += chunk
 
     if (this.buffer.length > 262144) {
-      this.close()
+      this.protocolFailure()
 
       return
     }
@@ -181,9 +181,20 @@ export class DoudianHost {
       try {
         const message = JSON.parse(line)
 
+        if (!message || typeof message !== 'object' || Array.isArray(message)) {
+          this.protocolFailure()
+          return
+        }
+
         if (message.event === 'paymentAuthorization') {
           // A legacy host is not allowed to request an obsolete grant or proceed.
-          this.close()
+          this.protocolFailure()
+          return
+        }
+
+        if (!validId(message.id) || typeof message.ok !== 'boolean' ||
+            (message.ok === false && typeof message.error !== 'string')) {
+          this.protocolFailure()
           return
         }
 
@@ -204,11 +215,15 @@ export class DoudianHost {
           )
         }
       } catch {
-        this.close()
+        this.protocolFailure()
 
         return
       }
     }
+  }
+  private protocolFailure() {
+    this.fail('DOUDIAN_PROTOCOL_ERROR')
+    this.child.kill()
   }
   request(method: string, params: Record<string, string> = {}): Promise<unknown> {
     if (this.closed) {
