@@ -1,0 +1,3 @@
+body { margin: 0; }
+.fixture-banner { background: #6f2632; color: white; font: 600 15px sans-serif; padding: 12px 24px; }
+.fixture-content { max-width: 1200px; margin: 0 auto; padding: 24px; }
