@@ -307,11 +307,14 @@ export class DoudianController {
       }
 
       const allowed = Object.hasOwn(fields, request?.action ?? '') ? fields[request.action] : undefined
+      const reviewOptions = ['startRow', 'maxRows', 'concurrency'] as const
+      const optional = request.action === 'prepare' ? reviewOptions : []
 
       if (
         !allowed ||
-        Object.keys(request).some(key => !['sessionId', 'action', ...allowed].includes(key)) ||
+        Object.keys(request).some(key => !['sessionId', 'action', ...allowed, ...optional].includes(key)) ||
         allowed.some(key => typeof request[key as keyof DoudianRequest] !== 'string') ||
+        optional.some(key => Object.hasOwn(request, key) && typeof request[key] !== 'string') ||
         ['shopId', 'workbookId', 'taskId'].some(key => allowed.includes(key) && !validId(request[key as keyof DoudianRequest]))
       ) {
         return bad('DOUDIAN_INVALID_REQUEST')
@@ -430,6 +433,24 @@ export class DoudianController {
           }
 
           args = { shopId: request.shopId!, workbook: file }
+          const present = reviewOptions.filter(key => Object.hasOwn(request, key))
+          if (present.length) {
+            if ((request.startRow !== undefined && (!validRow(request.startRow, 1) || Number(request.startRow) > 1000000)) ||
+                (request.maxRows !== undefined && (!validRow(request.maxRows, 0) || Number(request.maxRows) > 1000000))) {
+              return bad('INVALID_RANGE')
+            }
+            if (request.concurrency !== undefined && !['1', '2', '4', '8'].includes(request.concurrency)) {
+              return bad('INVALID_CONCURRENCY')
+            }
+            const capabilities = (await this.host.request('capabilities')) as DoudianReply['capabilities']
+            this.current()
+            if (capabilities?.reviewOptions !== 1) {
+              return bad('REVIEW_OPTIONS_UNSUPPORTED')
+            }
+            for (const key of present) {
+              args[key] = request[key]!
+            }
+          }
         } else if (request.action === 'preparePayment') {
           const file = this.files.get(request.workbookId!)
           const amount = request.amount

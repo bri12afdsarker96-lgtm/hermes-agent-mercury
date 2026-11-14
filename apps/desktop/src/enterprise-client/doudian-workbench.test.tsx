@@ -10,14 +10,14 @@ import type { EnterpriseClientRuntime } from './runtime'
 
 vi.mock('@/i18n/context', () => ({ useI18n: () => ({ t: zh }) }))
 
-function setup() {
+function setup(reviewOptions?: number) {
   let task: DoudianTask = { taskId: null, state: 'idle', saved: 0, summary: '', error: '', messages: [] }
 
   const send = vi.fn(async (request: Omit<DoudianRequest, 'sessionId'>): Promise<DoudianReply> => {
     if (request.action === 'capabilities') {
       return {
         ok: true,
-        capabilities: { protocol: 1, version: '1.0.54', authorized: true, chrome: true, spreadsheet: true }
+        capabilities: { protocol: 1, version: '1.0.54', authorized: true, chrome: true, spreadsheet: true, reviewOptions }
       }
     }
 
@@ -51,10 +51,47 @@ function setup() {
 
   const runtime = { doudian: send } as unknown as EnterpriseClientRuntime
 
-  return { send, runtime, view: render(<DoudianWorkbench runtime={runtime} />) }
+  return { send, runtime, setReviewOptions: (value: number | undefined) => { reviewOptions = value }, view: render(<DoudianWorkbench runtime={runtime} />) }
 }
 
 describe('Doudian workbench (offline fixtures)', () => {
+  it('sends chosen range and concurrency to the prepare bridge', async () => {
+    const { send } = setup(1)
+    await screen.findByText('模拟店铺 (123)')
+    fireEvent.change(screen.getByLabelText('起始行'), { target: { value: '7' } })
+    fireEvent.change(screen.getByLabelText('最多行'), { target: { value: '13' } })
+    fireEvent.change(screen.getByLabelText('截图并发'), { target: { value: '4' } })
+    fireEvent.change(screen.getByRole('combobox', { name: '店铺' }), { target: { value: 'a'.repeat(32) } })
+    fireEvent.click(screen.getByText('选择工作簿副本'))
+    await screen.findByText('测试副本.xlsx')
+    fireEvent.click(screen.getByText('检查待回填表格'))
+    await waitFor(() => expect(send).toHaveBeenCalledWith({ action: 'prepare', shopId: 'a'.repeat(32), workbookId: 'b'.repeat(32), startRow: '7', maxRows: '13', concurrency: '4' }))
+  })
+  it('shows old host limitations and preserves the old no-options request', async () => {
+    const { send } = setup()
+    await screen.findByText('模拟店铺 (123)')
+    expect(screen.getByLabelText('起始行').matches(':disabled')).toBe(true)
+    expect(screen.getByText(/当前执行模块不支持范围与并发设置/)).toBeTruthy()
+    fireEvent.change(screen.getByRole('combobox', { name: '店铺' }), { target: { value: 'a'.repeat(32) } })
+    fireEvent.click(screen.getByText('选择工作簿副本'))
+    await screen.findByText('测试副本.xlsx')
+    fireEvent.click(screen.getByText('检查待回填表格'))
+    await waitFor(() => expect(send).toHaveBeenCalledWith({ action: 'prepare', shopId: 'a'.repeat(32), workbookId: 'b'.repeat(32) }))
+  })
+  it('does not discard selected options when the host loses the capability', async () => {
+    const { send, setReviewOptions } = setup(1)
+    await screen.findByText('模拟店铺 (123)')
+    fireEvent.change(screen.getByLabelText('起始行'), { target: { value: '7' } })
+    fireEvent.change(screen.getByRole('combobox', { name: '店铺' }), { target: { value: 'a'.repeat(32) } })
+    fireEvent.click(screen.getByText('选择工作簿副本'))
+    await screen.findByText('测试副本.xlsx')
+    setReviewOptions(undefined)
+    fireEvent.click(screen.getByText(zh.doudian.refresh))
+    await screen.findByText(/当前执行模块不支持范围与并发设置/)
+    fireEvent.click(screen.getByText('检查待回填表格'))
+    await screen.findByRole('alert')
+    expect(send.mock.calls.some(([request]) => request.action === 'prepare')).toBe(false)
+  })
   it('previews continuation before explicit start, and reports only saved counts', async () => {
     const { send } = setup()
     await screen.findByText('模拟店铺 (123)')

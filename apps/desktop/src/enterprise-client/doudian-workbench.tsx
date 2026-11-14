@@ -31,10 +31,17 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [unknown, setUnknown] = useState(false)
+  const [startRow, setStartRow] = useState('2')
+  const [maxRows, setMaxRows] = useState('0')
+  const [concurrency, setConcurrency] = useState('1')
+  const [optionsChanged, setOptionsChanged] = useState(false)
   const lifecycle = useMemo(() => ({ runtime, alive: true, inFlight: false }), [runtime])
   const [owner, setOwner] = useState(runtime)
   const service = runtime.doudian
   const locked = busy || active(task) || task?.state === 'awaiting_confirmation' || unknown
+  const optionsSupported = capabilities?.reviewOptions === 1
+  const validRange = /^\d+$/.test(startRow) && Number(startRow) >= 1 && Number(startRow) <= 1000000 &&
+    /^\d+$/.test(maxRows) && Number(maxRows) <= 1000000
 
   const errorText = (code: string) =>
     ({
@@ -47,7 +54,9 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
       DOUDIAN_RESULT_UNKNOWN: copy.resultUnknown,
       LICENSE_REQUIRED: copy.licenseRequired,
       TASK_BUSY: copy.busy,
-      WORKBOOK_BUSY: copy.workbookBusy
+      WORKBOOK_BUSY: copy.workbookBusy,
+      REVIEW_OPTIONS_UNSUPPORTED: entry.rangeReason,
+      INVALID_RANGE: entry.invalidRange
     })[code] ?? `${copy.failed}: ${code}`
 
   const call = useCallback(
@@ -150,6 +159,10 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
     setWorkbook(undefined)
     setTask(undefined)
     setUnknown(false)
+    setStartRow('2')
+    setMaxRows('0')
+    setConcurrency('1')
+    setOptionsChanged(false)
     setOwner(runtime)
     void action(refresh)
 
@@ -200,17 +213,21 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
     <div className="space-y-4" data-testid="doudian-workbench">
       {standalone ? <>
         {!task || task.state === 'idle' ? <DoudianEntryStatus state={capabilities?.authorized ? 'idle' : 'unauthorized'} /> : null}
-        <fieldset aria-describedby="review-range-unavailable" className="flex flex-wrap gap-4" disabled>
-          <legend>{entry.range}</legend>
-          <label>{entry.startRow}<Input placeholder={entry.unavailable} readOnly type="number" value="" /></label>
-          <label>{entry.maxRows}<Input placeholder={entry.unavailable} readOnly type="number" value="" /></label>
-        </fieldset>
-        <p id="review-range-unavailable">{entry.rangeReason}</p>
         <div aria-label={entry.results} className="flex flex-wrap gap-4">
           <span>{entry.currentRow}: {entry.notProvided}</span>
           <span>{entry.failedCount}: {entry.notProvided}</span>
         </div>
       </> : null}
+      <fieldset className="flex flex-wrap gap-4" disabled={locked || !optionsSupported}>
+        <legend>{entry.range}</legend>
+        <label>{entry.startRow}<Input max={1000000} min={1} onChange={event => { setStartRow(event.target.value); setOptionsChanged(true) }} type="number" value={startRow} /></label>
+        <label>{entry.maxRows}<Input max={1000000} min={0} onChange={event => { setMaxRows(event.target.value); setOptionsChanged(true) }} type="number" value={maxRows} /></label>
+        <label>{entry.concurrency}<select className="block border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) p-2" onChange={event => { setConcurrency(event.target.value); setOptionsChanged(true) }} value={concurrency}>
+          {[1, 2, 4, 8].map(value => <option key={value} value={value}>{value}</option>)}
+        </select></label>
+      </fieldset>
+      {capabilities && !optionsSupported ? <p role="status">{entry.rangeReason}</p> : null}
+      {optionsSupported && !validRange ? <p role="alert">{entry.invalidRange}</p> : null}
       <div className="flex flex-wrap items-center gap-3">
         <Button disabled={busy} onClick={() => void action(refresh)} variant="secondary">
           <RefreshCw />
@@ -288,11 +305,17 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
             !workbook ||
             !capabilities?.chrome ||
             !capabilities.spreadsheet ||
-            !capabilities.authorized
+            !capabilities.authorized ||
+            (optionsSupported && !validRange)
           }
           onClick={() =>
             void action(async () => {
-              await call({ action: 'prepare', shopId, workbookId: workbook!.id })
+              if (!optionsSupported && optionsChanged) {
+                setError('REVIEW_OPTIONS_UNSUPPORTED')
+                return
+              }
+              await call({ action: 'prepare', shopId, workbookId: workbook!.id,
+                ...(optionsSupported ? { startRow, maxRows, concurrency } : {}) })
             })
           }
         >

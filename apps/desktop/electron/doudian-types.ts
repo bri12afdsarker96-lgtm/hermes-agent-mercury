@@ -13,6 +13,7 @@ export interface DoudianRequest {
   amount?: string
   startRow?: string
   maxRows?: string
+  concurrency?: string
   mode?: 'standard' | 'new-order'
 }
 
@@ -54,6 +55,7 @@ export interface DoudianReply {
     reviewUi?: number
     feigeUi?: number
     taskIsolation?: string
+    reviewOptions?: number
   }
   shops?: DoudianShop[]
   workbook?: { id: string; name: string }

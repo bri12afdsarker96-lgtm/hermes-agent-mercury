@@ -41,7 +41,7 @@ function fixture() {
 
   const host = {
     close: vi.fn(),
-    request: vi.fn(async (method: string) => {
+    request: vi.fn(async (method: string): Promise<unknown> => {
       if (method === 'initialize') {
         return { protocol: 1, version: '1.0.54', integration: 'hermes-review-v1', taskIsolation: 'hermes-task-isolation-v1' }
       }
@@ -146,6 +146,41 @@ describe('authority and private runtime', () => {
 })
 
 describe.runIf(process.platform === 'win32')('Windows controller flow (synthetic capture, no shop or COM)', () => {
+  it('negotiates review options through the real controller and rejects unsupported or invalid requests', async () => {
+    const f = fixture(), root = await temp(), file = path.join(root, 'copy.xlsx')
+    await fs.writeFile(file, 'synthetic')
+    f.deps.chooseWorkbook.mockResolvedValue(file)
+    const workbookId = (await f.call('chooseWorkbook')).workbook!.id
+    const shopId = 'b'.repeat(32)
+    const original = f.host.request.getMockImplementation()!
+    let marker: unknown = 1
+    f.host.request.mockImplementation(async (method: string) => method === 'capabilities'
+      ? { protocol: 1, version: '1.0.54', reviewOptions: marker }
+      : original(method))
+    const opts = { workbookId, shopId, startRow: '7', maxRows: '13', concurrency: '4' }
+    for (const value of [undefined, null, '1', 0, 2]) {
+      marker = value
+      expect(await f.call('prepare', opts)).toEqual({ ok: false, error: 'REVIEW_OPTIONS_UNSUPPORTED' })
+    }
+    expect(f.host.request.mock.calls.filter(([method]) => method === 'prepare')).toHaveLength(0)
+    for (const invalid of [{ startRow: '0' }, { maxRows: '1000001' }, { concurrency: '3' }, { startRow: '1.5' }]) {
+      expect((await f.call('prepare', { ...opts, ...invalid })).ok).toBe(false)
+    }
+    expect(f.host.request.mock.calls.filter(([method]) => method === 'prepare')).toHaveLength(0)
+    marker = 1
+    expect((await f.call('prepare', opts)).ok).toBe(true)
+    expect(f.host.request).toHaveBeenCalledWith('prepare', { shopId, workbook: file, startRow: '7', maxRows: '13', concurrency: '4' })
+  })
+  it('keeps old prepare calls without options compatible with an old host', async () => {
+    const f = fixture(), root = await temp(), file = path.join(root, 'copy.xlsx')
+    await fs.writeFile(file, 'synthetic')
+    f.deps.chooseWorkbook.mockResolvedValue(file)
+    const workbookId = (await f.call('chooseWorkbook')).workbook!.id
+    const shopId = 'b'.repeat(32)
+    expect((await f.call('prepare', { workbookId, shopId })).ok).toBe(true)
+    expect(f.host.request).toHaveBeenCalledWith('prepare', { shopId, workbook: file })
+    expect(f.host.request.mock.calls.filter(([method]) => method === 'capabilities')).toHaveLength(0)
+  })
   it('accepts only a native-selected workbook and separates prepare from start', async () => {
     const f = fixture(),
       root = await temp(),
