@@ -43,7 +43,7 @@ function fixture() {
     close: vi.fn(),
     request: vi.fn(async (method: string): Promise<unknown> => {
       if (method === 'initialize') {
-        return { protocol: 1, version: '1.0.54', integration: 'hermes-review-v1', taskIsolation: 'hermes-task-isolation-v1' }
+        return { protocol: 1, version: '1.0.54', integration: 'hermes-review-v1', taskIsolation: 'hermes-task-isolation-v1', authorizationMode: 'enterprise-session-v1' }
       }
 
       if (method === 'capabilities') {

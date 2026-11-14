@@ -5,7 +5,7 @@ import type { DoudianAction } from './doudian-types'
 function fixture(available = true) {
   const request = vi.fn(async (method: string) =>
     method === 'initialize'
-      ? { protocol: 1, version: '1.0.54', integration: 'hermes-review-v1', taskIsolation: 'hermes-task-isolation-v1' }
+      ? { protocol: 1, version: '1.0.54', integration: 'hermes-review-v1', taskIsolation: 'hermes-task-isolation-v1', authorizationMode: 'enterprise-session-v1' }
       : method === 'capabilities'
         ? {
             protocol: 1,

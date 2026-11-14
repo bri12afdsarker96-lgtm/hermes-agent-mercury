@@ -376,6 +376,7 @@ export class DoudianController {
             integration?: string
             version?: string
             taskIsolation?: string
+            authorizationMode?: string
           }
 
           if (init.protocol !== 1 || init.integration !== 'hermes-review-v1' || init.version !== '1.0.54') {
@@ -383,7 +384,7 @@ export class DoudianController {
 
             return bad('DOUDIAN_MODULE_INVALID')
           }
-          if (init.taskIsolation !== isolationCapability) {
+          if (init.taskIsolation !== isolationCapability || init.authorizationMode !== 'enterprise-session-v1') {
             this.close()
             return bad('DOUDIAN_MODULE_INCOMPATIBLE')
           }

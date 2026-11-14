@@ -12,7 +12,7 @@ function fixture() {
   let current = true
   let online = true
   const request = vi.fn(async (method: string) => {
-    if (method === 'initialize') return { protocol: 1, version: '1.0.54', integration: 'hermes-review-v1', taskIsolation: 'hermes-task-isolation-v1' }
+    if (method === 'initialize') return { protocol: 1, version: '1.0.54', integration: 'hermes-review-v1', taskIsolation: 'hermes-task-isolation-v1', authorizationMode: 'enterprise-session-v1' }
     if (method === 'capabilities') return { authorized: true, authorizationMode: 'enterprise-session-v1', shopManagement: capability, shopOperations: capability }
     if (method === 'shopManagementList') return [shop]
     if (['shopLoginStart', 'shopOperationStatus', 'shopLoginConfirm', 'shopOperationCancel'].includes(method)) return { taskId: token, shopId, kind: 'shop-login', state: 'awaiting_confirmation', phase: 'confirm_identity', candidate: { name: 'Shop A', platformId: '123' }, bound: { name: null, platformId: null }, merchantStatus: null, feigeStatus: null, bindingSaved: false, error: null, cookie: 'must-not-leak' }

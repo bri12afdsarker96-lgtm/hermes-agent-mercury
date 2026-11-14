@@ -12,7 +12,7 @@ function fixture(paymentUi = 1) {
   const host = {
     close: vi.fn(),
     request: vi.fn(async (method: string) => {
-      if (method === 'initialize') return { protocol: 1, version: '1.0.54', integration: 'hermes-review-v1', taskIsolation: 'hermes-task-isolation-v1' }
+      if (method === 'initialize') return { protocol: 1, version: '1.0.54', integration: 'hermes-review-v1', taskIsolation: 'hermes-task-isolation-v1', authorizationMode: 'enterprise-session-v1' }
       if (method === 'capabilities') return { protocol: 1, version: '1.0.54', authorized: true, authorizationMode: 'enterprise-session-v1', paymentUi }
       return { taskId: 'a'.repeat(32), kind: 'payment-window', state: 'running', saved: 0, summary: '', error: '', messages: [] }
     })

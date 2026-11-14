@@ -25,7 +25,7 @@ async function fixture(isolation: unknown = capability, omitMarker = false) {
   const host = {
     close: vi.fn(),
     request: vi.fn(async (method: string, _args?: Record<string, string>): Promise<unknown> => {
-      if (method === 'initialize') return { protocol: 1, integration: 'hermes-review-v1', version: '1.0.54', ...(omitMarker ? {} : { taskIsolation: isolation }) }
+      if (method === 'initialize') return { protocol: 1, integration: 'hermes-review-v1', version: '1.0.54', authorizationMode: 'enterprise-session-v1', ...(omitMarker ? {} : { taskIsolation: isolation }) }
       if (method === 'capabilities') return { protocol: 1, version: '1.0.54', authorized: true, authorizationMode: 'enterprise-session-v1', paymentUi: 1, reviewUi: 1, feigeUi: 1, taskIsolation: isolation }
       if (method === 'prepare') return result('review', 'awaiting_confirmation')
       if (method === 'preparePayment') return result('payment', 'awaiting_confirmation')
@@ -56,6 +56,15 @@ async function fixture(isolation: unknown = capability, omitMarker = false) {
 }
 
 describe('fixed TD payment bridge contract', () => {
+  it('rejects a legacy host at initialization even when isolation is advertised', async () => {
+    const f = await fixture()
+    const original = f.host.request.getMockImplementation()!
+    f.host.request.mockImplementation(async (method, args) => method === 'initialize'
+      ? { protocol: 1, integration: 'hermes-review-v1', version: '1.0.54', taskIsolation: capability }
+      : original(method, args))
+    expect(await f.call({ action: 'capabilities' })).toEqual({ ok: false, error: 'DOUDIAN_MODULE_INCOMPATIBLE' })
+    expect(f.host.request.mock.calls.some(([method]) => method === 'preparePayment' || method === 'startPayment')).toBe(false)
+  })
   it('rejects obsolete activation requests and never forwards credentials', async () => {
     const f = await fixture()
     expect(await f.call({ action: 'activateLicense', licenseCode: 'SYNTHETIC-123' } as unknown as DoudianRequest))
