@@ -250,6 +250,7 @@ export class DoudianHost {
 export interface DoudianDependencies {
   platform: string
   root: string
+  localVerification?: boolean
   authorize(action: DoudianRequest['action']): Promise<string>
   isCurrent(): boolean
   chooseWorkbook(): Promise<string | null>
@@ -281,6 +282,8 @@ export class DoudianController {
   }
   async operate(request: DoudianRequest): Promise<DoudianReply> {
     try {
+      // The legacy host and its browser descendants have no verified local sandbox.
+      if (this.deps.localVerification) return bad('DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE')
       this.current()
 
       if (this.deps.platform !== 'win32') {

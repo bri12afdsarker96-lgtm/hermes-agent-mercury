@@ -13640,6 +13640,7 @@ ipcMain.handle('hermes:enterprise:doudian', async (event, payload: DoudianReques
     const current = () => isEnterpriseUpdateSender(event) && enterpriseSessions.resolve(event.sender.id, session.sessionId) === session
     const controller = new DoudianController({
       platform: process.platform,
+      localVerification: enterpriseOriginSelection.local,
       root: app.isPackaged ? path.join(process.resourcesPath, 'doudian') : path.join(app.getAppPath(), 'build', 'doudian'),
       isCurrent: current,
       async authorize(action) {
