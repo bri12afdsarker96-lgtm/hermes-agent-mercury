@@ -38,6 +38,7 @@ it('enforces server capabilities for each IPC operation', () => {
 
 function fixture() {
   let state = 'idle'
+  let kind = 'review'
 
   const host = {
     close: vi.fn(),
@@ -51,6 +52,12 @@ function fixture() {
       }
 
       if (method === 'prepare') {
+        kind = 'review'
+        state = 'awaiting_confirmation'
+      }
+
+      if (method === 'preparePayment') {
+        kind = 'payment'
         state = 'awaiting_confirmation'
       }
 
@@ -64,7 +71,7 @@ function fixture() {
 
       return {
         taskId: state === 'idle' ? null : taskId,
-        kind: 'review',
+        kind,
         state,
         saved: 0,
         summary: 'synthetic',
@@ -146,6 +153,42 @@ describe('authority and private runtime', () => {
 })
 
 describe.runIf(process.platform === 'win32')('Windows controller flow (synthetic capture, no shop or COM)', () => {
+  it('preserves an xlsm selection for both prepare operations and fences other tenants', async () => {
+    const f = fixture(), root = await temp(), file = path.join(root, 'macro.XLSM')
+    await fs.writeFile(file, 'synthetic')
+    f.deps.chooseWorkbook.mockResolvedValue(file)
+    const choice = await f.call('chooseWorkbook')
+    expect(choice.workbook?.name).toBe('macro.XLSM')
+    expect(JSON.stringify(choice)).not.toContain(root)
+    const workbookId = choice.workbook!.id
+    const shopId = 'b'.repeat(32)
+    expect((await f.call('prepare', { workbookId, shopId })).ok).toBe(true)
+    expect(f.host.request).toHaveBeenCalledWith('prepare', { shopId, workbook: file })
+    expect((await f.call('preparePayment', { workbookId, amount: '1', startRow: '1', maxRows: '0', mode: 'standard' })).ok).toBe(true)
+    expect(f.host.request).toHaveBeenCalledWith('preparePayment', { workbook: file, amount: '1', startRow: '1', maxRows: '0', mode: 'standard' })
+    const other = fixture()
+    other.deps.authorize.mockResolvedValue('b'.repeat(64))
+    expect((await other.call('prepare', { workbookId, shopId })).error).toBe('INVALID_WORKBOOK')
+    expect(other.host.request.mock.calls.filter(([method]) => method === 'prepare')).toHaveLength(0)
+    f.deps.authorize.mockResolvedValue('b'.repeat(64))
+    expect((await f.call('prepare', { workbookId, shopId })).error).toBe('DOUDIAN_OWNER_CHANGED')
+    expect(f.host.close).toHaveBeenCalled()
+    expect(f.host.request.mock.calls.filter(([method]) => method === 'prepare')).toHaveLength(1)
+  })
+  it('rejects unsupported files and discards an xlsm selection after the session changes', async () => {
+    const f = fixture(), root = await temp(), file = path.join(root, 'bad.xlsm.exe')
+    await fs.writeFile(file, 'synthetic')
+    f.deps.chooseWorkbook.mockResolvedValue(file)
+    expect((await f.call('chooseWorkbook')).error).toBe('INVALID_WORKBOOK')
+    let finish!: (value: string | null) => void
+    f.deps.chooseWorkbook.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const pending = f.call('chooseWorkbook')
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    f.deps.isCurrent.mockReturnValue(false)
+    finish(path.join(root, 'macro.xlsm'))
+    expect((await pending).error).toBe('DOUDIAN_OWNER_CHANGED')
+    expect(f.host.close).toHaveBeenCalled()
+  })
   it('negotiates review options through the real controller and rejects unsupported or invalid requests', async () => {
     const f = fixture(), root = await temp(), file = path.join(root, 'copy.xlsx')
     await fs.writeFile(file, 'synthetic')

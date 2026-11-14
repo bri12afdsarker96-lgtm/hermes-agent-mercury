@@ -14,6 +14,7 @@ const bad = (code: string): never => {
 }
 
 const isolationCapability = 'hermes-task-isolation-v1'
+export const doudianWorkbookExtensions = ['xlsx', 'xls', 'xlsm']
 const validId = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{32}$/.test(value)
 const validAmount = (value: unknown) => {
   if (typeof value !== 'string' || value.length > 16000) return false
@@ -449,12 +450,13 @@ export class DoudianController {
           if (
             !path.isAbsolute(canonical) ||
             canonical.startsWith('\\\\') ||
-            !['.xlsx', '.xls'].includes(path.extname(canonical).toLowerCase()) ||
+            !doudianWorkbookExtensions.includes(path.extname(canonical).slice(1).toLowerCase()) ||
             !(await fs.stat(canonical)).isFile()
           ) {
             return bad('INVALID_WORKBOOK')
           }
 
+          this.current()
           const workbookId = id()
           this.files.clear()
           this.files.set(workbookId, canonical)

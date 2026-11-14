@@ -1,6 +1,6 @@
 import { execFile, execFileSync, spawn } from 'node:child_process'
 import crypto from 'node:crypto'
-import { assertDoudianCapability, DoudianController, doudianScope } from './doudian-host'
+import { assertDoudianCapability, DoudianController, doudianScope, doudianWorkbookExtensions } from './doudian-host'
 import type { DoudianRequest } from './doudian-types'
 import fs from 'node:fs'
 import http from 'node:http'
@@ -13673,7 +13673,7 @@ ipcMain.handle('hermes:enterprise:doudian', async (event, payload: DoudianReques
       async chooseWorkbook() {
         const selection = await dialog.showOpenDialog(mainWindow, {
           title: '选择截图或打款工作簿副本', properties: ['openFile'],
-          filters: [{ name: 'Excel / WPS', extensions: ['xlsx', 'xls'] }]
+          filters: [{ name: 'Excel / WPS', extensions: doudianWorkbookExtensions }]
         })
         return selection.canceled ? null : selection.filePaths[0] ?? null
       }
