@@ -7,9 +7,8 @@ import type { DoudianRequest } from './doudian-types'
 
 const executable = process.env.HERMES_PAYMENT_TEST_HOST
 
-it.each([['unknown', 'paused_review'], ['balance', 'paused_balance']])(
+it.skipIf(process.platform !== 'win32' || !executable).each([['unknown', 'paused_review'], ['balance', 'paused_balance']])(
   'propagates %s from the real TD workflow through the controller', async (mode, expected) => {
-    if (process.platform !== 'win32' || !executable) throw new Error('HERMES_PAYMENT_TEST_HOST required')
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hermes-payment-pipe-'))
     const workbook = path.join(root, 'fixture', 'synthetic.xlsx')
     const oldRoot = process.env.HERMES_PAYMENT_PIPE_ROOT
@@ -18,7 +17,7 @@ it.each([['unknown', 'paused_review'], ['balance', 'paused_balance']])(
     process.env.HERMES_PAYMENT_PIPE_MODE = mode
     const controller = new DoudianController({
       platform: 'win32', root, isCurrent: () => true, authorize: async () => 'a'.repeat(64),
-      chooseWorkbook: async () => workbook, verify: async () => executable
+      chooseWorkbook: async () => workbook, verify: async () => executable!
     })
     const call = (request: Omit<DoudianRequest, 'sessionId'>) => controller.operate({ ...request, sessionId: 'fixture' })
     try {
