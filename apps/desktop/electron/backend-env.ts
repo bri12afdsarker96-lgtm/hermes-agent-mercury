@@ -118,6 +118,16 @@ function normalizeHermesHomeRoot(hermesHome, { pathModule = pathModuleForPlatfor
   return resolved
 }
 
+function localVerificationHome(local: boolean, userData: string, pathModule = pathModuleForPlatform(process.platform)) {
+  if (!local) return null
+  if (!userData || !pathModule.isAbsolute(userData)) throw new Error('Local verification requires an absolute userData directory')
+  return pathModule.join(userData, 'hermes-home')
+}
+
+function localVerificationEnv(local: boolean, hermesHome: string) {
+  return local ? { HERMES_HOME: hermesHome } : {}
+}
+
 function buildDesktopBackendEnv({
   hermesHome,
   pythonPathEntries = [],
@@ -155,6 +165,8 @@ export {
   buildDesktopBackendPath,
   delimiterForPlatform,
   hermesManagedNodePathEntries,
+  localVerificationHome,
+  localVerificationEnv,
   normalizeHermesHomeRoot,
   pathEnvKey,
   POSIX_SANE_PATH_ENTRIES

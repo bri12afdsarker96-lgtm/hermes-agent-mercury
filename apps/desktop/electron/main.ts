@@ -35,13 +35,14 @@ import nodePty from 'node-pty'
 
 import enterpriseDeployment from '../assets/enterprise-deployment.json'
 import openVpnConnectManifest from '../assets/openvpn-connect-manifest.json'
+import { registerDesktopProtocol } from '../scripts/local-deployment.mjs'
 import { applyEnterpriseWindowIdentity, ENTERPRISE_APP_ID, repairEnterpriseShortcuts } from './enterprise-windows-identity'
 
 import { classifyActiveRuntime } from './active-runtime-state'
 import { stopBackendChild as stopBackendChildImpl, stopBackendTreesForUpdate } from './backend-child'
 import { dashboardFallbackArgs, sourceDeclaresServe } from './backend-command'
 import { createBackendConnectionState } from './backend-connection-state'
-import { buildDesktopBackendEnv, hermesManagedNodePathEntries, normalizeHermesHomeRoot } from './backend-env'
+import { buildDesktopBackendEnv, hermesManagedNodePathEntries, normalizeHermesHomeRoot, localVerificationHome, localVerificationEnv } from './backend-env'
 import { isReauthRequiredError, waitForHermesReady } from './backend-health'
 import { backendCommandMatches, createBackendOwnership, createBackendShutdownCoordinator } from './backend-ownership'
 import {
@@ -135,7 +136,7 @@ import {
 } from './desktop-uninstall'
 import { describeDevCdpDecision, resolveDevCdpPort } from './dev-cdp'
 import { installEmbedReferer } from './embed-referer'
-import { resolveEnterpriseOriginCandidate } from './enterprise-origin-candidate'
+import { selectEnterpriseOrigin } from './enterprise-local-origin'
 import { createEnterprisePackageUpdater, type EnterprisePackageUpdaterController } from './enterprise-package-updater'
 import {
   backgroundLaunchArguments,
@@ -158,7 +159,6 @@ import {
   EnterpriseSessionStore,
   isAllowedEnterpriseMethod,
   isValidEnterprisePassword,
-  normalizeEnterpriseApiOriginOrNull,
   resolveEnterpriseUrl,
   sanitizeMultipartContentType,
   uploadByteLength
@@ -409,12 +409,34 @@ import { isPackagedInstallPath as isPackagedInstallPathUnderRoots } from './work
 import { readWslWindowsClipboardImage } from './wsl-clipboard-image'
 import { resolvePickerDefaultPath } from './wsl-path-bridge'
 
+const enterpriseOriginSelection = (() => {
+  try {
+    const selection = selectEnterpriseOrigin({
+      isPackaged: app.isPackaged || Boolean(process.env.HERMES_DESKTOP_IS_PACKAGED),
+      packagedOrigin: enterpriseDeployment.enterprise_api_origin,
+      localBuild: (enterpriseDeployment as { local_verification_only?: boolean }).local_verification_only === true,
+      envOrigin: process.env.HERMES_DESKTOP_ENTERPRISE_ORIGIN
+    })
+    console.info(`enterprise origin = ${selection.origin ?? '(unavailable)'} (source=${selection.source})`)
+    return selection
+  } catch (error) {
+    console.error('[enterprise] Invalid local enterprise origin; startup stopped:', error instanceof Error ? error.message : 'invalid configuration')
+    throw error
+  }
+})()
+
 const USER_DATA_OVERRIDE = process.env.HERMES_DESKTOP_USER_DATA_DIR
 
 if (USER_DATA_OVERRIDE) {
   const resolvedUserData = path.resolve(USER_DATA_OVERRIDE)
   fs.mkdirSync(resolvedUserData, { recursive: true })
   app.setPath('userData', resolvedUserData)
+}
+
+if (enterpriseOriginSelection.local) {
+  const localUserData = `${app.getPath('userData')}-localprep`
+  fs.mkdirSync(localUserData, { recursive: true })
+  app.setPath('userData', localUserData)
 }
 
 const DEV_SERVER = process.env.HERMES_DESKTOP_DEV_SERVER
@@ -718,6 +740,8 @@ if (INSTALL_STAMP) {
 // HERMES_HOME beneath the throwaway userData dir so a fresh-install run never
 // touches the user's real ~/.hermes / %LOCALAPPDATA%\hermes.
 function resolveHermesHome() {
+  const isolated = localVerificationHome(enterpriseOriginSelection.local, app.getPath('userData'))
+  if (isolated) return isolated
   if (process.env.HERMES_HOME) {
     return normalizeHermesHomeRoot(process.env.HERMES_HOME)
   }
@@ -757,6 +781,7 @@ function resolveHermesHome() {
 }
 
 const HERMES_HOME = resolveHermesHome()
+if (enterpriseOriginSelection.local) process.env.HERMES_HOME = HERMES_HOME
 
 function pathWithHermesManagedNode(...entries) {
   const managed = hermesManagedNodePathEntries(HERMES_HOME).filter(directoryExists)
@@ -850,7 +875,7 @@ const BOOT_FAKE_STEP_MS = (() => {
   return Math.max(120, raw)
 })()
 
-const APP_NAME = process.env.HERMES_DESKTOP_APP_NAME || 'hermes_Agent'
+const APP_NAME = enterpriseOriginSelection.local ? 'Hermes-企业助手-本地联调' : (process.env.HERMES_DESKTOP_APP_NAME || 'hermes_Agent')
 const HUD_WINDOW_TITLE = `${APP_NAME} HUD`
 const TITLEBAR_HEIGHT = 34
 const MACOS_TRAFFIC_LIGHTS_HEIGHT = 14
@@ -1224,8 +1249,25 @@ app.setName(APP_NAME)
 // keep this string in sync with package.json `build.appId`. macOS/Linux don't
 // need this, so gate it on Windows. (Fixes: desktop approval/turn notifications
 // never firing on Windows.)
+const LOCAL_APP_ID = `${ENTERPRISE_APP_ID}.localprep`
 if (IS_WINDOWS) {
-  app.setAppUserModelId(ENTERPRISE_APP_ID)
+  app.setAppUserModelId(enterpriseOriginSelection.local ? LOCAL_APP_ID : ENTERPRISE_APP_ID)
+}
+
+function applyWindowIdentity(window: BrowserWindow, icon: string) {
+  if (enterpriseOriginSelection.local) {
+    window.setTitle(APP_NAME)
+    window.on('page-title-updated', event => { event.preventDefault(); window.setTitle(APP_NAME) })
+    window.setAppDetails({
+      appId: LOCAL_APP_ID,
+      appIconPath: icon,
+      appIconIndex: 0,
+      relaunchCommand: `"${app.getPath('exe')}"`,
+      relaunchDisplayName: APP_NAME
+    })
+  } else {
+    applyEnterpriseWindowIdentity(window, app.getPath('exe'), icon)
+  }
 }
 
 // Seed the native About panel with the live Hermes version. This is refreshed
@@ -2221,7 +2263,7 @@ function backendSupportsServe(backend) {
       // and its timeout-only retry instead of a thinner local bound.
       execProbeSync(backend.command, [...prefix, 'serve', '--help'], {
         cwd: backend.root || undefined,
-        env: { ...process.env, HERMES_HOME, ...(backend.env || {}) },
+        env: { ...process.env, HERMES_HOME, ...(backend.env || {}), ...localVerificationEnv(enterpriseOriginSelection.local, HERMES_HOME) },
         timeout: PROBE_TIMEOUT_MS,
         stdio: 'ignore',
         // `.cmd`/`.bat` shim backends carry shell: true in their descriptor
@@ -10078,6 +10120,7 @@ async function spawnPoolBackend(profile, entry, opts: { forceLocal?: boolean; po
         ...process.env,
         HERMES_HOME,
         ...backend.env,
+        ...localVerificationEnv(enterpriseOriginSelection.local, HERMES_HOME),
         // Pin the gateway's tool/terminal cwd to the same directory we chose for
         // the child process. Inherited TERMINAL_CWD (or a stale config bridge)
         // can still point at the install dir even when spawn cwd is home.
@@ -10445,6 +10488,7 @@ async function startHermes() {
           // can't reliably do that, so we set it inline for every spawn.
           HERMES_HOME,
           ...backend.env,
+          ...localVerificationEnv(enterpriseOriginSelection.local, HERMES_HOME),
           TERMINAL_CWD: hermesCwd,
           HERMES_DASHBOARD_SESSION_TOKEN: token,
           // Marks this dashboard backend as desktop-spawned so it runs the cron
@@ -10759,7 +10803,7 @@ function spawnSecondaryWindow({ sessionId, watch }: { sessionId?: string; watch?
     height: SESSION_WINDOW_MIN_HEIGHT,
     minWidth: SESSION_WINDOW_MIN_WIDTH,
     minHeight: SESSION_WINDOW_MIN_HEIGHT,
-    title: 'Hermes-企业助手',
+    title: enterpriseOriginSelection.local ? APP_NAME : 'Hermes-企业助手',
     titleBarStyle: 'hidden',
     titleBarOverlay: getTitleBarOverlayOptions(),
     trafficLightPosition: IS_MAC ? WINDOW_BUTTON_POSITION : undefined,
@@ -10777,7 +10821,9 @@ function spawnSecondaryWindow({ sessionId, watch }: { sessionId?: string; watch?
 
   // Chat-surface registration: applyWindowTranslucency swaps this window's
   // backing between opaque-themed and alpha-0 when glass toggles.
-  if (IS_WINDOWS && icon) applyEnterpriseWindowIdentity(win, app.getPath('exe'), icon)
+  if (IS_WINDOWS && icon) {
+    applyWindowIdentity(win, icon)
+  }
   translucencyBackedWindows.add(win)
 
   if (IS_MAC) {
@@ -10862,7 +10908,7 @@ function createInstanceWindow() {
     ...nextInstanceBounds(),
     minWidth: WINDOW_MIN_WIDTH,
     minHeight: WINDOW_MIN_HEIGHT,
-    title: 'Hermes-企业助手',
+    title: enterpriseOriginSelection.local ? APP_NAME : 'Hermes-企业助手',
     titleBarStyle: 'hidden',
     titleBarOverlay: getTitleBarOverlayOptions(),
     trafficLightPosition: IS_MAC ? WINDOW_BUTTON_POSITION : undefined,
@@ -10872,7 +10918,9 @@ function createInstanceWindow() {
     webPreferences: chatWindowWebPreferences(PRELOAD_PATH)
   })
 
-  if (IS_WINDOWS && icon) applyEnterpriseWindowIdentity(win, app.getPath('exe'), icon)
+  if (IS_WINDOWS && icon) {
+    applyWindowIdentity(win, icon)
+  }
   instanceWindows.add(win)
 
   // Chat-surface registration: see applyWindowTranslucency.
@@ -11719,7 +11767,7 @@ function createWindow() {
     ...computeWindowOptions(savedWindowState, screen.getAllDisplays()),
     minWidth: WINDOW_MIN_WIDTH,
     minHeight: WINDOW_MIN_HEIGHT,
-    title: 'Hermes-企业助手',
+    title: enterpriseOriginSelection.local ? APP_NAME : 'Hermes-企业助手',
     // Frameless title bar on every platform so the renderer can paint the
     // "hide sidebar" button (and other left-side titlebar tools) flush with
     // the top edge — matching the macOS layout where the traffic lights sit
@@ -11744,7 +11792,9 @@ function createWindow() {
   })
 
   const createdMainWindow = mainWindow
-  if (IS_WINDOWS && icon) applyEnterpriseWindowIdentity(createdMainWindow, app.getPath('exe'), icon)
+  if (IS_WINDOWS && icon) {
+    applyWindowIdentity(createdMainWindow, icon)
+  }
   const updateSenderId = createdMainWindow.webContents.id
   createdMainWindow.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
     if (isMainFrame) {
@@ -13765,24 +13815,19 @@ function destroyAllEnterpriseSessions(): void {
   enterpriseWiredSenders.clear()
 }
 
-/** The signed desktop release is fixed to its bundled enterprise HTTPS origin.
- * A stale local environment variable must never redirect business traffic away
- * from the deployment address shown to the user. */
+/** Main owns the resolved origin; packaged releases ignore environment overrides. */
 function deployedEnterpriseOrigin(): string | null {
-  return normalizeEnterpriseApiOriginOrNull(
-    resolveEnterpriseOriginCandidate({
-      packagedOrigin: enterpriseDeployment.enterprise_api_origin,
-      preferPackagedOrigin: true
-    })
-  )
+  return enterpriseOriginSelection.origin
 }
+
+ipcMain.handle('hermes:enterprise:local-verification', () => enterpriseOriginSelection.local)
 
 // ── Internal pre-release network access ────────────────────────────────────
 // The renderer gets no executable path, profile path, command line, or network
 // destination. Its small bridge below can ask only for a fixed status, launch,
 // MSI installation, or a native `.ovpn` picker/import. The imported profile
 // belongs to OpenVPN Connect; Hermes retains neither its contents nor a copy.
-const preReleaseAccessEnabled = enterpriseDeployment.pre_release_access?.enabled === true
+const preReleaseAccessEnabled = !enterpriseOriginSelection.local && enterpriseDeployment.pre_release_access?.enabled === true
 const preReleaseProfileName =
   typeof enterpriseDeployment.pre_release_access?.openvpn_profile_name === 'string'
     ? enterpriseDeployment.pre_release_access.openvpn_profile_name
@@ -16160,7 +16205,7 @@ function _extractDeepLink(argv) {
 }
 
 function handleDeepLink(url) {
-  if (!url || typeof url !== 'string') {
+  if (enterpriseOriginSelection.local || !url || typeof url !== 'string') {
     return
   }
 
@@ -16221,13 +16266,8 @@ ipcMain.handle('hermes:deep-link-ready', () => {
 
 function registerDeepLinkProtocol() {
   try {
-    if (process.defaultApp && process.argv.length >= 2) {
-      // Dev: register with the electron exec path + entry script so the OS can
-      // relaunch us with the URL.
-      app.setAsDefaultProtocolClient(HERMES_PROTOCOL, process.execPath, [path.resolve(process.argv[1])])
-    } else {
-      app.setAsDefaultProtocolClient(HERMES_PROTOCOL)
-    }
+    registerDesktopProtocol(app, { local: enterpriseOriginSelection.local, protocol: HERMES_PROTOCOL,
+      defaultApp: process.defaultApp, argv: process.argv, executable: process.execPath })
   } catch (err) {
     rememberLog(`[deeplink] protocol registration failed: ${err.message}`)
   }
@@ -16329,32 +16369,33 @@ app.whenReady().then(async () => {
     screen.on('display-removed', reposition)
   }
 
-  enterprisePackageUpdater = createEnterprisePackageUpdater({
-    isPackaged: app.isPackaged,
-    currentVersion: app.getVersion(),
-    resourcesPath: process.resourcesPath,
-    userDataPath: app.getPath('userData'),
-    prepare: transactionId => enterpriseUpdateReadiness.prepare(transactionId),
-    onHandoff: () => {
-      isQuittingForHandoff = true
-      enterpriseSpeech.stopAll()
-      app.quit()
-    }
-  })
-  enterprisePackageUpdater.subscribe(state => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('hermes:enterprise:package-update-status', state)
-    }
-  })
-  // The controller bounds startup recovery and fences late network results.
-  // Ordinary work starts only once that attempt has finished or been abandoned.
-  await enterprisePackageUpdater.recoverOnStartup()
+  if (!enterpriseOriginSelection.local) {
+    enterprisePackageUpdater = createEnterprisePackageUpdater({
+      isPackaged: app.isPackaged,
+      currentVersion: app.getVersion(),
+      resourcesPath: process.resourcesPath,
+      userDataPath: app.getPath('userData'),
+      prepare: transactionId => enterpriseUpdateReadiness.prepare(transactionId),
+      onHandoff: () => {
+        isQuittingForHandoff = true
+        enterpriseSpeech.stopAll()
+        app.quit()
+      }
+    })
+    enterprisePackageUpdater.subscribe(state => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('hermes:enterprise:package-update-status', state)
+      }
+    })
+    // Startup recovery is deliberately unavailable in a local verification build.
+    await enterprisePackageUpdater.recoverOnStartup()
+  }
 
   if (isQuittingForHandoff) {
     return
   }
   createWindow()
-  if (IS_WINDOWS && app.isPackaged && !BOOT_FAKE_MODE && fs.existsSync(path.join(process.resourcesPath, 'enterprise-nsis-install.json'))) {
+  if (!enterpriseOriginSelection.local && IS_WINDOWS && app.isPackaged && !BOOT_FAKE_MODE && fs.existsSync(path.join(process.resourcesPath, 'enterprise-nsis-install.json'))) {
     const icon = getAppIconPath()
     if (icon) {
       const appData = app.getPath('appData')
@@ -16370,14 +16411,16 @@ app.whenReady().then(async () => {
       if (migration.failed.length) console.warn('[enterprise] Shortcut migration unavailable:', migration.failed)
     }
   }
-  const packageUpdateTimer = setTimeout(() => {
-    void enterprisePackageUpdater?.check()
-  }, 30_000)
-  packageUpdateTimer.unref()
-  app.once('will-quit', () => {
-    clearTimeout(packageUpdateTimer)
-    enterprisePackageUpdater?.dispose()
-  })
+  if (!enterpriseOriginSelection.local) {
+    const packageUpdateTimer = setTimeout(() => {
+      void enterprisePackageUpdater?.check()
+    }, 30_000)
+    packageUpdateTimer.unref()
+    app.once('will-quit', () => {
+      clearTimeout(packageUpdateTimer)
+      enterprisePackageUpdater?.dispose()
+    })
+  }
 
   // Win/Linux cold start: the launching hermes:// URL is in our own argv.
   const _coldStartLink = _extractDeepLink(process.argv)

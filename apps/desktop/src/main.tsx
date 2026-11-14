@@ -22,6 +22,7 @@ import { HapticsProvider } from './components/haptics-provider'
 import { RootTooltipProvider } from './components/ui/tooltip'
 import { enterpriseNativeAppearance } from './enterprise-client/native-appearance'
 import { EnterpriseWorkspaceApp } from './enterprise-client/workspace-app'
+import { LocalVerificationBadge } from './enterprise-client/local-verification-badge'
 import { I18nProvider } from './i18n'
 import { installClipboardShim } from './lib/clipboard'
 import { queryClient } from './lib/query-client'
@@ -72,6 +73,7 @@ if (winParam === 'overlay') {
                   {/* Independent product root: all visible chrome/navigation/UI belongs
                     to this client. Hermes remains runtime/service capability only. */}
                   <EnterpriseWorkspaceApp />
+                  <LocalVerificationBadge />
                 </RootTooltipProvider>
               </HapticsProvider>
             </ThemeProvider>

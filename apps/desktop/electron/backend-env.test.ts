@@ -8,10 +8,24 @@ import {
   buildDesktopBackendEnv,
   buildDesktopBackendPath,
   hermesManagedNodePathEntries,
+  localVerificationHome,
+  localVerificationEnv,
   normalizeHermesHomeRoot,
   pathEnvKey,
   POSIX_SANE_PATH_ENTRIES
 } from './backend-env'
+
+test('local verification pins home under isolated userData and overrides inherited child home', () => {
+  const userData = 'C:\\Users\\fixture\\Hermes-localprep'
+  const home = localVerificationHome(true, userData, path.win32)!
+  assert.equal(home, 'C:\\Users\\fixture\\Hermes-localprep\\hermes-home')
+  assert.equal(localVerificationHome(false, userData, path.win32), null)
+  assert.throws(() => localVerificationHome(true, 'relative', path.win32))
+  const inherited = { HERMES_HOME: 'C:\\production' }
+  const backend = { HERMES_HOME: 'C:\\other' }
+  assert.equal({ ...inherited, ...backend, ...localVerificationEnv(true, home) }.HERMES_HOME, home)
+  assert.equal({ ...inherited, ...backend, ...localVerificationEnv(false, home) }.HERMES_HOME, backend.HERMES_HOME)
+})
 
 test('desktop backend PATH adds Hermes-managed bins and missing POSIX sane entries', () => {
   const result = buildDesktopBackendPath({
