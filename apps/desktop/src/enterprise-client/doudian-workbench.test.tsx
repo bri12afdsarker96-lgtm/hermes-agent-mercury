@@ -6,6 +6,7 @@ import { zh } from '@/i18n/zh'
 import type { DoudianReply, DoudianRequest, DoudianTask } from '../../electron/doudian-types'
 
 import { DoudianWorkbench } from './doudian-workbench'
+import { ReviewCapturePage } from './review-capture-page'
 import type { EnterpriseClientRuntime } from './runtime'
 
 vi.mock('@/i18n/context', () => ({ useI18n: () => ({ t: zh }) }))
@@ -55,6 +56,17 @@ function setup(reviewOptions?: number) {
 }
 
 describe('Doudian workbench (offline fixtures)', () => {
+  it('shows the integrated screenshot page without an activation-code form or request', async () => {
+    const send = vi.fn(async (request: Omit<DoudianRequest, 'sessionId'>): Promise<DoudianReply> => {
+      if (request.action === 'capabilities') return { ok: true, capabilities: { protocol: 1, version: '1.0.54', authorized: true, chrome: true, spreadsheet: true, authorizationMode: 'enterprise-session-v1' } }
+      if (request.action === 'shops') return { ok: true, shops: [] }
+      return { ok: true, task: { taskId: null, state: 'idle', saved: 0, summary: '', error: '', messages: [] } }
+    })
+    render(<ReviewCapturePage runtime={{ doudian: send } as unknown as EnterpriseClientRuntime} />)
+    await screen.findByText('请选择店铺')
+    expect(screen.queryByText(/激活码/)).toBeNull()
+    expect(send.mock.calls.some(([request]) => ['activateLicense', 'resumeLicense', 'licenseStatus'].includes(request.action))).toBe(false)
+  })
   it('sends chosen range and concurrency to the prepare bridge', async () => {
     const { send } = setup(1)
     await screen.findByText('模拟店铺 (123)')

@@ -1,43 +1,28 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-
 import { I18nProvider } from '@/i18n/context'
-import { DoudianLicense } from './doudian-license'
-import type { EnterpriseClientRuntime } from './runtime'
 import type { DoudianRequest } from '../../electron/doudian-types'
+import type { EnterpriseClientRuntime } from './runtime'
+import { PaymentPage } from './payment-page'
+import { ReviewCapturePage } from './review-capture-page'
 
-function mount(doudian: ReturnType<typeof vi.fn>) {
-  return render(<I18nProvider initialLocale="zh" configClient={null}><DoudianLicense runtime={{ doudian } as unknown as EnterpriseClientRuntime} onReady={vi.fn()} /></I18nProvider>)
-}
-
-describe('embedded original activation', () => {
-  it('does not accept a code when the integration is unavailable', async () => {
-    const doudian = vi.fn(async (_request: Omit<DoudianRequest, 'sessionId'>) => ({ ok: true, capabilities: { protocol: 1, authorized: false, licenseActivation: 0 } }))
-    mount(doudian)
-    await screen.findByText('原激活码服务尚未就绪，无法执行任务。')
-    expect(screen.queryByLabelText('原激活码')).toBeNull()
-    expect(doudian.mock.calls.some(([request]) => request.action === 'activateLicense')).toBe(false)
+describe('enterprise-only desktop entry', () => {
+  it.each(['review', 'payment'])('does not display or request activation for %s', async kind => {
+    const doudian = vi.fn(async (request: Omit<DoudianRequest, 'sessionId'>) => {
+      if (request.action === 'capabilities') return { ok: true, capabilities: { protocol: 1, version: '1.0.54', chrome: true, spreadsheet: true, authorized: true, authorizationMode: 'enterprise-session-v1' } }
+      if (request.action === 'shops') return { ok: true, shops: [] }
+      return { ok: true, task: { kind: 'review' as const, taskId: null, state: 'idle' as const, saved: 0, summary: '', error: '', messages: [] } }
+    })
+    const runtime = { doudian } as unknown as EnterpriseClientRuntime
+    render(<I18nProvider initialLocale="zh" configClient={null}>{kind === 'review' ? <ReviewCapturePage runtime={runtime} /> : <PaymentPage runtime={runtime} />}</I18nProvider>)
+    await waitFor(() => expect(doudian).toHaveBeenCalledWith({ action: 'capabilities' }))
+    expect(screen.queryByText(/激活码/)).toBeNull()
+    expect(doudian.mock.calls.some(([request]) => ['activateLicense', 'resumeLicense', 'licenseStatus'].includes(request.action))).toBe(false)
   })
-
-  it('sends a synthetic code only after an explicit click and clears the input', async () => {
-    const doudian = vi.fn(async request => request.action === 'capabilities'
-      ? { ok: true, capabilities: { protocol: 1, authorized: false, licenseActivation: 1 } }
-      : { ok: true, license: { state: 'pending' } })
-    mount(doudian)
-    const input = await screen.findByLabelText('原激活码') as HTMLInputElement
-    fireEvent.change(input, { target: { value: 'SYNTHETIC-CODE' } })
-    expect(doudian.mock.calls.some(([request]) => request.action === 'activateLicense')).toBe(false)
-    fireEvent.click(screen.getByRole('button', { name: '验证激活码' }))
-    await waitFor(() => expect(doudian).toHaveBeenCalledWith({ action: 'activateLicense', licenseCode: 'SYNTHETIC-CODE' }))
-    expect(input.value).toBe('')
-  })
-
-  it('requests cached authorization without sending a code', async () => {
-    const doudian = vi.fn(async (request: Omit<DoudianRequest, 'sessionId'>) => request.action === 'capabilities'
-      ? { ok: true, capabilities: { protocol: 1, authorized: false, licenseActivation: 1 } }
-      : { ok: true, license: { state: 'pending' } })
-    mount(doudian)
-    fireEvent.click(await screen.findByRole('button', { name: '恢复本机授权' }))
-    await waitFor(() => expect(doudian).toHaveBeenCalledWith({ action: 'resumeLicense' }))
+  it('does not send activation requests when the host is unavailable', async () => {
+    const doudian = vi.fn(async (_request: Omit<DoudianRequest, 'sessionId'>) => ({ ok: false, error: 'DOUDIAN_FORBIDDEN' }))
+    render(<I18nProvider initialLocale="zh" configClient={null}><PaymentPage runtime={{ doudian } as unknown as EnterpriseClientRuntime} /></I18nProvider>)
+    await screen.findByText('执行模块不可用或企业权限不足')
+    expect(doudian.mock.calls.some(([request]) => ['activateLicense', 'resumeLicense', 'licenseStatus'].includes(request.action))).toBe(false)
   })
 })

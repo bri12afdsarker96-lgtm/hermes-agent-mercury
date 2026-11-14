@@ -18,12 +18,12 @@ const prepared: DoudianTask = {
   messages: []
 }
 
-const capability = (authorized = true, licenseVerification?: string): DoudianReply => ({
+const capability = (authorized = true, authorizationMode?: string): DoudianReply => ({
   ok: true,
-  capabilities: { protocol: 1, version: '1.0.54', authorized, chrome: true, spreadsheet: true, licenseVerification }
+  capabilities: { protocol: 1, version: '1.0.54', authorized, chrome: true, spreadsheet: true, authorizationMode }
 })
 
-function setup(initialCapability = capability(true, 'verified-v1'), initialTask?: DoudianTask) {
+function setup(initialCapability = capability(true, 'enterprise-session-v1'), initialTask?: DoudianTask) {
   let cap = initialCapability
   let task = initialTask
 
@@ -74,6 +74,12 @@ async function chooseAndFill(amount = '3.25', startRow = '1', maxRows = '0', mod
 }
 
 describe('payment page offline', () => {
+  it('offers payment without an activation-code form or activation request', async () => {
+    const { send } = setup()
+    await chooseAndFill()
+    expect(screen.queryByText(/激活码/)).toBeNull()
+    expect(send.mock.calls.some(([request]) => ['activateLicense', 'resumeLicense', 'licenseStatus'].includes(request.action))).toBe(false)
+  })
   it.each([
     ['standard', '0.01', '1', '0'],
     ['new-order', '+100,000.00', '2147483647', '2147483647']
@@ -108,8 +114,8 @@ describe('payment page offline', () => {
 
   it.each([
     ['old host', capability()],
-    ['unknown marker', capability(true, 'verified-v2')],
-    ['false authorization', capability(false, 'verified-v1')],
+    ['unknown marker', capability(true, 'enterprise-session-v2')],
+    ['false authorization', capability(false, 'enterprise-session-v1')],
     ['failed capability request', { ok: false, error: 'DOUDIAN_FORBIDDEN' }]
   ])('blocks preparation and start with %s', async (_label, reply) => {
     const { send } = setup(reply, prepared)
@@ -125,7 +131,7 @@ describe('payment page offline', () => {
   it('rechecks authorization immediately before prepare and start', async () => {
     const fixture = setup()
     await chooseAndFill()
-    fixture.setCapability(capability(false, 'verified-v1'))
+    fixture.setCapability(capability(false, 'enterprise-session-v1'))
     fireEvent.click(screen.getByRole('button', { name: '检查并准备' }))
     await screen.findByRole('alert')
     expect(fixture.send.mock.calls.some(([request]) => request.action === 'preparePayment')).toBe(false)
@@ -163,7 +169,7 @@ describe('payment page offline', () => {
   })
 
   it('never starts a task of another kind or state', async () => {
-    const { send } = setup(capability(true, 'verified-v1'), { ...prepared, kind: 'review' })
+    const { send } = setup(capability(true, 'enterprise-session-v1'), { ...prepared, kind: 'review' })
     await waitFor(() => expect(send.mock.calls.some(([request]) => request.action === 'status')).toBe(true))
     expect((screen.getByRole('button', { name: '确认开始打款' }) as HTMLButtonElement).disabled).toBe(true)
     expect(send.mock.calls.some(([request]) => request.action === 'startPayment')).toBe(false)

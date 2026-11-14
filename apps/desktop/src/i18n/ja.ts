@@ -6,7 +6,7 @@ export const ja = defineLocale({
   doudian: {
     "title": "抖店ワークベンチ",
     "refresh": "更新",
-    "manageShops": "認証 / 店舗管理",
+    "manageShops": "店舗管理",
     "moduleVersion": "実行モジュール",
     "shop": "店舗",
     "selectShop": "店舗を選択",
@@ -26,7 +26,7 @@ export const ja = defineLocale({
     "ownerChanged": "アカウントまたは企業が変更されました。再度開いてください。",
     "hostLost": "実行プロセスが切断されました。ブックを確認してからアプリを再起動してください。タスクは再送していません。",
     "resultUnknown": "結果を確認できません。再送せず状態を確認してください。",
-    "licenseRequired": "「認証 / 店舗管理」でモジュールを認証してください。",
+    "licenseRequired": "実行モジュールは現在の企業セッションに対応していません。更新してください。",
     "busy": "タスクまたは店舗操作が実行中です。",
     "workbookBusy": "このブックは別のタスクが処理中です。",
     "failed": "操作失敗",

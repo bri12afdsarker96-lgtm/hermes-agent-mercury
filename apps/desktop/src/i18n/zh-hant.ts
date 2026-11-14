@@ -6,7 +6,7 @@ export const zhHant = defineLocale({
   doudian: {
     "title": "抖店工作台",
     "refresh": "重新整理",
-    "manageShops": "授權 / 店鋪管理",
+    "manageShops": "店鋪管理",
     "moduleVersion": "執行模組",
     "shop": "店鋪",
     "selectShop": "請選擇店鋪",
@@ -26,7 +26,7 @@ export const zhHant = defineLocale({
     "ownerChanged": "帳號或企業已變更，請重新開啟工作台。",
     "hostLost": "截圖程序已中斷。請先核對活頁簿，再重新啟動軟體；未自動重播任務。",
     "resultUnknown": "結果尚未確認，請查詢任務狀態，勿重複提交。",
-    "licenseRequired": "請透過「授權 / 店鋪管理」完成截圖模組授權。",
+    "licenseRequired": "執行模組與目前企業工作階段不相容，請更新執行模組。",
     "busy": "任務或店鋪操作仍在執行。",
     "workbookBusy": "此活頁簿正在由其他任務處理。",
     "failed": "操作失敗",

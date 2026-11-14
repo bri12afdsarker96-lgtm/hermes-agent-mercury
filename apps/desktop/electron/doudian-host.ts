@@ -68,7 +68,7 @@ export function assertDoudianCapability(identity: unknown, action: DoudianReques
   const enabled = (value: typeof review) => value?.enabled === true && value.status === 'LIVE'
   const allowed = ['openReview', 'shops', 'manageShops', 'prepare', 'start', 'shopManagementList', 'shopManagementAdd', 'shopManagementRename', 'shopManagementPin', 'shopManagementMove', 'shopManagementPrepareDelete', 'shopManagementDelete', 'shopLoginStart', 'shopCheckStart', 'shopOperationStatus', 'shopLoginConfirm', 'shopLoginFinishFeige', 'shopOperationCancel'].includes(action) ? enabled(review)
     : ['openPayment', 'preparePayment', 'startPayment'].includes(action) ? enabled(payment)
-      : ['capabilities', 'chooseWorkbook', 'status', 'activateLicense', 'resumeLicense', 'licenseStatus'].includes(action) ? enabled(review) || enabled(payment)
+      : ['capabilities', 'chooseWorkbook', 'status'].includes(action) ? enabled(review) || enabled(payment)
         : false
   if (!allowed) bad('DOUDIAN_FORBIDDEN')
 }
@@ -313,9 +313,6 @@ export class DoudianController {
         shopLoginFinishFeige: ['taskId'],
         shopOperationCancel: ['taskId'],
         chooseWorkbook: [],
-        activateLicense: ['licenseCode'],
-        resumeLicense: [],
-        licenseStatus: [],
         prepare: ['shopId', 'workbookId'],
         preparePayment: ['workbookId', 'amount', 'startRow', 'maxRows', 'mode'],
         start: ['taskId'],
@@ -395,19 +392,11 @@ export class DoudianController {
         this.current()
 
         let checkedCapabilities: DoudianReply['capabilities']
-        if (request.action === 'activateLicense' || request.action === 'resumeLicense') {
-          const capabilities = (await this.host.request('capabilities')) as DoudianReply['capabilities']
-          this.current()
-          if (capabilities?.licenseActivation !== 1) return bad('LICENSE_INTEGRATION_UNVERIFIED')
-          if (request.action === 'activateLicense' && (!request.licenseCode || request.licenseCode.trim().length < 4 || request.licenseCode.trim().length > 256 || /[\x00-\x1f\x7f]/.test(request.licenseCode))) {
-            return bad('INVALID_LICENSE_INPUT')
-          }
-        }
         if (request.action.startsWith('shopManagement') || ['shopLoginStart', 'shopCheckStart', 'shopLoginConfirm', 'shopLoginFinishFeige', 'manageShops', 'prepare', 'start', 'preparePayment', 'startPayment', 'openReview', 'openPayment'].includes(request.action)) {
           checkedCapabilities = (await this.host.request('capabilities')) as DoudianReply['capabilities']
           this.current()
-          if (checkedCapabilities?.authorized !== true || checkedCapabilities.licenseVerification !== 'verified-v1') {
-            return bad('LICENSE_REQUIRED')
+          if (checkedCapabilities?.authorized !== true || checkedCapabilities.authorizationMode !== 'enterprise-session-v1') {
+            return bad('DOUDIAN_MODULE_INCOMPATIBLE')
           }
           if (request.action.startsWith('shopManagement') && checkedCapabilities.shopManagement !== 1) return bad('SHOP_MANAGEMENT_UNSUPPORTED')
           if (['shopLoginStart', 'shopCheckStart', 'shopLoginConfirm', 'shopLoginFinishFeige'].includes(request.action) && checkedCapabilities.shopOperations !== 1) return bad('SHOP_OPERATION_UNSUPPORTED')
@@ -458,9 +447,7 @@ export class DoudianController {
 
         let args: Record<string, string> = {}
 
-        if (request.action === 'activateLicense') {
-          args = { licenseCode: request.licenseCode!.trim() }
-        } else if (request.action.startsWith('shopManagement') || ['shopLoginStart', 'shopCheckStart', 'shopOperationStatus', 'shopLoginConfirm', 'shopLoginFinishFeige', 'shopOperationCancel'].includes(request.action)) {
+        if (request.action.startsWith('shopManagement') || ['shopLoginStart', 'shopCheckStart', 'shopOperationStatus', 'shopLoginConfirm', 'shopLoginFinishFeige', 'shopOperationCancel'].includes(request.action)) {
           if (['shopOperationStatus', 'shopLoginConfirm', 'shopLoginFinishFeige', 'shopOperationCancel'].includes(request.action) && request.taskId !== this.shopOperation?.taskId) return bad('TASK_NOT_FOUND')
           for (const key of allowed) args[key] = request[key as keyof DoudianRequest] as string
         } else if (request.action === 'prepare') {
@@ -527,17 +514,11 @@ export class DoudianController {
         const result = await this.host.request(request.action, args)
         this.current()
 
-        if (request.action === 'activateLicense' || request.action === 'resumeLicense' || request.action === 'licenseStatus') {
-          const state = (result as { state?: unknown } | null)?.state
-          if (state !== 'idle' && state !== 'pending' && state !== 'ready' && state !== 'failed' && state !== 'cache_unavailable') return bad('DOUDIAN_PROTOCOL_ERROR')
-          return { ok: true, license: { state } }
-        }
-
         if (request.action === 'capabilities') {
           const capabilities = result as DoudianReply['capabilities']
           return { ok: true, capabilities: capabilities && {
             ...capabilities,
-            authorized: capabilities.authorized === true && capabilities.licenseVerification === 'verified-v1'
+            authorized: capabilities.authorized === true && capabilities.authorizationMode === 'enterprise-session-v1'
           } }
         }
 
@@ -644,8 +625,7 @@ export class DoudianController {
       }
     } catch (error) {
       const rawCode = error instanceof Error ? error.message : 'DOUDIAN_FAILED'
-      const safeActivationErrors = ['DOUDIAN_FORBIDDEN', 'DOUDIAN_OWNER_CHANGED', 'DOUDIAN_WINDOWS_REQUIRED', 'DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE', 'LICENSE_INTEGRATION_UNVERIFIED', 'INVALID_LICENSE_INPUT', 'LICENSE_CHECK_IN_PROGRESS', 'TASK_BUSY', 'DOUDIAN_HOST_LOST', 'DOUDIAN_PROTOCOL_ERROR']
-      const code = ['activateLicense', 'resumeLicense'].includes(request?.action) && !safeActivationErrors.includes(rawCode) ? 'LICENSE_ACTIVATION_FAILED' : rawCode
+      const code = rawCode
 
       if (code === 'DOUDIAN_HOST_LOST' || code === 'DOUDIAN_FORBIDDEN') {
         this.close()

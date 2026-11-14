@@ -2,7 +2,6 @@ export type DoudianAction =
   | 'capabilities' | 'shops' | 'manageShops' | 'chooseWorkbook'
   | 'prepare' | 'start' | 'stop' | 'status'
   | 'preparePayment' | 'startPayment'
-  | 'activateLicense' | 'resumeLicense' | 'licenseStatus'
   | 'openPayment' | 'openReview' | 'openFeige'
   | 'shopManagementList' | 'shopManagementAdd' | 'shopManagementRename' | 'shopManagementPin'
   | 'shopManagementMove' | 'shopManagementPrepareDelete' | 'shopManagementDelete'
@@ -18,7 +17,6 @@ export interface DoudianRequest {
   startRow?: string
   maxRows?: string
   concurrency?: string
-  licenseCode?: string
   alias?: string
   pinned?: string
   direction?: string
@@ -88,8 +86,7 @@ export interface DoudianReply {
     chrome: boolean
     spreadsheet: boolean
     authorized: boolean
-    licenseVerification?: string
-    licenseActivation?: number
+    authorizationMode?: string
     paymentUi?: number
     reviewUi?: number
     feigeUi?: number
@@ -103,7 +100,6 @@ export interface DoudianReply {
   shopMutation?: { id?: string; updated?: boolean }
   shopDeleteConfirmation?: { confirmation: string; expiresSeconds: number; effect: string }
   shopOperation?: DoudianShopOperation
-  license?: { state: 'idle' | 'pending' | 'ready' | 'failed' | 'cache_unavailable' }
   workbook?: { id: string; name: string }
   task?: DoudianTask
 }

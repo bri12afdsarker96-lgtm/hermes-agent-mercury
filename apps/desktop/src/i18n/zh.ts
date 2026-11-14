@@ -6,7 +6,7 @@ export const zh: Translations = {
   doudian: {
     "title": "抖店工作台",
     "refresh": "刷新",
-    "manageShops": "授权 / 店铺管理",
+    "manageShops": "店铺管理",
     "moduleVersion": "执行模块",
     "shop": "店铺",
     "selectShop": "请选择店铺",
@@ -26,7 +26,7 @@ export const zh: Translations = {
     "ownerChanged": "账号或企业已变化，请重新打开工作台。",
     "hostLost": "截图进程已断开。请先核对工作簿，再重启软件；没有自动重放任务。",
     "resultUnknown": "结果暂未确认，请查询任务状态，不要重复提交。",
-    "licenseRequired": "请通过“授权 / 店铺管理”完成截图模块授权。",
+    "licenseRequired": "执行模块与当前企业会话不兼容，请更新执行模块。",
     "busy": "任务或店铺操作仍在执行。",
     "workbookBusy": "该工作簿正在被其他任务处理。",
     "failed": "操作失败",

@@ -26,7 +26,7 @@ async function fixture(isolation: unknown = capability, omitMarker = false) {
     close: vi.fn(),
     request: vi.fn(async (method: string, _args?: Record<string, string>): Promise<unknown> => {
       if (method === 'initialize') return { protocol: 1, integration: 'hermes-review-v1', version: '1.0.54', ...(omitMarker ? {} : { taskIsolation: isolation }) }
-      if (method === 'capabilities') return { protocol: 1, version: '1.0.54', authorized: true, licenseVerification: 'verified-v1', paymentUi: 1, reviewUi: 1, feigeUi: 1, taskIsolation: isolation }
+      if (method === 'capabilities') return { protocol: 1, version: '1.0.54', authorized: true, authorizationMode: 'enterprise-session-v1', paymentUi: 1, reviewUi: 1, feigeUi: 1, taskIsolation: isolation }
       if (method === 'prepare') return result('review', 'awaiting_confirmation')
       if (method === 'preparePayment') return result('payment', 'awaiting_confirmation')
       if (method === 'start') return result('review', 'running')
@@ -56,16 +56,16 @@ async function fixture(isolation: unknown = capability, omitMarker = false) {
 }
 
 describe('fixed TD payment bridge contract', () => {
-  it('blocks activation when the host has not enabled it and never forwards credentials', async () => {
+  it('rejects obsolete activation requests and never forwards credentials', async () => {
     const f = await fixture()
-    expect(await f.call({ action: 'activateLicense', licenseCode: 'SYNTHETIC-123' }))
-      .toEqual({ ok: false, error: 'LICENSE_INTEGRATION_UNVERIFIED' })
+    expect(await f.call({ action: 'activateLicense', licenseCode: 'SYNTHETIC-123' } as unknown as DoudianRequest))
+      .toEqual({ ok: false, error: 'DOUDIAN_INVALID_REQUEST' })
     expect(f.host.request.mock.calls.some(([method]) => method === 'activateLicense')).toBe(false)
-    expect(await f.call({ action: 'resumeLicense' })).toEqual({ ok: false, error: 'LICENSE_INTEGRATION_UNVERIFIED' })
+    expect(await f.call({ action: 'resumeLicense' } as unknown as DoudianRequest)).toEqual({ ok: false, error: 'DOUDIAN_INVALID_REQUEST' })
     expect(f.host.request.mock.calls.some(([method]) => method === 'resumeLicense')).toBe(false)
   })
 
-  it('forwards only an explicit activation request and redacts host errors', async () => {
+  it('rejects obsolete activation even if an old host advertises it', async () => {
     const f = await fixture()
     const original = f.host.request.getMockImplementation()!
     f.host.request.mockImplementation(async (method, args) => {
@@ -73,12 +73,12 @@ describe('fixed TD payment bridge contract', () => {
       if (method === 'activateLicense') throw new Error(`unexpected ${args?.licenseCode}`)
       return original(method, args)
     })
-    expect(await f.call({ action: 'activateLicense', licenseCode: 'SYNTHETIC-123' }))
-      .toEqual({ ok: false, error: 'LICENSE_ACTIVATION_FAILED' })
-    expect(f.host.request).toHaveBeenCalledWith('activateLicense', { licenseCode: 'SYNTHETIC-123' })
+    expect(await f.call({ action: 'activateLicense', licenseCode: 'SYNTHETIC-123' } as unknown as DoudianRequest))
+      .toEqual({ ok: false, error: 'DOUDIAN_INVALID_REQUEST' })
+    expect(f.host.request.mock.calls.some(([method]) => method === 'activateLicense')).toBe(false)
   })
 
-  it('rejects legacy authorization without a verified license marker before preparing payment', async () => {
+  it('rejects old modules without enterprise-session mode before preparing payment', async () => {
     const f = await fixture()
     const workbookId = await f.choice()
     const original = f.host.request.getMockImplementation()!
@@ -88,9 +88,9 @@ describe('fixed TD payment bridge contract', () => {
 
     expect(await f.call({ action: 'capabilities' })).toMatchObject({ ok: true, capabilities: { authorized: false } })
     expect(await f.call({ action: 'preparePayment', workbookId, amount: '3', startRow: '2', maxRows: '0', mode: 'standard' }))
-      .toEqual({ ok: false, error: 'LICENSE_REQUIRED' })
+      .toEqual({ ok: false, error: 'DOUDIAN_MODULE_INCOMPATIBLE' })
     expect(f.host.request.mock.calls.some(([method]) => method === 'preparePayment')).toBe(false)
-    expect(await f.call({ action: 'openPayment' })).toEqual({ ok: false, error: 'LICENSE_REQUIRED' })
+    expect(await f.call({ action: 'openPayment' })).toEqual({ ok: false, error: 'DOUDIAN_MODULE_INCOMPATIBLE' })
     expect(f.host.request.mock.calls.some(([method]) => method === 'openPayment')).toBe(false)
   })
 

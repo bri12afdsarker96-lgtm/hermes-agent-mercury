@@ -49,6 +49,7 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
     ({
       DOUDIAN_MODULE_MISSING: copy.moduleMissing,
       DOUDIAN_MODULE_INVALID: copy.moduleInvalid,
+      DOUDIAN_MODULE_INCOMPATIBLE: copy.moduleInvalid,
       DOUDIAN_WINDOWS_REQUIRED: copy.windowsOnly,
       DOUDIAN_FORBIDDEN: copy.forbidden,
       DOUDIAN_OWNER_CHANGED: copy.ownerChanged,

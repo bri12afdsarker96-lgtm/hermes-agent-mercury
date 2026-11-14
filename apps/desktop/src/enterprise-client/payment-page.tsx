@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -7,7 +7,6 @@ import { useI18n } from '@/i18n/context'
 import type { DoudianReply, DoudianRequest, DoudianTask } from '../../electron/doudian-types'
 
 import type { DoudianPageProps } from './doudian-entry-state'
-import { DoudianLicense } from './doudian-license'
 
 const labels = {
   zh: [
@@ -23,15 +22,15 @@ const labels = {
     '检查并准备',
     '确认开始打款',
     '停止',
-    '原激活授权尚无法核验，准备和开始已阻断。企业权限和模块状态不能替代此核验。',
+    '执行模块与当前企业会话不兼容，请更新执行模块。',
     '工作簿和任务状态',
     '操作失败',
     '正在检查执行模块',
     '执行模块不可用或企业权限不足',
-    '原激活授权未核验',
+    '执行模块不兼容',
     '保存数量',
     '请使用工作簿副本。',
-    '授权已核验，请核对准备结果后确认开始。',
+    '企业会话已核验，请核对准备结果后确认开始。',
     '任务状态已变化，请重新核对。'
   ],
   en: [
@@ -47,15 +46,15 @@ const labels = {
     'Check and prepare',
     'Confirm payment',
     'Stop',
-    'Original activation authorization cannot be verified. Preparation and start are blocked; enterprise permissions and module status do not replace this check.',
+    'The execution module is incompatible with this enterprise session. Update the module.',
     'Workbook and task status',
     'Operation failed',
     'Checking execution module',
     'Execution module unavailable or enterprise access denied',
-    'Original activation not verified',
+    'Execution module incompatible',
     'Saved',
     'Use a copy of the workbook.',
-    'Authorization verified. Review the prepared task before confirming.',
+    'Enterprise session verified. Review the prepared task before confirming.',
     'Task state changed. Review it again.'
   ]
 } as const
@@ -67,13 +66,11 @@ function paymentCapability(result: DoudianReply): Capability {
     return 'unavailable'
   }
 
-  return result.capabilities.licenseVerification === 'verified-v1' ? 'ready' : 'unverified'
+  return result.capabilities.authorizationMode === 'enterprise-session-v1' ? 'ready' : 'unverified'
 }
 
 export function PaymentPage({ runtime }: DoudianPageProps) {
-  const [revision, setRevision] = useState(0)
-  const onReady = useCallback(() => setRevision(value => value + 1), [])
-  return <><DoudianLicense runtime={runtime} onReady={onReady} /><PaymentWorkspace key={revision} runtime={runtime} /></>
+  return <PaymentWorkspace runtime={runtime} />
 }
 
 function PaymentWorkspace({ runtime }: DoudianPageProps) {

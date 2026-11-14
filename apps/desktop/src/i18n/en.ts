@@ -6,7 +6,7 @@ export const en: Translations = {
   doudian: {
     "title": "Doudian workbench",
     "refresh": "Refresh",
-    "manageShops": "Authorize / manage shops",
+    "manageShops": "Manage shops",
     "moduleVersion": "Module",
     "shop": "Shop",
     "selectShop": "Select a shop",
@@ -26,7 +26,7 @@ export const en: Translations = {
     "ownerChanged": "The account or enterprise changed. Reopen the workbench.",
     "hostLost": "The capture process disconnected. Verify the workbook before restarting the app; nothing was replayed.",
     "resultUnknown": "The result is not confirmed. Check task status; do not submit again.",
-    "licenseRequired": "Authorize the capture module through Authorize / manage shops.",
+    "licenseRequired": "The execution module is incompatible with this enterprise session. Update the module.",
     "busy": "A task or shop operation is still active.",
     "workbookBusy": "This workbook is already being processed.",
     "failed": "Operation failed",

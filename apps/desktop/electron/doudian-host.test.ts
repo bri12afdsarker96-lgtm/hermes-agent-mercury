@@ -47,7 +47,7 @@ function fixture() {
       }
 
       if (method === 'capabilities') {
-        return { protocol: 1, version: '1.0.54', authorized: true, licenseVerification: 'verified-v1', chrome: true, spreadsheet: true }
+        return { protocol: 1, version: '1.0.54', authorized: true, authorizationMode: 'enterprise-session-v1', chrome: true, spreadsheet: true }
       }
 
       if (method === 'prepare') {
@@ -155,7 +155,7 @@ describe.runIf(process.platform === 'win32')('Windows controller flow (synthetic
     const original = f.host.request.getMockImplementation()!
     let marker: unknown = 1
     f.host.request.mockImplementation(async (method: string) => method === 'capabilities'
-      ? { protocol: 1, version: '1.0.54', authorized: true, licenseVerification: 'verified-v1', reviewOptions: marker }
+      ? { protocol: 1, version: '1.0.54', authorized: true, authorizationMode: 'enterprise-session-v1', reviewOptions: marker }
       : original(method))
     const opts = { workbookId, shopId, startRow: '7', maxRows: '13', concurrency: '4' }
     for (const value of [undefined, null, '1', 0, 2]) {
