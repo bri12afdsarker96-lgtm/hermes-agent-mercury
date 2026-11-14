@@ -246,7 +246,7 @@ export function enterpriseWorkspaces(snapshot: EnterpriseRoleSnapshot | undefine
       )
     entries.splice(1, 0,
       { id: 'review-capture', label: '订单截图', glyph: '02', description: '订单评价截图与工作簿回填' },
-      { id: 'payment', label: '小额打款', glyph: '03', description: '打开原版打款窗口' })
+      { id: 'payment', label: '小额打款', glyph: '03', description: '处理订单小额打款并回填结果' })
     entries.push({ id: 'receivables', label: '应收款跟进', glyph: '款', description: '创建和处理本人应收款', requiredPermissions: ['reminder.read'] })
     entries.push({ id: 'overdue', label: '逾期未处理', glyph: '期', description: '查看权限范围内的逾期待办', requiredPermissions: ['reminder.read'] })
   }
