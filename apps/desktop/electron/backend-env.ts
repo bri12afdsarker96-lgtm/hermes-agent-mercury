@@ -128,6 +128,10 @@ function localVerificationEnv(local: boolean, hermesHome: string) {
   return local ? { HERMES_HOME: hermesHome } : {}
 }
 
+function assertBootstrapAllowed(local: boolean, bootstrap: boolean) {
+  if (local && bootstrap) throw new Error('Local verification cannot bootstrap or repair a Hermes runtime automatically')
+}
+
 function buildDesktopBackendEnv({
   hermesHome,
   pythonPathEntries = [],
@@ -167,6 +171,7 @@ export {
   hermesManagedNodePathEntries,
   localVerificationHome,
   localVerificationEnv,
+  assertBootstrapAllowed,
   normalizeHermesHomeRoot,
   pathEnvKey,
   POSIX_SANE_PATH_ENTRIES

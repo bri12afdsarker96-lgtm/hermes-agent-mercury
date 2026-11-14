@@ -42,7 +42,7 @@ import { classifyActiveRuntime } from './active-runtime-state'
 import { stopBackendChild as stopBackendChildImpl, stopBackendTreesForUpdate } from './backend-child'
 import { dashboardFallbackArgs, sourceDeclaresServe } from './backend-command'
 import { createBackendConnectionState } from './backend-connection-state'
-import { buildDesktopBackendEnv, hermesManagedNodePathEntries, normalizeHermesHomeRoot, localVerificationHome, localVerificationEnv } from './backend-env'
+import { assertBootstrapAllowed, buildDesktopBackendEnv, hermesManagedNodePathEntries, normalizeHermesHomeRoot, localVerificationHome, localVerificationEnv } from './backend-env'
 import { isReauthRequiredError, waitForHermesReady } from './backend-health'
 import { backendCommandMatches, createBackendOwnership, createBackendShutdownCoordinator } from './backend-ownership'
 import {
@@ -4651,6 +4651,7 @@ function resolveHermesBackend(backendArgs) {
 }
 
 async function ensureRuntime(backend) {
+  assertBootstrapAllowed(enterpriseOriginSelection.local, backend.bootstrap === true)
   if (!backend.bootstrap) {
     await advanceBootProgress('runtime.external', `Using ${backend.label}`, 32)
 

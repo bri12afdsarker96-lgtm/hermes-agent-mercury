@@ -16,9 +16,9 @@ const require = createRequire(import.meta.url)
 export function assertAssetPolicy(assetContract, localprep) {
   if (!['UNTRUSTED', 'UNVERIFIED'].includes(assetContract?.asset_approval)) throw new Error('Asset approval status is missing or invalid')
   if (assetContract.asset_approval === 'UNVERIFIED' && Object.hasOwn(assetContract, 'candidate_status')) throw new Error('Candidate assets cannot be marked unverified')
-  if (assetContract.asset_approval === 'UNTRUSTED' && !localprep) throw new Error('Candidate assets are unapproved and may only be used for localprep')
-  if (assetContract.asset_approval === 'UNTRUSTED' && (typeof assetContract.candidate_status !== 'string' || !assetContract.candidate_status.trim())) {
-    throw new Error('Candidate asset status is missing')
+  if (!localprep) throw new Error('This packaging path is restricted to localprep')
+  if (assetContract.asset_approval !== 'UNTRUSTED' || !['UNTRUSTED', 'LOCAL VERIFICATION ONLY; NOT AN APPROVED RELEASE TRUST MANIFEST'].includes(assetContract.candidate_status)) {
+    throw new Error('Localprep requires an explicitly unapproved candidate asset status')
   }
 }
 

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { test } from 'vitest'
 
 import {
+  assertBootstrapAllowed,
   appendUniquePathEntries,
   buildDesktopBackendEnv,
   buildDesktopBackendPath,
@@ -14,6 +15,12 @@ import {
   pathEnvKey,
   POSIX_SANE_PATH_ENTRIES
 } from './backend-env'
+
+test('local verification stops both fresh bootstrap and forced repair before installer handoff', () => {
+  assert.throws(() => assertBootstrapAllowed(true, true), /cannot bootstrap or repair/)
+  assert.doesNotThrow(() => assertBootstrapAllowed(true, false))
+  assert.doesNotThrow(() => assertBootstrapAllowed(false, true))
+})
 
 test('local verification pins home under isolated userData and overrides inherited child home', () => {
   const userData = 'C:\\Users\\fixture\\Hermes-localprep'

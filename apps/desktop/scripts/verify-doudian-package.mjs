@@ -106,6 +106,9 @@ export async function readAssetContract(file) {
   if (hasCandidateStatus && (typeof manifest.candidate_status !== 'string' || !manifest.candidate_status.trim())) {
     throw new Error('Invalid candidate asset status')
   }
+  if (hasCandidateStatus && !['UNTRUSTED', 'LOCAL VERIFICATION ONLY; NOT AN APPROVED RELEASE TRUST MANIFEST'].includes(manifest.candidate_status)) {
+    throw new Error('Unrecognized candidate asset status')
+  }
   const profile = manifest.profiles?.['hermes-module']
   if (manifest.schema_version !== 1 || !profile) throw new Error('Missing hermes-module asset profile')
   if (!/^[a-f0-9]{40}$/i.test(manifest.source_commit)) throw new Error('Invalid module source commit')

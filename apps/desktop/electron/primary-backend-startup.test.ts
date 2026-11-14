@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { test, vi } from 'vitest'
 
 import { createFirstRunSetupGate } from './first-run-setup-gate'
+import { assertBootstrapAllowed } from './backend-env'
 import {
   createPrimaryRemoteConnection,
   FirstRunSetupResetError,
@@ -26,6 +27,18 @@ function startupOptions(overrides: Record<string, unknown> = {}) {
     ...overrides
   }
 }
+
+test('local startup stops before installer handoff when the backend requires bootstrap', async () => {
+  const installer = vi.fn()
+  const options = startupOptions({
+    ensureLocalRuntime: async () => {
+      assertBootstrapAllowed(true, true)
+      installer()
+    }
+  })
+  await assert.rejects(runPrimaryBackendStartup(options), /cannot bootstrap or repair/)
+  assert.equal(installer.mock.calls.length, 0)
+})
 
 test('primary remote descriptor preserves a resolved registry connection id', () => {
   const connection = createPrimaryRemoteConnection(
