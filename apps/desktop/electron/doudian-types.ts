@@ -70,6 +70,8 @@ export interface DoudianTask {
     | 'stopping'
     | 'stopped'
     | 'completed'
+    | 'paused_balance'
+    | 'paused_review'
     | 'failed'
     | 'unknown'
   saved: number

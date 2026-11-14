@@ -31,7 +31,11 @@ const labels = {
     '保存数量',
     '请使用工作簿副本。',
     '企业会话已核验，请核对准备结果后确认开始。',
-    '任务状态已变化，请重新核对。'
+    '任务状态已变化，请重新核对。',
+    '因余额原因，打款已暂停。',
+    '打款已暂停，需人工核验。',
+    '任务已停止。',
+    '任务已完成。'
   ],
   en: [
     'Small payments',
@@ -55,7 +59,11 @@ const labels = {
     'Saved',
     'Use a copy of the workbook.',
     'Enterprise session verified. Review the prepared task before confirming.',
-    'Task state changed. Review it again.'
+    'Task state changed. Review it again.',
+    'Payment paused due to a balance issue.',
+    'Payment paused; manual verification is required.',
+    'Task stopped.',
+    'Task completed.'
   ]
 } as const
 
@@ -378,7 +386,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
       </div>
       {displayedTask && (
         <div aria-label={t[13]} aria-live="polite" className="space-y-1">
-          <p>{displayedTask.state}</p>
+          <p>{displayedTask.state === 'paused_balance' ? t[22] : displayedTask.state === 'paused_review' ? t[23] : displayedTask.state === 'stopped' ? t[24] : displayedTask.state === 'completed' ? t[25] : displayedTask.state}</p>
           <p>{displayedTask.summary}</p>
           <p>
             {t[18]}: {displayedTask.saved}

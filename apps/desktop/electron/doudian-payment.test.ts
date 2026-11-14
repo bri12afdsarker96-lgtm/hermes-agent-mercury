@@ -28,6 +28,45 @@ function fixture(paymentUi = 1) {
 }
 
 describe('original payment session and tenant authority', () => {
+  it.each(['paused_balance', 'paused_review', 'stopped', 'completed'])(
+    'passes terminal payment-window status %s and does not start it', async state => {
+      const { controller, host } = fixture()
+      await controller.operate({ sessionId: 'test', action: 'openPayment' })
+      const original = host.request.getMockImplementation()!
+      host.request.mockImplementation(async method => method === 'status'
+        ? { taskId: 'a'.repeat(32), kind: 'payment-window', state, saved: 1, summary: '', error: '', messages: [] }
+        : original(method))
+      expect(await controller.operate({ sessionId: 'test', action: 'status' })).toMatchObject({ ok: true, task: { state } })
+      expect(await controller.operate({ sessionId: 'test', action: 'startPayment', taskId: 'a'.repeat(32) })).toEqual({ ok: false, error: 'NOT_PREPARED' })
+      expect(host.request.mock.calls.some(([method]) => method === 'startPayment')).toBe(false)
+    }
+  )
+  it.each(['paused_balance', 'paused_review'])(
+    'accepts %s only for payment kinds', async state => {
+      for (const kind of ['payment', 'review']) {
+        const { controller, host } = fixture()
+        const original = host.request.getMockImplementation()!
+        host.request.mockImplementation(async method => method === 'status'
+          ? { taskId: 'a'.repeat(32), kind, state, saved: 0, summary: '', error: '', messages: [] }
+          : original(method))
+        const result = await controller.operate({ sessionId: 'test', action: 'status' })
+        expect(result).toMatchObject(kind === 'payment' ? { ok: true, task: { state } } : { ok: false, error: 'DOUDIAN_PROTOCOL_ERROR' })
+      }
+    }
+  )
+  it('rejects unknown future states', async () => {
+    const { controller, host } = fixture()
+    const original = host.request.getMockImplementation()!
+    let state = 'awaiting_confirmation'
+    host.request.mockImplementation(async method => method === 'status'
+      ? { taskId: 'a'.repeat(32), kind: 'payment', state, saved: 0, summary: '', error: '', messages: [] }
+      : original(method))
+    expect((await controller.operate({ sessionId: 'test', action: 'status' })).ok).toBe(true)
+    state = 'paused_other'
+    expect(await controller.operate({ sessionId: 'test', action: 'status' })).toEqual({ ok: false, error: 'DOUDIAN_PROTOCOL_ERROR' })
+    expect(await controller.operate({ sessionId: 'test', action: 'startPayment', taskId: 'a'.repeat(32) })).toEqual({ ok: false, error: 'NOT_PREPARED' })
+    expect(host.request.mock.calls.some(([method]) => method === 'startPayment')).toBe(false)
+  })
   it.each(['none', 'pending', 'rejected', 'approved', 'revoked', 'expired', 'unavailable'])(
     'does not request obsolete grant state %s when opening the original window', async _state => {
       const { controller, deps, host } = fixture()

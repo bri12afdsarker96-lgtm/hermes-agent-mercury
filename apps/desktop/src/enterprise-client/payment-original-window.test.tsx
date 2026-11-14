@@ -38,7 +38,8 @@ function fixture(paymentUi = 1) {
     return { ok: true, task }
   })
 
-  return { runtime: { doudian } as unknown as EnterpriseClientRuntime, doudian }
+  return { runtime: { doudian } as unknown as EnterpriseClientRuntime, doudian,
+    setTask: (next: DoudianTask) => { task = next } }
 }
 
 const view = (runtime: EnterpriseClientRuntime | null) =>
@@ -49,6 +50,19 @@ const view = (runtime: EnterpriseClientRuntime | null) =>
   )
 
 describe('original licensed payment window', () => {
+  it.each([
+    ['paused_balance', '因余额原因，打款已暂停。'],
+    ['paused_review', '打款已暂停，需人工核验。'],
+    ['stopped', '打款任务已停止。'],
+    ['completed', '打款任务已完成。']
+  ] as const)('shows terminal state %s from polling', async (state, label) => {
+    const { runtime, doudian, setTask } = fixture()
+    setTask({ kind: 'payment-window', taskId: 'a'.repeat(32), state, saved: 0, summary: '', error: '', messages: [] })
+    view(runtime)
+    await screen.findByText(label)
+    expect(screen.queryByRole('button', { name: '停止并关闭打款窗口' })).toBeNull()
+    expect(doudian.mock.calls.some(([request]) => ['openPayment', 'stop', 'startPayment'].includes(request.action))).toBe(false)
+  })
   it('does not expose the native module without an enterprise session', () => {
     view(null)
     expect(screen.queryByRole('button', { name: '打开早鸟打款窗口' })).toBeNull()

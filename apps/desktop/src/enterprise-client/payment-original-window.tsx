@@ -140,7 +140,9 @@ export function OriginalPaymentWindow({ runtime }: { runtime: EnterpriseClientRu
       </div>
       {task?.kind === 'payment-window' && (
         <p aria-live="polite" className="text-sm">
-          {task.state === 'stopping' ? copy.stopping : active ? copy.opened : task.state === 'failed' ? copy.failed : copy.closed}
+          {task.state === 'stopping' ? copy.stopping : active ? copy.opened : task.state === 'failed' ? copy.failed :
+            task.state === 'paused_balance' ? copy.pausedBalance : task.state === 'paused_review' ? copy.pausedReview :
+            task.state === 'completed' ? copy.completed : task.state === 'stopped' ? copy.stopped : copy.closed}
         </p>
       )}
       {current?.error && <p className="text-sm text-destructive" role="alert">{copy.failed}</p>}

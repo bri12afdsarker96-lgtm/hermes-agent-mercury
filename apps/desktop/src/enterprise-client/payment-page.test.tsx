@@ -164,7 +164,7 @@ describe('payment page offline', () => {
     const { send } = setup(capability(), running)
     await screen.findByText('模拟运行')
     fireEvent.click(screen.getByRole('button', { name: '停止' }))
-    await screen.findByText('stopped')
+    await screen.findByText('任务已停止。')
     expect(send).toHaveBeenCalledWith({ action: 'stop', taskId: running.taskId })
   })
 
@@ -173,5 +173,17 @@ describe('payment page offline', () => {
     await waitFor(() => expect(send.mock.calls.some(([request]) => request.action === 'status')).toBe(true))
     expect((screen.getByRole('button', { name: '确认开始打款' }) as HTMLButtonElement).disabled).toBe(true)
     expect(send.mock.calls.some(([request]) => request.action === 'startPayment')).toBe(false)
+  })
+  it.each([
+    ['paused_balance', '因余额原因，打款已暂停。'],
+    ['paused_review', '打款已暂停，需人工核验。'],
+    ['stopped', '任务已停止。'],
+    ['completed', '任务已完成。']
+  ] as const)('shows terminal state %s without starting or stopping', async (state, label) => {
+    const { send } = setup(capability(true, 'enterprise-session-v1'), { ...prepared, state })
+    await screen.findByText(label)
+    expect((screen.getByRole('button', { name: '确认开始打款' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByRole('button', { name: '停止' })).toBeNull()
+    expect(send.mock.calls.some(([request]) => ['startPayment', 'stop'].includes(request.action))).toBe(false)
   })
 })

@@ -13,7 +13,11 @@ const zh = {
   closed: '原版窗口已关闭',
   failed: '原打款模块不可用或企业会话失效；请检查后重试。',
   retry: '重新检查模块',
-  stopping: '正在安全停止并关闭窗口'
+  stopping: '正在安全停止并关闭窗口',
+  pausedBalance: '因余额原因，打款已暂停。',
+  pausedReview: '打款已暂停，需人工核验。',
+  completed: '打款任务已完成。',
+  stopped: '打款任务已停止。'
 }
 
 export const paymentOriginalCopy: Record<Locale, { [K in keyof typeof zh]: string }> = {
@@ -31,7 +35,11 @@ export const paymentOriginalCopy: Record<Locale, { [K in keyof typeof zh]: strin
     closed: 'Original window closed',
     failed: 'Payment module unavailable or enterprise session expired. Check and retry.',
     retry: 'Check module again',
-    stopping: 'Safely stopping and closing window'
+    stopping: 'Safely stopping and closing window',
+    pausedBalance: 'Payment paused due to a balance issue.',
+    pausedReview: 'Payment paused; manual verification is required.',
+    completed: 'Payment task completed.',
+    stopped: 'Payment task stopped.'
   },
   'zh-hant': {
     title: '早鳥原版打款',
@@ -46,7 +54,11 @@ export const paymentOriginalCopy: Record<Locale, { [K in keyof typeof zh]: strin
     closed: '原版視窗已關閉',
     failed: '原打款模組不可用或企業工作階段已失效；請檢查後重試。',
     retry: '重新檢查模組',
-    stopping: '正在安全停止並關閉視窗'
+    stopping: '正在安全停止並關閉視窗',
+    pausedBalance: '因餘額原因，打款已暫停。',
+    pausedReview: '打款已暫停，需人工核驗。',
+    completed: '打款任務已完成。',
+    stopped: '打款任務已停止。'
   },
   ja: {
     title: '早鳥オリジナル支払い',
@@ -61,7 +73,11 @@ export const paymentOriginalCopy: Record<Locale, { [K in keyof typeof zh]: strin
     closed: '元の画面を閉じました',
     failed: '支払いモジュールを利用できないか、企業セッションが失効しました。確認して再試行してください。',
     retry: 'モジュールを再確認',
-    stopping: '安全に停止して画面を閉じています'
+    stopping: '安全に停止して画面を閉じています',
+    pausedBalance: '残高に関する理由で支払いを停止しました。',
+    pausedReview: '支払いを停止しました。手動確認が必要です。',
+    completed: '支払いタスクが完了しました。',
+    stopped: '支払いタスクを停止しました。'
   },
   ar: {
     title: 'مدفوعات Early Bird الأصلية',
@@ -76,6 +92,10 @@ export const paymentOriginalCopy: Record<Locale, { [K in keyof typeof zh]: strin
     closed: 'أغلقت النافذة الأصلية',
     failed: 'وحدة الدفع غير متاحة أو انتهت جلسة المؤسسة. تحقق ثم أعد المحاولة.',
     retry: 'إعادة فحص الوحدة',
-    stopping: 'جارٍ الإيقاف الآمن وإغلاق النافذة'
+    stopping: 'جارٍ الإيقاف الآمن وإغلاق النافذة',
+    pausedBalance: 'توقف الدفع مؤقتًا بسبب مشكلة في الرصيد.',
+    pausedReview: 'توقف الدفع مؤقتًا؛ يلزم التحقق اليدوي.',
+    completed: 'اكتملت مهمة الدفع.',
+    stopped: 'توقفت مهمة الدفع.'
   }
 }

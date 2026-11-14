@@ -585,7 +585,7 @@ export class DoudianController {
 
         if (
           !task ||
-          ![
+          !([
             'idle',
             'preparing',
             'awaiting_confirmation',
@@ -594,11 +594,14 @@ export class DoudianController {
             'stopped',
             'completed',
             'failed'
-          ].includes(task.state) ||
+          ].includes(task.state) || (['payment', 'payment-window'].includes(task.kind ?? '') &&
+            ['paused_balance', 'paused_review'].includes(task.state))) ||
           !Number.isSafeInteger(task.saved) ||
           task.saved < 0 ||
           !Array.isArray(task.messages)
         ) {
+          this.taskState = 'unknown'
+
           return bad('DOUDIAN_PROTOCOL_ERROR')
         }
 
