@@ -82,6 +82,13 @@ export function alreadyHasNoSandbox(argv: readonly string[] = [], env: NodeJS.Pr
   return disable === '1' || disable === 'true' || disable === 'yes' || disable === 'on'
 }
 
+export function allowSandboxFallback(local: boolean, argv: readonly string[], env: NodeJS.ProcessEnv, chromiumNoSandbox = false): boolean {
+  if (local && (chromiumNoSandbox || alreadyHasNoSandbox(argv, env))) {
+    throw new Error('Local verification requires the Chromium sandbox')
+  }
+  return !local
+}
+
 const FALLBACK_REASONS: readonly string[] = ['gpu-breakpoint', 'renderer-crash-loop', 'boot-loop']
 
 export function parseSandboxMarker(raw: unknown): SandboxMarker | null {

@@ -391,6 +391,7 @@ import {
 } from './windows-remote-lifecycle'
 import {
   alreadyHasNoSandbox,
+  allowSandboxFallback,
   buildNoSandboxRelaunchArgs,
   decideWindowsSandboxLaunch,
   fallbackMarker,
@@ -548,7 +549,11 @@ let windowsSandboxFallbackSticky = false
 let windowsSandboxFallbackReason: SandboxFallbackReason = 'boot-loop'
 let windowsNoSandboxRelaunchAttempted = false
 
-if (IS_WINDOWS) {
+const sandboxFallbackAllowed = allowSandboxFallback(
+  enterpriseOriginSelection.local, process.argv, process.env, app.commandLine.hasSwitch('no-sandbox')
+)
+
+if (IS_WINDOWS && sandboxFallbackAllowed) {
   const windowsUserData = app.getPath('userData')
   const priorMarker = readSandboxMarker(windowsUserData)
 
@@ -11909,6 +11914,7 @@ function createWindow() {
         mainWindow.webContents.reload()
       },
       onCrashLoopSuppressed: details => {
+        if (!sandboxFallbackAllowed) return
         // #38216 renderer flavor (same recovery as #56726, credit @Sahil-SS9):
         // a deterministic Windows renderer crash loop with the sandbox
         // breakpoint signature gets one --no-sandbox relaunch instead of a

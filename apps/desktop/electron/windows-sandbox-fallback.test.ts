@@ -8,6 +8,7 @@ import { test } from 'vitest'
 import {
   ALL_APPLICATION_PACKAGES_SID,
   alreadyHasNoSandbox,
+  allowSandboxFallback,
   BOOT_ABORTS_BEFORE_FALLBACK,
   buildIcaclsGrantArgs,
   buildNoSandboxRelaunchArgs,
@@ -26,6 +27,14 @@ import {
   WINDOWS_SANDBOX_MARKER_FILENAME,
   writeSandboxMarker
 } from './windows-sandbox-fallback'
+
+test('local verification rejects explicit sandbox disable and forbids automatic fallback', () => {
+  assert.equal(allowSandboxFallback(true, [], {}), false)
+  assert.throws(() => allowSandboxFallback(true, ['--no-sandbox'], {}), /requires the Chromium sandbox/)
+  assert.throws(() => allowSandboxFallback(true, [], { ELECTRON_DISABLE_SANDBOX: '1' }), /requires the Chromium sandbox/)
+  assert.throws(() => allowSandboxFallback(true, [], {}, true), /requires the Chromium sandbox/)
+  assert.equal(allowSandboxFallback(false, [], {}), true)
+})
 
 test('isWindowsSandboxBreakpointExit recognizes signed and unsigned STATUS_BREAKPOINT', () => {
   assert.equal(isWindowsSandboxBreakpointExit(WINDOWS_SANDBOX_BREAKPOINT_EXIT), true)
