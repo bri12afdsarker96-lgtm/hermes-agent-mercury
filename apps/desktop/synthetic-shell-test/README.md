@@ -1,8 +1,8 @@
 # Synthetic enterprise shell acceptance
 
 This is a test-only Electron main process and synthetic login/TD bridge. The
-renderer uses the real `EnterpriseWorkspaceApp`, pages, and production preload
-from Hermes base commit `e4b5e85881fa541566167efe60709505fe93feef`. It is not the
+renderer uses the current checkout's `EnterpriseWorkspaceApp`, pages, and production
+preload. The original test was based on Hermes commit `e4b5e85881fa541566167efe60709505fe93feef`. It is not the
 production Electron main process, real enterprise authentication, a packaged
 application, or an acceptance of the existing local-verification gate.
 
@@ -13,10 +13,9 @@ a fake review engine. Both use synthetic workbooks and session. The fixed
 hashes in `main.ts` reject other executables and dependencies. No production TD
 asset was launched; the payment preflight in this fixture is a stub.
 
-From this worktree:
+From the `apps/desktop` directory of the checkout being tested:
 
 ```powershell
-Set-Location 'D:\文档\抖店自动化\_codex_verify\hermes-enterprise-fixture-repro-20261115\apps\desktop'
 node --test synthetic-shell-test/prepare-fixtures.test.mjs
 node scripts/synthetic-shell-e2e.mjs
 ```
