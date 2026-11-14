@@ -31,4 +31,13 @@ describe('embedded original activation', () => {
     await waitFor(() => expect(doudian).toHaveBeenCalledWith({ action: 'activateLicense', licenseCode: 'SYNTHETIC-CODE' }))
     expect(input.value).toBe('')
   })
+
+  it('requests cached authorization without sending a code', async () => {
+    const doudian = vi.fn(async (request: Omit<DoudianRequest, 'sessionId'>) => request.action === 'capabilities'
+      ? { ok: true, capabilities: { protocol: 1, authorized: false, licenseActivation: 1 } }
+      : { ok: true, license: { state: 'pending' } })
+    mount(doudian)
+    fireEvent.click(await screen.findByRole('button', { name: '恢复本机授权' }))
+    await waitFor(() => expect(doudian).toHaveBeenCalledWith({ action: 'resumeLicense' }))
+  })
 })

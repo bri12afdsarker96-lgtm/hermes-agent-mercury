@@ -2,7 +2,7 @@ export type DoudianAction =
   | 'capabilities' | 'shops' | 'manageShops' | 'chooseWorkbook'
   | 'prepare' | 'start' | 'stop' | 'status'
   | 'preparePayment' | 'startPayment'
-  | 'activateLicense' | 'licenseStatus'
+  | 'activateLicense' | 'resumeLicense' | 'licenseStatus'
   | 'openPayment' | 'openReview' | 'openFeige'
 
 export interface DoudianRequest {
@@ -61,7 +61,7 @@ export interface DoudianReply {
     reviewOptions?: number
   }
   shops?: DoudianShop[]
-  license?: { state: 'idle' | 'pending' | 'ready' | 'failed' }
+  license?: { state: 'idle' | 'pending' | 'ready' | 'failed' | 'cache_unavailable' }
   workbook?: { id: string; name: string }
   task?: DoudianTask
 }

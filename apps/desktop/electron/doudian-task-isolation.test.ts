@@ -61,6 +61,8 @@ describe('fixed TD payment bridge contract', () => {
     expect(await f.call({ action: 'activateLicense', licenseCode: 'SYNTHETIC-123' }))
       .toEqual({ ok: false, error: 'LICENSE_INTEGRATION_UNVERIFIED' })
     expect(f.host.request.mock.calls.some(([method]) => method === 'activateLicense')).toBe(false)
+    expect(await f.call({ action: 'resumeLicense' })).toEqual({ ok: false, error: 'LICENSE_INTEGRATION_UNVERIFIED' })
+    expect(f.host.request.mock.calls.some(([method]) => method === 'resumeLicense')).toBe(false)
   })
 
   it('forwards only an explicit activation request and redacts host errors', async () => {
