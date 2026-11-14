@@ -26,7 +26,7 @@ async function fixture(isolation: unknown = capability, omitMarker = false) {
     close: vi.fn(),
     request: vi.fn(async (method: string, _args?: Record<string, string>): Promise<unknown> => {
       if (method === 'initialize') return { protocol: 1, integration: 'hermes-review-v1', version: '1.0.54', ...(omitMarker ? {} : { taskIsolation: isolation }) }
-      if (method === 'capabilities') return { protocol: 1, version: '1.0.54', paymentUi: 1, reviewUi: 1, feigeUi: 1, taskIsolation: isolation }
+      if (method === 'capabilities') return { protocol: 1, version: '1.0.54', authorized: true, licenseVerification: 'verified-v1', paymentUi: 1, reviewUi: 1, feigeUi: 1, taskIsolation: isolation }
       if (method === 'prepare') return result('review', 'awaiting_confirmation')
       if (method === 'preparePayment') return result('payment', 'awaiting_confirmation')
       if (method === 'start') return result('review', 'running')
@@ -56,6 +56,20 @@ async function fixture(isolation: unknown = capability, omitMarker = false) {
 }
 
 describe('fixed TD payment bridge contract', () => {
+  it('rejects legacy authorization without a verified license marker before preparing payment', async () => {
+    const f = await fixture()
+    const workbookId = await f.choice()
+    const original = f.host.request.getMockImplementation()!
+    f.host.request.mockImplementation(async (method, args) => method === 'capabilities'
+      ? { protocol: 1, version: '1.0.54', authorized: true }
+      : original(method, args))
+
+    expect(await f.call({ action: 'capabilities' })).toMatchObject({ ok: true, capabilities: { authorized: false } })
+    expect(await f.call({ action: 'preparePayment', workbookId, amount: '3', startRow: '2', maxRows: '0', mode: 'standard' }))
+      .toEqual({ ok: false, error: 'LICENSE_REQUIRED' })
+    expect(f.host.request.mock.calls.some(([method]) => method === 'preparePayment')).toBe(false)
+  })
+
   it.each(['standard', 'new-order'] as const)('forwards valid %s parameters and starts exactly once without grant', async mode => {
     const f = await fixture()
     const workbookId = await f.choice()

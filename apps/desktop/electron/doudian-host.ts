@@ -368,6 +368,14 @@ export class DoudianController {
 
         this.current()
 
+        if (['manageShops', 'prepare', 'start', 'preparePayment', 'startPayment'].includes(request.action)) {
+          const capabilities = (await this.host.request('capabilities')) as DoudianReply['capabilities']
+          this.current()
+          if (capabilities?.authorized !== true || capabilities.licenseVerification !== 'verified-v1') {
+            return bad('LICENSE_REQUIRED')
+          }
+        }
+
         if (request.action === 'openPayment') {
           const capabilities = (await this.host.request('capabilities')) as DoudianReply['capabilities']
           this.current()
@@ -460,7 +468,11 @@ export class DoudianController {
         this.current()
 
         if (request.action === 'capabilities') {
-          return { ok: true, capabilities: result as DoudianReply['capabilities'] }
+          const capabilities = result as DoudianReply['capabilities']
+          return { ok: true, capabilities: capabilities && {
+            ...capabilities,
+            authorized: capabilities.authorized === true && capabilities.licenseVerification === 'verified-v1'
+          } }
         }
 
         if (request.action === 'shops') {
