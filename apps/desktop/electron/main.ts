@@ -42,7 +42,7 @@ import { classifyActiveRuntime } from './active-runtime-state'
 import { stopBackendChild as stopBackendChildImpl, stopBackendTreesForUpdate } from './backend-child'
 import { dashboardFallbackArgs, sourceDeclaresServe } from './backend-command'
 import { createBackendConnectionState } from './backend-connection-state'
-import { assertBootstrapAllowed, buildDesktopBackendEnv, hermesManagedNodePathEntries, normalizeHermesHomeRoot, localVerificationHome, localVerificationEnv } from './backend-env'
+import { assertBootstrapAllowed, buildDesktopBackendEnv, buildDesktopChildEnv, hermesManagedNodePathEntries, normalizeHermesHomeRoot, localVerificationHome } from './backend-env'
 import { isReauthRequiredError, waitForHermesReady } from './backend-health'
 import { backendCommandMatches, createBackendOwnership, createBackendShutdownCoordinator } from './backend-ownership'
 import {
@@ -2235,6 +2235,21 @@ function unwrapWindowsVenvHermesCommand(command, backendArgs) {
 // is cached per resolved runtime so we probe at most once per backend.
 const _serveSupportCache = new Map()
 
+function backendChildEnv(backend, explicit = {}) {
+  const local = enterpriseOriginSelection.local
+  let pythonPaths = []
+  if (local) {
+    if (backend.kind !== 'python' || !backend.root || !path.isAbsolute(backend.root)) {
+      throw new Error('Local verification requires an explicit Python runtime root')
+    }
+    for (const dir of [HERMES_HOME, ...['appdata', 'localappdata', 'temp'].map(name => path.join(HERMES_HOME, name))]) {
+      fs.mkdirSync(dir, { recursive: true })
+    }
+    pythonPaths = [backend.root, ...getVenvSitePackagesEntries(path.join(backend.root, 'venv'))]
+  }
+  return buildDesktopChildEnv({ local, inherited: process.env, backend: backend.env || {}, explicit, hermesHome: HERMES_HOME, pythonPaths })
+}
+
 function backendSupportsServe(backend) {
   if (!backend || !backend.command) {
     return true
@@ -2267,8 +2282,8 @@ function backendSupportsServe(backend) {
       // runtime through the legacy `dashboard` form. Share the probe budget
       // and its timeout-only retry instead of a thinner local bound.
       execProbeSync(backend.command, [...prefix, 'serve', '--help'], {
-        cwd: backend.root || undefined,
-        env: { ...process.env, HERMES_HOME, ...(backend.env || {}), ...localVerificationEnv(enterpriseOriginSelection.local, HERMES_HOME) },
+        cwd: enterpriseOriginSelection.local ? HERMES_HOME : backend.root || undefined,
+        env: backendChildEnv(backend),
         timeout: PROBE_TIMEOUT_MS,
         stdio: 'ignore',
         // `.cmd`/`.bat` shim backends carry shell: true in their descriptor
@@ -4330,6 +4345,10 @@ function isPackagedInstallPath(dir) {
 }
 
 function resolveHermesCwd() {
+  if (enterpriseOriginSelection.local) {
+    fs.mkdirSync(HERMES_HOME, { recursive: true })
+    return HERMES_HOME
+  }
   // In a packaged build, `process.cwd()` resolves to the install root (e.g.
   // `…/win-unpacked` on Windows or `/Applications/Hermes.app/Contents/...`
   // on macOS). Sessions spawned there leave files inside the app bundle
@@ -10122,11 +10141,7 @@ async function spawnPoolBackend(profile, entry, opts: { forceLocal?: boolean; po
     backend.args,
     hiddenWindowsChildOptions({
       cwd: hermesCwd,
-      env: {
-        ...process.env,
-        HERMES_HOME,
-        ...backend.env,
-        ...localVerificationEnv(enterpriseOriginSelection.local, HERMES_HOME),
+      env: backendChildEnv(backend, {
         // Pin the gateway's tool/terminal cwd to the same directory we chose for
         // the child process. Inherited TERMINAL_CWD (or a stale config bridge)
         // can still point at the install dir even when spawn cwd is home.
@@ -10141,7 +10156,7 @@ async function spawnPoolBackend(profile, entry, opts: { forceLocal?: boolean; po
         ...parentIdentityEnv,
         HERMES_WEB_DIST: webDist,
         ...(readyFile ? { HERMES_DESKTOP_READY_FILE: readyFile } : {})
-      },
+      }),
       shell: backend.shell,
       stdio: ['ignore', 'pipe', 'pipe']
     })
@@ -10482,8 +10497,7 @@ async function startHermes() {
       backend.args,
       hiddenWindowsChildOptions({
         cwd: hermesCwd,
-        env: {
-          ...process.env,
+        env: backendChildEnv(backend, {
           // Explicitly pin HERMES_HOME for the child so Python's get_hermes_home()
           // resolves to the SAME location our resolveHermesHome() picked. Without
           // this pin, Python falls back to ~/.hermes on every platform — fine on
@@ -10492,9 +10506,6 @@ async function startHermes() {
           // Mismatch would split config / sessions / .env / logs across two
           // directories. install.ps1 sets HERMES_HOME via setx; the desktop
           // can't reliably do that, so we set it inline for every spawn.
-          HERMES_HOME,
-          ...backend.env,
-          ...localVerificationEnv(enterpriseOriginSelection.local, HERMES_HOME),
           TERMINAL_CWD: hermesCwd,
           HERMES_DASHBOARD_SESSION_TOKEN: token,
           // Marks this dashboard backend as desktop-spawned so it runs the cron
@@ -10506,7 +10517,7 @@ async function startHermes() {
           ...parentIdentityEnv,
           HERMES_WEB_DIST: webDist,
           ...(readyFile ? { HERMES_DESKTOP_READY_FILE: readyFile } : {})
-        },
+        }),
         shell: backend.shell,
         stdio: ['ignore', 'pipe', 'pipe']
       })

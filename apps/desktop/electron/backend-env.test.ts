@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 
 import { test } from 'vitest'
 
@@ -7,6 +8,7 @@ import {
   assertBootstrapAllowed,
   appendUniquePathEntries,
   buildDesktopBackendEnv,
+  buildDesktopChildEnv,
   buildDesktopBackendPath,
   hermesManagedNodePathEntries,
   localVerificationHome,
@@ -15,6 +17,48 @@ import {
   pathEnvKey,
   POSIX_SANE_PATH_ENTRIES
 } from './backend-env'
+
+test('local backend child gets isolated defaults and no inherited credentials or proxy', () => {
+  const home = 'C:\\local-test\\hermes-home'
+  const env = buildDesktopChildEnv({
+    local: true, hermesHome: home, platform: 'win32', pathModule: path.win32,
+    inherited: { SystemRoot: 'C:\\Windows', OPENAI_API_KEY: 'synthetic-secret', HTTP_PROXY: 'http://example.invalid', http_proxy: 'http://example.invalid', NODE_OPTIONS: '--require bad',
+      PYTHONPATH: 'C:\\production', USERPROFILE: 'C:\\Users\\real' },
+    backend: { PYTHONPATH: 'C:\\production', PATH: 'C:\\production' },
+    pythonPaths: ['C:\\test-runtime'],
+    explicit: { HERMES_DASHBOARD_SESSION_TOKEN: 'synthetic-token', HERMES_PARENT_PID: '123' }
+  })
+  assert.equal(env.HERMES_HOME, home)
+  assert.equal(env.USERPROFILE, home)
+  assert.equal(env.LOCALAPPDATA, path.win32.join(home, 'localappdata'))
+  assert.equal(env.TEMP, path.win32.join(home, 'temp'))
+  assert.equal(env.PYTHONPATH, 'C:\\test-runtime')
+  assert.ok(!env.PATH.includes('production'))
+  assert.equal(env.OPENAI_API_KEY, undefined)
+  assert.equal(env.HTTP_PROXY, undefined)
+  assert.equal(env.http_proxy, undefined)
+  assert.equal(env.NODE_OPTIONS, undefined)
+  assert.equal(env.HERMES_DASHBOARD_SESSION_TOKEN, 'synthetic-token')
+  assert.throws(() => buildDesktopChildEnv({ local: true, hermesHome: 'relative', platform: 'win32', pathModule: path.win32, inherited: { SystemRoot: 'C:\\Windows' } }))
+  assert.throws(() => buildDesktopChildEnv({ local: true, hermesHome: '\\\\server\\share', platform: 'win32', pathModule: path.win32, inherited: { SystemRoot: 'C:\\Windows' } }))
+  assert.throws(() => buildDesktopChildEnv({ local: true, hermesHome: home, platform: 'win32', pathModule: path.win32, inherited: { SystemRoot: 'C:\\Windows' }, pythonPaths: ['C:\\safe;C:\\other'] }))
+  assert.throws(() => buildDesktopChildEnv({ local: true, hermesHome: home, platform: 'win32', pathModule: path.win32, inherited: { SystemRoot: 'C:\\Windows' }, explicit: { HTTP_PROXY: 'bad' } }))
+})
+
+test('local child process does not receive inherited test secrets', () => {
+  const home = path.resolve(process.cwd(), 'synthetic-local-home')
+  const env = buildDesktopChildEnv({ local: true, hermesHome: home, inherited: {
+    ...process.env, CODEX_SYNTHETIC_SECRET: 'never-forward', HTTPS_PROXY: 'http://example.invalid'
+  } })
+  const child = spawnSync(process.execPath, ['-e', 'process.stdout.write(JSON.stringify({secret:process.env.CODEX_SYNTHETIC_SECRET??null,proxy:process.env.HTTPS_PROXY??null,home:process.env.HERMES_HOME}))'], { env, encoding: 'utf8' })
+  assert.equal(child.status, 0, child.stderr)
+  assert.deepEqual(JSON.parse(child.stdout), { secret: null, proxy: null, home })
+})
+
+test('normal backend child retains its existing merge semantics', () => {
+  const env = buildDesktopChildEnv({ local: false, hermesHome: '/home', inherited: { X: 'a', HERMES_HOME: 'old' }, backend: { X: 'b', HERMES_HOME: 'backend' }, explicit: { X: 'c' } })
+  assert.deepEqual(env, { X: 'c', HERMES_HOME: 'backend' })
+})
 
 test('local verification stops both fresh bootstrap and forced repair before installer handoff', () => {
   assert.throws(() => assertBootstrapAllowed(true, true), /cannot bootstrap or repair/)

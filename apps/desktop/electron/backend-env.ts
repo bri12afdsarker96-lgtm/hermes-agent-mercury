@@ -128,6 +128,51 @@ function localVerificationEnv(local: boolean, hermesHome: string) {
   return local ? { HERMES_HOME: hermesHome } : {}
 }
 
+const LOCAL_CHILD_EXPLICIT_KEYS = new Set([
+  'TERMINAL_CWD', 'HERMES_DASHBOARD_SESSION_TOKEN', 'HERMES_DESKTOP',
+  'HERMES_PARENT_PID', 'HERMES_PARENT_START_MARKER', 'HERMES_PARENT_NONCE',
+  'HERMES_WEB_DIST', 'HERMES_DESKTOP_READY_FILE'
+])
+
+// Environment hygiene is a separate layer, not an OS filesystem or network sandbox.
+function buildDesktopChildEnv({ local, inherited = process.env, backend = {}, explicit = {}, hermesHome,
+  pythonPaths = [], platform = process.platform, pathModule = pathModuleForPlatform(platform) }: any) {
+  if (!local) return { ...inherited, HERMES_HOME: hermesHome, ...backend, ...explicit }
+  if (!hermesHome || !pathModule.isAbsolute(hermesHome) || (platform === 'win32' && !/^[a-z]:[\\/]/i.test(hermesHome))) {
+    throw new Error('Local backend requires an absolute local home')
+  }
+  for (const key of Object.keys(explicit)) {
+    if (!LOCAL_CHILD_EXPLICIT_KEYS.has(key)) throw new Error(`Local backend environment key is not allowed: ${key}`)
+  }
+  for (const entry of pythonPaths) {
+    if (typeof entry !== 'string' || entry.includes(delimiterForPlatform(platform)) || !pathModule.isAbsolute(entry) ||
+        (platform === 'win32' && !/^[a-z]:[\\/]/i.test(entry))) {
+      throw new Error('Local backend Python paths must be absolute local paths')
+    }
+  }
+  const home = pathModule.resolve(hermesHome)
+  const env: Record<string, string> = {
+    HERMES_HOME: home, HOME: home, USERPROFILE: home,
+    APPDATA: pathModule.join(home, 'appdata'), LOCALAPPDATA: pathModule.join(home, 'localappdata'),
+    TEMP: pathModule.join(home, 'temp'), TMP: pathModule.join(home, 'temp'),
+    PYTHONUTF8: '1', PYTHONNOUSERSITE: '1'
+  }
+  if (platform === 'win32') {
+    const rootKey = Object.keys(inherited).find(key => key.toUpperCase() === 'SYSTEMROOT')
+    const root = rootKey && inherited[rootKey]
+    if (typeof root !== 'string' || !/^[a-z]:[\\/]/i.test(root)) throw new Error('Local backend requires a local Windows system root')
+    env.SystemRoot = pathModule.resolve(root)
+    env.WINDIR = env.SystemRoot
+    env.ComSpec = pathModule.join(env.SystemRoot, 'System32', 'cmd.exe')
+    env.PATHEXT = '.COM;.EXE;.BAT;.CMD'
+    env.PATH = [pathModule.join(env.SystemRoot, 'System32'), env.SystemRoot].join(';')
+  } else {
+    env.PATH = '/usr/bin:/bin'
+  }
+  if (pythonPaths.length) env.PYTHONPATH = pythonPaths.map((entry: string) => pathModule.resolve(entry)).join(delimiterForPlatform(platform))
+  return { ...env, ...explicit }
+}
+
 function assertBootstrapAllowed(local: boolean, bootstrap: boolean) {
   if (local && bootstrap) throw new Error('Local verification cannot bootstrap or repair a Hermes runtime automatically')
 }
@@ -166,6 +211,7 @@ function buildDesktopBackendEnv({
 export {
   appendUniquePathEntries,
   buildDesktopBackendEnv,
+  buildDesktopChildEnv,
   buildDesktopBackendPath,
   delimiterForPlatform,
   hermesManagedNodePathEntries,
