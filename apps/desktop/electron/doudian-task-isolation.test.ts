@@ -68,6 +68,8 @@ describe('fixed TD payment bridge contract', () => {
     expect(await f.call({ action: 'preparePayment', workbookId, amount: '3', startRow: '2', maxRows: '0', mode: 'standard' }))
       .toEqual({ ok: false, error: 'LICENSE_REQUIRED' })
     expect(f.host.request.mock.calls.some(([method]) => method === 'preparePayment')).toBe(false)
+    expect(await f.call({ action: 'openPayment' })).toEqual({ ok: false, error: 'LICENSE_REQUIRED' })
+    expect(f.host.request.mock.calls.some(([method]) => method === 'openPayment')).toBe(false)
   })
 
   it.each(['standard', 'new-order'] as const)('forwards valid %s parameters and starts exactly once without grant', async mode => {

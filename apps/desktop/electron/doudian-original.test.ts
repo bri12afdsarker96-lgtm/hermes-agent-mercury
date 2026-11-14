@@ -13,7 +13,8 @@ function fixture(available = true) {
             reviewUi: available ? 1 : 0,
             feigeUi: available ? 1 : 0,
             paymentUi: 1,
-            authorized: false
+            authorized: true,
+            licenseVerification: 'verified-v1'
           }
         : {
             kind: method === 'openReview' ? 'review-window' : 'feige-window',

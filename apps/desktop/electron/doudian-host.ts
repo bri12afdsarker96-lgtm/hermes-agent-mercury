@@ -368,16 +368,17 @@ export class DoudianController {
 
         this.current()
 
-        if (['manageShops', 'prepare', 'start', 'preparePayment', 'startPayment'].includes(request.action)) {
-          const capabilities = (await this.host.request('capabilities')) as DoudianReply['capabilities']
+        let checkedCapabilities: DoudianReply['capabilities']
+        if (['manageShops', 'prepare', 'start', 'preparePayment', 'startPayment', 'openReview', 'openPayment'].includes(request.action)) {
+          checkedCapabilities = (await this.host.request('capabilities')) as DoudianReply['capabilities']
           this.current()
-          if (capabilities?.authorized !== true || capabilities.licenseVerification !== 'verified-v1') {
+          if (checkedCapabilities?.authorized !== true || checkedCapabilities.licenseVerification !== 'verified-v1') {
             return bad('LICENSE_REQUIRED')
           }
         }
 
         if (request.action === 'openPayment') {
-          const capabilities = (await this.host.request('capabilities')) as DoudianReply['capabilities']
+          const capabilities = checkedCapabilities
           this.current()
           if (capabilities?.protocol !== 1 || capabilities.version !== '1.0.54' || capabilities.paymentUi !== 1) {
             return bad('PAYMENT_MODULE_MISSING')
@@ -385,7 +386,7 @@ export class DoudianController {
         }
 
         if (request.action === 'openReview' || request.action === 'openFeige') {
-          const capabilities = (await this.host.request('capabilities')) as DoudianReply['capabilities']
+          const capabilities = checkedCapabilities ?? (await this.host.request('capabilities')) as DoudianReply['capabilities']
           this.current()
           const capability = request.action === 'openReview' ? capabilities?.reviewUi : capabilities?.feigeUi
           if (capabilities?.protocol !== 1 || capabilities.version !== '1.0.54' || capability !== 1) {
