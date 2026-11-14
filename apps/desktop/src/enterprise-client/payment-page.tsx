@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -7,6 +7,7 @@ import { useI18n } from '@/i18n/context'
 import type { DoudianReply, DoudianRequest, DoudianTask } from '../../electron/doudian-types'
 
 import type { DoudianPageProps } from './doudian-entry-state'
+import { DoudianLicense } from './doudian-license'
 
 const labels = {
   zh: [
@@ -70,6 +71,12 @@ function paymentCapability(result: DoudianReply): Capability {
 }
 
 export function PaymentPage({ runtime }: DoudianPageProps) {
+  const [revision, setRevision] = useState(0)
+  const onReady = useCallback(() => setRevision(value => value + 1), [])
+  return <><DoudianLicense runtime={runtime} onReady={onReady} /><PaymentWorkspace key={revision} runtime={runtime} /></>
+}
+
+function PaymentWorkspace({ runtime }: DoudianPageProps) {
   const { locale } = useI18n()
   const t = locale === 'zh' || locale === 'zh-hant' ? labels.zh : labels.en
   const [workbook, setWorkbook] = useState<{ id: string; name: string }>()

@@ -56,6 +56,26 @@ async function fixture(isolation: unknown = capability, omitMarker = false) {
 }
 
 describe('fixed TD payment bridge contract', () => {
+  it('blocks activation when the host has not enabled it and never forwards credentials', async () => {
+    const f = await fixture()
+    expect(await f.call({ action: 'activateLicense', licenseCode: 'SYNTHETIC-123' }))
+      .toEqual({ ok: false, error: 'LICENSE_INTEGRATION_UNVERIFIED' })
+    expect(f.host.request.mock.calls.some(([method]) => method === 'activateLicense')).toBe(false)
+  })
+
+  it('forwards only an explicit activation request and redacts host errors', async () => {
+    const f = await fixture()
+    const original = f.host.request.getMockImplementation()!
+    f.host.request.mockImplementation(async (method, args) => {
+      if (method === 'capabilities') return { protocol: 1, version: '1.0.54', licenseActivation: 1 }
+      if (method === 'activateLicense') throw new Error(`unexpected ${args?.licenseCode}`)
+      return original(method, args)
+    })
+    expect(await f.call({ action: 'activateLicense', licenseCode: 'SYNTHETIC-123' }))
+      .toEqual({ ok: false, error: 'LICENSE_ACTIVATION_FAILED' })
+    expect(f.host.request).toHaveBeenCalledWith('activateLicense', { licenseCode: 'SYNTHETIC-123' })
+  })
+
   it('rejects legacy authorization without a verified license marker before preparing payment', async () => {
     const f = await fixture()
     const workbookId = await f.choice()

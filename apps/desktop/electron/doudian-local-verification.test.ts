@@ -14,7 +14,7 @@ it('fails every TD operation closed in local verification before any external ef
   const controller = new DoudianController(deps)
   const actions: DoudianRequest['action'][] = [
     'capabilities', 'openPayment', 'openReview', 'openFeige', 'shops', 'manageShops',
-    'chooseWorkbook', 'prepare', 'preparePayment', 'start', 'startPayment', 'status', 'stop'
+    'chooseWorkbook', 'prepare', 'preparePayment', 'start', 'startPayment', 'status', 'stop', 'activateLicense', 'licenseStatus'
   ]
   for (const action of actions) {
     expect(await controller.operate({ sessionId: 'fixture', action } as DoudianRequest))
