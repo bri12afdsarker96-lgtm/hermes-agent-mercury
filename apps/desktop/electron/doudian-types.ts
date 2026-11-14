@@ -49,7 +49,7 @@ export interface DoudianReply {
     chrome: boolean
     spreadsheet: boolean
     authorized: boolean
-    licenseVerification?: 'verified-v1' | 'unverified'
+    licenseVerification?: string
     paymentUi?: number
     reviewUi?: number
     feigeUi?: number
