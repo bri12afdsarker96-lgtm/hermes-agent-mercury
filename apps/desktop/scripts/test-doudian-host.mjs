@@ -15,7 +15,10 @@ export function testDoudianHost(executable) {
     ['start', { taskId: 'a'.repeat(32) }],
     ['payment', {}],
     ['initialize', { scope: 'b'.repeat(64) }],
-    ['resolvePaymentAuthorization', { authorizationId: 'd'.repeat(32), allowed: 'true' }]
+    ['resolvePaymentAuthorization', { authorizationId: 'd'.repeat(32), allowed: 'true' }],
+    ['activateLicense', {}],
+    ['resumeLicense', {}],
+    ['licenseStatus', {}]
   ].map(([method, params]) => ({ id: randomBytes(16).toString('hex'), method, params }))
   const child = spawnSync(executable, ['--hermes-review-host'], {
     input: requests.map(request => JSON.stringify(request)).join('\n') + '\n',
@@ -31,7 +34,9 @@ export function testDoudianHost(executable) {
   assert.equal(replies[2].result.integration, 'hermes-review-v1')
   assert.equal(replies[2].result.version, '1.0.54')
   assert.equal(replies[2].result.taskIsolation, 'hermes-task-isolation-v1')
-  assert.equal(replies[3].result.authorized, false)
+  assert.equal(replies[2].result.authorizationMode, 'enterprise-session-v1')
+  assert.equal(replies[3].result.authorized, true)
+  assert.equal(replies[3].result.authorizationMode, 'enterprise-session-v1')
   assert.equal(replies[3].result.licenseVerification, 'unverified')
   assert.equal(replies[3].result.licenseActivation, 0)
   assert.equal(replies[3].result.reviewOptions, 1)
@@ -48,6 +53,9 @@ export function testDoudianHost(executable) {
   assert.equal(replies[8].error, 'METHOD_NOT_ALLOWED')
   assert.equal(replies[9].error, 'INVALID_SCOPE')
   assert.equal(replies[10].result.accepted, false)
+  assert.equal(replies[11].error, 'LICENSE_FEATURE_REMOVED')
+  assert.equal(replies[12].error, 'LICENSE_FEATURE_REMOVED')
+  assert.equal(replies[13].error, 'LICENSE_FEATURE_REMOVED')
   const direct = spawnSync(executable, ['--payment'], { encoding: 'utf8', windowsHide: true, shell: false, timeout: 20000 })
   assert.equal(direct.status, 2)
   assert.match(direct.stderr, /HERMES_ENTRY_REQUIRED/)
