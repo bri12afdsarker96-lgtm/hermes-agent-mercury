@@ -7,7 +7,7 @@ import { test } from 'vitest'
 import { FileMatcher, copyFiles } from 'app-builder-lib/out/fileMatcher.js'
 import { compareFiles, inventory, readAssetContract, verifyStagedModule,
   verifyPackagedModule, assertReport } from './verify-doudian-package.mjs'
-import { makeBuildInfo } from './pack-doudian-nsis.mjs'
+import { assertAssetPolicy, makeBuildInfo } from './pack-doudian-nsis.mjs'
 import beforePack from './before-pack.mjs'
 
 async function fixture(run) {
@@ -106,7 +106,7 @@ test('copied file tampering is detected after pack', async () => {
 test('BUILD_INFO identifies a verified artifact and refuses failed or incomplete comparisons', () => {
   const input = { version: '0.20.9', commit: 'a'.repeat(40), branch: 'feature/test',
     electron: '40.10.2', node: 'v22.23.2', artifact: 'test.exe', bytes: 100, sha512: 'b'.repeat(128),
-    assetContract: { file_count: 2, source_commit: 'c'.repeat(40), manifest_sha256: 'd'.repeat(64) },
+    assetContract: { file_count: 2, source_commit: 'c'.repeat(40), manifest_sha256: 'd'.repeat(64), asset_approval: 'UNVERIFIED' },
     verified: { passed: true, matched_count: 2, total_bytes: 50 } }
   const result = makeBuildInfo(input)
   assert.equal(result.sha512, input.sha512)
@@ -116,6 +116,37 @@ test('BUILD_INFO identifies a verified artifact and refuses failed or incomplete
   assert.throws(() => makeBuildInfo({ ...input, verified: { ...input.verified, matched_count: 1 } }))
   assert.throws(() => makeBuildInfo({ ...input, commit: 'unknown' }))
   assert.throws(() => makeBuildInfo({ ...input, assetContract: { ...input.assetContract, source_commit: undefined } }))
+})
+
+test('candidate manifests remain unapproved and are restricted to localprep records', async () => {
+  await fixture(async ({ contract }) => {
+    const json = JSON.parse(await readFile(contract, 'utf8'))
+    for (const status of ['UNTRUSTED', 'LOCAL VERIFICATION ONLY; NOT AN APPROVED RELEASE TRUST MANIFEST']) {
+      await writeFile(contract, JSON.stringify({ ...json, candidate_status: status }))
+      const candidate = await readAssetContract(contract)
+      assert.equal(candidate.asset_approval, 'UNTRUSTED')
+      assert.equal(candidate.candidate_status, status)
+      assert.throws(() => assertAssetPolicy(candidate, false), /only be used for localprep/)
+      assert.doesNotThrow(() => assertAssetPolicy(candidate, true))
+      const input = { version: '1', commit: 'a'.repeat(40), branch: 'test', electron: '1', node: '1',
+        artifact: 'test-localprep.exe', bytes: 1, sha512: 'b'.repeat(128), assetContract: candidate,
+        verified: { passed: true, matched_count: candidate.file_count, total_bytes: candidate.total_bytes },
+        localprep: true, enterpriseOrigin: 'http://127.0.0.1:18080' }
+      const info = makeBuildInfo(input)
+      assert.equal(info.doudian.asset_approval, 'UNTRUSTED')
+      assert.equal(info.doudian.candidate_status, status)
+      assert.equal(info.publication_allowed, false)
+      assert.equal(info.published, false)
+      assert.throws(() => makeBuildInfo({ ...input, localprep: false }), /only be used for localprep/)
+      assert.throws(() => makeBuildInfo({ ...input, artifact: 'release.exe' }), /localprep artifact/)
+      assert.throws(() => makeBuildInfo({ ...input, enterpriseOrigin: 'https://example.test' }), /Local origin/)
+    }
+    for (const status of ['', null, 0]) {
+      await writeFile(contract, JSON.stringify({ ...json, candidate_status: status }))
+      await assert.rejects(readAssetContract(contract), /Invalid candidate asset status/)
+    }
+    assert.throws(() => assertAssetPolicy({ asset_approval: 'UNVERIFIED', candidate_status: 'UNTRUSTED' }, false))
+  })
 })
 
 test('profile fields cannot replace computed provenance', async () => {

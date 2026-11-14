@@ -102,6 +102,10 @@ export async function verifyStagedModule(root) {
 
 export async function readAssetContract(file) {
   const manifest = JSON.parse((await readFile(file, 'utf8')).replace(/^\uFEFF/, ''))
+  const hasCandidateStatus = Object.hasOwn(manifest, 'candidate_status')
+  if (hasCandidateStatus && (typeof manifest.candidate_status !== 'string' || !manifest.candidate_status.trim())) {
+    throw new Error('Invalid candidate asset status')
+  }
   const profile = manifest.profiles?.['hermes-module']
   if (manifest.schema_version !== 1 || !profile) throw new Error('Missing hermes-module asset profile')
   if (!/^[a-f0-9]{40}$/i.test(manifest.source_commit)) throw new Error('Invalid module source commit')
@@ -111,7 +115,9 @@ export async function readAssetContract(file) {
     throw new Error('Invalid hermes-module asset totals/requirements')
   }
   return { files: profile.files, file_count: profile.file_count, total_bytes: profile.total_bytes,
-    source_commit: manifest.source_commit, manifest_sha256: await hashFile(file) }
+    source_commit: manifest.source_commit, manifest_sha256: await hashFile(file),
+    asset_approval: hasCandidateStatus ? 'UNTRUSTED' : 'UNVERIFIED',
+    ...(hasCandidateStatus ? { candidate_status: manifest.candidate_status } : {}) }
 }
 
 export async function verifyPackagedModule(stagedRoot, packagedRoot) {

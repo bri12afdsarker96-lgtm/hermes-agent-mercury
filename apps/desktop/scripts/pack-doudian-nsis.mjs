@@ -13,8 +13,21 @@ const desktopRoot = path.resolve(import.meta.dirname, '..')
 const repoRoot = path.resolve(desktopRoot, '../..')
 const require = createRequire(import.meta.url)
 
+export function assertAssetPolicy(assetContract, localprep) {
+  if (!['UNTRUSTED', 'UNVERIFIED'].includes(assetContract?.asset_approval)) throw new Error('Asset approval status is missing or invalid')
+  if (assetContract.asset_approval === 'UNVERIFIED' && Object.hasOwn(assetContract, 'candidate_status')) throw new Error('Candidate assets cannot be marked unverified')
+  if (assetContract.asset_approval === 'UNTRUSTED' && !localprep) throw new Error('Candidate assets are unapproved and may only be used for localprep')
+  if (assetContract.asset_approval === 'UNTRUSTED' && (typeof assetContract.candidate_status !== 'string' || !assetContract.candidate_status.trim())) {
+    throw new Error('Candidate asset status is missing')
+  }
+}
+
 export function makeBuildInfo({ version, commit, branch, electron, node, artifact, bytes,
-  sha512, assetContract, verified, enterpriseOrigin, builtAt = new Date().toISOString() }) {
+  sha512, assetContract, verified, enterpriseOrigin, localprep = false, builtAt = new Date().toISOString() }) {
+  assertAssetPolicy(assetContract, localprep)
+  if (localprep && (!artifact.endsWith('-localprep.exe') || validateLocalOrigin(enterpriseOrigin) !== enterpriseOrigin)) {
+    throw new Error('Local verification requires a localprep artifact and canonical loopback origin')
+  }
   if (!verified?.passed || verified.matched_count !== assetContract.file_count ||
       !/^[a-f0-9]{40}$/.test(commit) || !branch || branch === 'HEAD' ||
       !/^[a-f0-9]{40}$/i.test(assetContract.source_commit) || !/^[a-f0-9]{64}$/i.test(assetContract.manifest_sha256) ||
@@ -22,8 +35,9 @@ export function makeBuildInfo({ version, commit, branch, electron, node, artifac
     throw new Error('Cannot certify an unverified installer')
   }
   return { version, commit, branch, built_at: builtAt, built_by: { electron, node },
-    artifact, bytes, sha512, sha512_encoding: 'hex', local_verification_only: true,
-    published: false, ...(enterpriseOrigin ? { enterprise_origin: enterpriseOrigin } : {}), doudian: { source_commit: assetContract.source_commit,
+    artifact, bytes, sha512, sha512_encoding: 'hex', local_verification_only: localprep,
+    published: false, publication_allowed: false, ...(enterpriseOrigin ? { enterprise_origin: enterpriseOrigin } : {}), doudian: { source_commit: assetContract.source_commit,
+      asset_approval: assetContract.asset_approval, ...(assetContract.candidate_status ? { candidate_status: assetContract.candidate_status } : {}),
       assets_manifest_sha256: assetContract.manifest_sha256, profile: 'hermes-module',
       files: verified.matched_count, bytes: verified.total_bytes } }
 }
@@ -113,10 +127,11 @@ async function main() {
     throw new Error('Commit desktop sources/packaging scripts before building an attributable verification package')
   }
   const contract = await readAssetContract(path.resolve(values['assets-manifest']))
+  assertAssetPolicy(contract, values.localprep)
   const staged = await verifyStagedModule(path.join(desktopRoot, 'build', 'doudian'))
   const stageReport = compareFiles(contract.files, staged)
   await writeReport(path.join(output, 'staged-assets'), stageReport)
-  assertReport(stageReport, 'trusted-asset-profile')
+  assertReport(stageReport, 'asset-profile-consistency')
   const pkg = JSON.parse(await readFile(path.join(desktopRoot, 'package.json'), 'utf8'))
   let localDeployment
   let localFile
@@ -189,7 +204,7 @@ async function main() {
   const buildInfo = makeBuildInfo({ version: pkg.version, commit, branch,
     electron: electronVersion, node: process.version, artifact: installers[0],
     bytes: (await stat(installer)).size, sha512: await hashFile(installer, 'sha512'),
-    assetContract: contract, verified: report, enterpriseOrigin: localDeployment?.enterprise_api_origin })
+    assetContract: contract, verified: report, localprep: values.localprep, enterpriseOrigin: localDeployment?.enterprise_api_origin })
   await writeFile(path.join(output, 'BUILD_INFO.json'), JSON.stringify(buildInfo, null, 2) + '\n', { flag: 'wx' })
   console.log(JSON.stringify(buildInfo, null, 2))
 }

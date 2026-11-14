@@ -77,9 +77,9 @@ it.skipIf(process.platform !== 'win32')('rejects an unsafe CLI origin before cre
 
 it('records local endpoint only in a validated local verification build record', () => {
   const common = { version: '1', commit: 'a'.repeat(40), branch: 'fixture', electron: '1', node: '1', artifact: 'fixture-localprep.exe', bytes: 1,
-    sha512: 'b'.repeat(128), assetContract: { file_count: 1, source_commit: 'c'.repeat(40), manifest_sha256: 'd'.repeat(64) },
+    sha512: 'b'.repeat(128), assetContract: { file_count: 1, source_commit: 'c'.repeat(40), manifest_sha256: 'd'.repeat(64), asset_approval: 'UNVERIFIED' },
     verified: { passed: true, matched_count: 1, total_bytes: 1 } }
-  expect(makeBuildInfo({ ...common, enterpriseOrigin: 'http://127.0.0.1:18080' })).toMatchObject({ local_verification_only: true, enterprise_origin: 'http://127.0.0.1:18080', published: false })
+  expect(makeBuildInfo({ ...common, localprep: true, enterpriseOrigin: 'http://127.0.0.1:18080' })).toMatchObject({ local_verification_only: true, enterprise_origin: 'http://127.0.0.1:18080', published: false })
   expect(makeBuildInfo(common)).not.toHaveProperty('enterprise_origin')
 })
 
