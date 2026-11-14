@@ -35,8 +35,8 @@ export async function inventory(root) {
   return result
 }
 
-function validateEntries(entries, requireBytes = true) {
-  if (!Array.isArray(entries) || !entries.length) throw new Error('Empty module contract')
+function validateEntries(entries, requireBytes = true, allowEmpty = false) {
+  if (!Array.isArray(entries) || (!allowEmpty && !entries.length)) throw new Error('Empty module contract')
   const seen = new Set()
   for (const entry of entries) {
     const name = safeRelative(entry.path)
@@ -51,7 +51,7 @@ function validateEntries(entries, requireBytes = true) {
 
 export function compareFiles(expected, actual) {
   validateEntries(expected)
-  validateEntries(actual)
+  validateEntries(actual, true, true)
   const byPath = new Map(actual.map(entry => [entry.path, entry]))
   const expectedNames = new Set(expected.map(entry => entry.path))
   const rows = expected.map(entry => {
