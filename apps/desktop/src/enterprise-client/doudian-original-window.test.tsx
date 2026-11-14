@@ -43,11 +43,11 @@ function view(feature: 'review', runtime: EnterpriseClientRuntime | null) {
 for (const feature of ['review'] as const)
   describe(`original ${feature}`, () => {
     const label = '打开订单截图'
-    it('allows the original activation dialog, not a fake activated state', async () => {
+    it('discloses missing activation verification and opens only on explicit request', async () => {
       const f = fixture(feature)
       view(feature, f.runtime)
       await screen.findByText('原版模块已就绪')
-      expect(screen.getByText(/打开后验证原激活码/)).toBeTruthy()
+      expect(screen.getByText(/原激活码校验尚未接入，仅供测试/)).toBeTruthy()
       await waitFor(() => expect(f.doudian).toHaveBeenCalledWith({ action: 'status' }))
       expect(f.doudian.mock.calls.some(([r]) => r.action.startsWith('open'))).toBe(false)
       fireEvent.click(screen.getByRole('button', { name: label }))

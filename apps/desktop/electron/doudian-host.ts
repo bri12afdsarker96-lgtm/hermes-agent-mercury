@@ -152,7 +152,8 @@ export class DoudianHost {
   constructor(executable: string) {
     this.child = spawn(executable, ['--hermes-review-host'], {
       shell: false,
-      windowsHide: true,
+      // The host creates the original WinForms windows in this process.
+      windowsHide: false,
       cwd: path.dirname(executable),
       stdio: 'pipe'
     })
