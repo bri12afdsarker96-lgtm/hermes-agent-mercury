@@ -1,13 +1,32 @@
 import { execFileSync } from 'node:child_process'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { build } from 'esbuild'
 import { _electron as electron } from 'playwright'
 
 const desktop = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const repo = path.resolve(desktop, '../..')
+const inputPaths = ['electron/main.ts', 'electron/doudian-host.ts', 'dist/electron-main.mjs', 'dist/electron-preload.js', 'dist/index.html']
+const hashes = Object.fromEntries(await Promise.all(inputPaths.map(async name => [name,
+  createHash('sha256').update(await readFile(path.join(desktop, name))).digest('hex')])))
+// Never launch a production or stale bundle: production builds intentionally
+// ignore the loopback override. Rebuild in memory using the normal dev settings.
+for (const [entry, output, format] of [
+  ['electron/main.ts', 'dist/electron-main.mjs', 'esm'],
+  ['electron/preload.ts', 'dist/electron-preload.js', 'cjs']
+]) {
+  const options = { entryPoints: [path.join(desktop, entry)], outfile: path.join(desktop, output),
+    bundle: true, platform: 'node', format, target: 'node20', external: ['electron', 'node-pty', 'get-windows', 'fs'],
+    write: false, logLevel: 'silent' }
+  if (format === 'esm') options.banner = { js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);" }
+  const expected = (await build(options)).outputFiles[0].contents
+  const expectedHash = createHash('sha256').update(expected).digest('hex')
+  if (expectedHash !== hashes[output]) throw new Error(`Dev bundle mismatch: ${output}. Build --dev in a dedicated checkout before running this test.`)
+}
 const runs = path.join(repo, 'results', 'real-main-loopback-gate')
 await mkdir(runs, { recursive: true })
 const output = await mkdtemp(path.join(runs, 'run-'))
@@ -33,7 +52,8 @@ const server = http.createServer(async (req, res) => {
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 const env = Object.fromEntries(['SystemRoot', 'WINDIR', 'SystemDrive', 'TEMP', 'TMP', 'COMSPEC', 'PATHEXT'].filter(key => process.env[key]).map(key => [key, process.env[key]]))
 Object.assign(env, { PATH: path.join(process.env.SystemRoot, 'System32'), HOME: userData, USERPROFILE: userData, APPDATA: path.join(userData, 'appdata'), LOCALAPPDATA: path.join(userData, 'localappdata'), HERMES_DESKTOP_USER_DATA_DIR: userData, HERMES_DESKTOP_ENTERPRISE_ORIGIN: `http://127.0.0.1:${server.address().port}`, HERMES_DESKTOP_BOOT_FAKE_ERROR: 'Synthetic test: backend intentionally unavailable', HERMES_DESKTOP_BOOT_FAKE_STEP_MS: '0' })
-const run = { head: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(), mode: 'unpackaged-real-main-loopback-only', userData, startedAt: new Date().toISOString() }
+const run = { head: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(), mode: 'unpackaged-real-main-loopback-only', userData, startedAt: new Date().toISOString(),
+  hashes, buildOrigin: 'Electron dev bundles matched an in-memory build; renderer build not independently verified' }
 await writeFile(path.join(output, 'run-info.json'), JSON.stringify(run, null, 2))
 let app, page
 try {
