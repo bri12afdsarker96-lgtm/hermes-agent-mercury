@@ -9,7 +9,8 @@
  *     "schemaVersion": 1,
  *     "commit":        "<40-char SHA>",
  *     "branch":        "<branch name>",
- *     "builtAt":       "<ISO 8601 UTC timestamp>",
+ *     "builtAt":       "<actual ISO 8601 UTC timestamp>" | null,
+ *     "sourceDateEpoch": "<source epoch seconds, only in reproducible mode>",
  *     "dirty":         true|false,
  *     "source":        "ci" | "local" | "fallback"
  *   }
@@ -114,6 +115,17 @@ export function isFallbackCommit(commit) {
   return typeof commit === "string" && /^0{7,40}$/.test(commit)
 }
 
+// Source time is not a build time. Keep the actual build time in external evidence.
+export function stampTime(env = process.env, now = () => new Date()) {
+  const epoch = env.SOURCE_DATE_EPOCH
+  if (epoch === undefined) return { builtAt: now().toISOString() }
+  if (typeof epoch !== "string" || !/^(0|[1-9][0-9]*)$/.test(epoch) ||
+      !Number.isSafeInteger(Number(epoch)) || Number(epoch) > 253402300799) {
+    throw new Error("SOURCE_DATE_EPOCH must be a supported non-negative integer in seconds")
+  }
+  return { builtAt: null, sourceDateEpoch: epoch }
+}
+
 function main() {
   const stamp = resolveStamp()
   if (!stamp || !stamp.commit) {
@@ -153,7 +165,7 @@ function main() {
     schemaVersion: STAMP_SCHEMA_VERSION,
     commit: stamp.commit,
     branch: stamp.branch,
-    builtAt: new Date().toISOString(),
+    ...stampTime(),
     dirty: stamp.dirty,
     source: stamp.source
   }
