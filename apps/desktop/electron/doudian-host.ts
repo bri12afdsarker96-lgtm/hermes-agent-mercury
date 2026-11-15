@@ -562,10 +562,6 @@ export class DoudianController {
           if (!validAmount(amount)) {
             return bad('INVALID_AMOUNT')
           }
-          if (request.transport === 'cdp' && !/^\+?0*5(?:\.0*)?\+?$/.test(amount!.trim().replaceAll(',', ''))) {
-            return bad('INVALID_AMOUNT')
-          }
-
           if (!validRow(startRow, 1) || !validRow(maxRows, 0)) {
             return bad('INVALID_RANGE')
           }

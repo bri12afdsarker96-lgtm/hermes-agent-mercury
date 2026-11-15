@@ -67,7 +67,7 @@ async function paymentFixture(state = 'running') {
 }
 
 describe('fixed TD payment bridge contract', () => {
-  it.each(['5', '5.00'])('prepares CDP with exact parameters and starts/resumes without foreground handoff, amount=%s', async amount => {
+  it.each(['0.01', '3.25', '7.50', '100000', '5.000000000000000000000000000001'])('prepares CDP with exact parameters and starts/resumes without foreground handoff, amount=%s', async amount => {
     const f = await fixture()
     const workbookId = await f.choice()
     expect((await f.call({ action: 'preparePayment', workbookId, amount, startRow: '2', maxRows: '3', mode: 'standard', transport: 'cdp' })).ok).toBe(true)
@@ -115,8 +115,8 @@ describe('fixed TD payment bridge contract', () => {
   })
 
   it.each([
-    ['4', 'standard', 'INVALID_AMOUNT'], ['6', 'standard', 'INVALID_AMOUNT'],
-    ['5.000000000000000000000000000001', 'standard', 'INVALID_AMOUNT'],
+    ['', 'standard', 'INVALID_AMOUNT'], ['0', 'standard', 'INVALID_AMOUNT'],
+    ['-1', 'standard', 'INVALID_AMOUNT'], ['100000.01', 'standard', 'INVALID_AMOUNT'],
     ['5', 'new-order', 'INVALID_MODE']
   ])('rejects CDP amount=%s mode=%s without preparing a fallback', async (amount, mode, error) => {
     const f = await fixture()

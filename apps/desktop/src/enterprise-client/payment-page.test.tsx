@@ -107,12 +107,12 @@ describe('payment page offline', () => {
     vi.useRealTimers()
   })
 
-  it('defaults to CDP with a fixed 5-yuan price adjustment and the exact payment-record rule', async () => {
+  it('defaults to CDP with an empty editable amount and the exact payment-record rule', async () => {
     const { send } = setup()
     await waitFor(() => expect((screen.getByRole('button', { name: '选择工作簿' }) as HTMLButtonElement).disabled).toBe(false))
     expect((screen.getByLabelText('操作方式') as HTMLSelectElement).value).toBe('cdp')
-    expect((screen.getByLabelText('金额') as HTMLInputElement).value).toBe('5')
-    expect((screen.getByLabelText('金额') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByLabelText('金额') as HTMLInputElement).value).toBe('')
+    expect((screen.getByLabelText('金额') as HTMLInputElement).disabled).toBe(false)
     expect((screen.getByLabelText('模式') as HTMLSelectElement).value).toBe('standard')
     expect((screen.getByLabelText('模式') as HTMLSelectElement).disabled).toBe(true)
     const explanation = screen.getByText(/仅在款项记录精确匹配/).textContent!
@@ -122,16 +122,17 @@ describe('payment page offline', () => {
     expect(send.mock.calls.some(([request]) => ['preparePayment', 'startPayment', 'openPayment'].includes(request.action))).toBe(false)
   })
 
-  it('prepares the CDP fields and starts only on confirmation while preserving pause and stop controls', async () => {
+  it.each(['3.25', '7.50'])('prepares the manually entered CDP amount %s and starts only on confirmation', async amount => {
     const { send } = setup()
     await waitFor(() => expect((screen.getByRole('button', { name: '选择工作簿' }) as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(screen.getByRole('button', { name: '选择工作簿' }))
     await screen.findByText('副本.xlsx')
+    fireEvent.change(screen.getByLabelText('金额'), { target: { value: amount } })
     fireEvent.change(screen.getByLabelText('起始行'), { target: { value: '2' } })
     fireEvent.change(screen.getByLabelText('最多行（0 表示不限）'), { target: { value: '4' } })
     fireEvent.click(screen.getByRole('button', { name: '检查并准备' }))
     await screen.findByText(prepared.summary)
-    expect(send).toHaveBeenCalledWith({ action: 'preparePayment', workbookId: 'b'.repeat(32), amount: '5', startRow: '2', maxRows: '4', mode: 'standard', transport: 'cdp' })
+    expect(send).toHaveBeenCalledWith({ action: 'preparePayment', workbookId: 'b'.repeat(32), amount, startRow: '2', maxRows: '4', mode: 'standard', transport: 'cdp' })
     for (const label of ['操作方式', '模式', '金额', '起始行', '最多行（0 表示不限）']) {
       expect((screen.getByLabelText(label) as HTMLInputElement | HTMLSelectElement).disabled).toBe(true)
     }
@@ -152,7 +153,8 @@ describe('payment page offline', () => {
     expect((screen.getByLabelText('金额') as HTMLInputElement).disabled).toBe(false)
     expect((screen.getByLabelText('模式') as HTMLSelectElement).disabled).toBe(false)
     fireEvent.change(screen.getByLabelText('操作方式'), { target: { value: 'cdp' } })
-    expect((screen.getByLabelText('金额') as HTMLInputElement).value).toBe('5')
+    expect((screen.getByLabelText('金额') as HTMLInputElement).value).toBe('3.25')
+    expect((screen.getByLabelText('金额') as HTMLInputElement).disabled).toBe(false)
     expect((screen.getByLabelText('模式') as HTMLSelectElement).value).toBe('standard')
     fireEvent.change(screen.getByLabelText('操作方式'), { target: { value: 'desktop' } })
     expect((screen.getByLabelText('金额') as HTMLInputElement).value).toBe('3.25')
@@ -187,6 +189,7 @@ describe('payment page offline', () => {
     const changed = capability(true, 'enterprise-session-v1')
     changed.capabilities!.paymentCdp = undefined
     fixture.setCapability(changed)
+    fireEvent.change(screen.getByLabelText('金额'), { target: { value: '3.25' } })
     fireEvent.click(screen.getByRole('button', { name: '检查并准备' }))
     await waitFor(() => expect((screen.getByRole('button', { name: '检查并准备' }) as HTMLButtonElement).disabled).toBe(true))
     expect((screen.getByLabelText('操作方式') as HTMLSelectElement).value).toBe('cdp')

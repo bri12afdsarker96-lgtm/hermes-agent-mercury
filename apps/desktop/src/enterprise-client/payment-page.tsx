@@ -46,7 +46,7 @@ const labels = {
     '操作方式',
     'CDP 网页控件',
     '原桌面兼容',
-    'CDP 每单固定 5 元补差价。仅在款项记录精确匹配“暂无记录，每个订单最多打款5次”时处理，其他记录跳过；不读取聊天内容。结果回填 D 列。',
+    'CDP 使用本次手动输入的金额补差价。仅在款项记录精确匹配“暂无记录，每个订单最多打款5次”时处理，其他记录跳过；不读取聊天内容。结果回填 D 列。',
     '执行模块尚不支持 CDP 打款，请更新执行模块或手动选择原桌面兼容。'
   ],
   en: [
@@ -86,7 +86,7 @@ const labels = {
     'Transport',
     'CDP web controls',
     'Original desktop compatibility',
-    'CDP uses a fixed CNY 5 price adjustment per order. Only payment records exactly matching “暂无记录，每个订单最多打款5次” are eligible. Other records are skipped. Chat content is not read. Results are saved in column D.',
+    'CDP uses the manually entered amount for each price adjustment. Only payment records exactly matching “暂无记录，每个订单最多打款5次” are eligible. Other records are skipped. Chat content is not read. Results are saved in column D.',
     'The execution module does not support CDP payments. Update it or manually select original desktop compatibility.'
   ]
 } as const
@@ -166,7 +166,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
   const displayedTask = current ? task : undefined
   const gate = current ? capability : 'checking'
   const busy = pendingAction !== undefined
-  const paymentAmount = transport === 'cdp' ? '5' : amount
+  const paymentAmount = amount
   const paymentMode = transport === 'cdp' ? 'standard' : mode
 
   const active = !!displayedTask &&
@@ -440,7 +440,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
         <label className="flex flex-col gap-2">
           {t[6]}
           <Input
-            disabled={busy || !!active || transport === 'cdp'}
+            disabled={busy || !!active}
             inputMode="decimal"
             onChange={event => setAmount(event.target.value)}
             value={paymentAmount}
