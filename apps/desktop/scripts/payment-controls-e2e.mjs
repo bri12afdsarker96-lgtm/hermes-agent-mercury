@@ -14,7 +14,8 @@ import { _electron as electron } from 'playwright'
 
 // This runner bundles a test-only Electron main. Production main.ts and trust
 // manifests are never changed. Controller, preload, pages, host and workflow
-// are imported/compiled from the working sources. Only external I/O is synthetic.
+// are imported/compiled from the working sources. Excel and Chrome I/O are
+// synthetic. The page adapter is exercised separately with poisoned chat getters.
 const desktop = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const repo = path.resolve(desktop, '../..')
 const verifyRoot = path.dirname(repo)
@@ -40,16 +41,22 @@ const screenshots = []
 let activeApp
 let activePage
 let activeRoot
+let activeGate
+let activeAmount
 const info = {
   startedAt: new Date().toISOString(), output, desktop, td,
   hermesHead: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(),
   hermesBranch: execFileSync('git', ['branch', '--show-current'], { cwd: repo, encoding: 'utf8' }).trim(),
   tdHead: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: td, encoding: 'utf8' }).trim(),
-  level: 'real Electron test-main + production renderer/preload/Controller + real TD host/PaymentWorkflow; synthetic auth, Excel and screen I/O',
+  level: 'real Electron test-main + production renderer/preload/Controller + real TD host/PaymentWorkflow.Cdp; synthetic auth, Excel and Chrome I/O; production page adapter in jsdom',
+  cdpBoundary: 'PaymentCdpChromeStub replaces ChromeBrowserSession external I/O; no live Chrome or store connection',
   productionMainCovered: false,
   productionMainLimitation: 'Production main has no fixture injection; localForeground pins a production EXE hash. Existing synthetic-shell test entry is used without changing production code.',
   syntheticOnly: true, realStoreAccess: false, realPayments: false, sourceHashes: {}, fixtureOverlay: []
 }
+const priorPaid = '已打款｜原有合成记录'
+const searchedOrders = ['444444444444444444', '555555555555555555', '777777777777777777', '888888888888888888', '999999999999999999']
+const scenarioAmounts = { '01-resume': '3.25', '03-stop': '7.50', '05-restart': '7.50' }
 function log(message, data = {}) {
   const entry = { at: new Date().toISOString(), message, ...data }
   entries.push(entry)
@@ -89,7 +96,7 @@ async function buildFixture() {
   await mkdir(path.join(source, 'tests'), { recursive: true })
   for (const name of sourceFiles.map(name => `DoudianAutomationTool/${name}`).concat([
     'tests/Test-PaymentHostEngine.ps1', 'tests/PaymentHostEngineTests.cs',
-    'tests/HermesHostIsolationTests.cs', 'tests/PaymentWorkflowFixture.cs'
+    'tests/HermesHostIsolationTests.cs', 'tests/PaymentWorkflowFixture.cs', 'tests/PaymentCdpChromeStub.cs'
   ])) {
     let bytes = await readFile(path.join(td, name))
     info.sourceHashes[`td/${name}`] = sha256(bytes)
@@ -112,9 +119,9 @@ async function buildFixture() {
         'File.WriteAllText(Fixture.StatePath, json); Fixture.Trace("save", new { cells = Fixture.Saved.ToDictionary(x => x.Key.ToString(), x => x.Value) });',
         'Record real fixture persistence')
       text = replaceOnce(text,
-        'order = value; Fixture.Searches.Add(value);',
-        'order = value; Fixture.Trace("search", new { order = value }); Fixture.Searches.Add(value);',
-        'Record which synthetic orders reached the screen adapter')
+        'public void OpenOrActivateFeigeWindow() { Fixture.Events.Add("fake-window"); }',
+        'public void OpenOrActivateFeigeWindow() { throw new Exception("Desktop transport is forbidden in this CDP fixture"); }',
+        'Reject accidental screen transport at the synthetic I/O boundary')
       text = replaceOnce(text,
         'internal static string WorkbookPath, StatePath;',
         'internal static void Trace(string kind, object data) { File.AppendAllText(Path.Combine(Path.GetDirectoryName(StatePath), "io-events.jsonl"), new JavaScriptSerializer().Serialize(new { at = DateTime.UtcNow.ToString("o"), kind = kind, data = data }) + "\\n"); }\n        internal static string WorkbookPath, StatePath;',
@@ -128,10 +135,26 @@ async function buildFixture() {
       info.fixtureOverlay.push({ label: 'Replace synthetic preflight summary with the production WorkbookResumeInspector', before,
         after: 'Scan = (config, log, cancel) => WorkbookResumeInspector.Scan(config, true, log, cancel)' })
       text = text.replaceAll(before, 'Scan = (config, log, cancel) => WorkbookResumeInspector.Scan(config, true, log, cancel)')
+      text = replaceOnce(text, 'HermesReviewHost.Run();', 'PaymentControlsCdpFixture.Start(); HermesReviewHost.Run();',
+        'Install the upstream synthetic Chrome boundary before the real host pipe starts')
+      bytes = Buffer.from(text)
+    }
+    if (name === 'tests/Test-PaymentHostEngine.ps1') {
+      let text = bytes.toString('utf8')
+      text = replaceOnce(text, '& $compiler /nologo /utf8output /target:exe',
+        '& $compiler /nologo /utf8output /langversion:5 "/resource:$source\\payment-cdp-resource.js,DoudianAutomationTool.Assets.ReviewCapture.feige-payment.js" /target:exe',
+        'Embed the CDP stub resource under the production logical name')
+      text = replaceOnce(text, '(Join-Path $PSScriptRoot \'PaymentHostEngineTests.cs\') $hostStubFile',
+        '(Join-Path $PSScriptRoot \'PaymentHostEngineTests.cs\') (Join-Path $PSScriptRoot \'PaymentCdpChromeStub.cs\') (Join-Path $PSScriptRoot \'PaymentControlsCdpFixture.cs\') $hostStubFile',
+        'Compile the upstream Chrome stub and the controls fixture alongside real TD sources')
       bytes = Buffer.from(text)
     }
     await writeFile(path.join(source, name), bytes)
   }
+  const controlsFixture = await readFile(path.join(desktop, 'scripts/fixtures/payment-controls-cdp.cs'))
+  info.sourceHashes['desktop/scripts/fixtures/payment-controls-cdp.cs'] = sha256(controlsFixture)
+  await writeFile(path.join(source, 'tests/PaymentControlsCdpFixture.cs'), controlsFixture)
+  await writeFile(path.join(source, 'payment-cdp-resource.js'), '/* Payment CDP integration resource fixture */')
   const fixture = path.join(output, 'pipe-build')
   const powershell = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   const result = spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
@@ -155,9 +178,33 @@ async function buildFixture() {
   return module
 }
 
+async function verifyPageAdapter() {
+  const source = path.join(output, 'dom-source')
+  const asset = 'DoudianAutomationTool/Assets/ReviewCapture/feige-payment.js'
+  await mkdir(path.join(source, path.dirname(asset)), { recursive: true })
+  await mkdir(path.join(source, 'tests'), { recursive: true })
+  const pageScript = await readFile(path.join(td, asset))
+  const upstreamTest = await readFile(path.join(td, 'tests/feige-payment.test.cjs'))
+  const proof = await readFile(path.join(desktop, 'scripts/fixtures/payment-controls-dom-proof.cjs'))
+  info.sourceHashes[`td/${asset}`] = sha256(pageScript)
+  info.sourceHashes['td/tests/feige-payment.test.cjs'] = sha256(upstreamTest)
+  info.sourceHashes['desktop/scripts/fixtures/payment-controls-dom-proof.cjs'] = sha256(proof)
+  await writeFile(path.join(source, asset), pageScript)
+  const test = path.join(source, 'tests/feige-payment.test.cjs')
+  await writeFile(test, Buffer.concat([upstreamTest, Buffer.from('\n'), proof]))
+  const result = spawnSync(process.execPath, ['--test', '--test-name-pattern=payment controls runner emits measured DOM contract evidence', test], { cwd: source, encoding: 'utf8', windowsHide: true,
+    timeout: 60000, env: { ...process.env, NODE_PATH: path.dirname(path.dirname(require.resolve('jsdom/package.json'))),
+      PAYMENT_CONTROLS_DOM_EVIDENCE: path.join(output, 'dom-evidence.json') } })
+  await writeFile(path.join(output, 'dom-tests.log'), `${result.stdout ?? ''}\n${result.stderr ?? ''}`)
+  assert.equal(result.status, 0, `Page adapter tests failed: ${result.stderr || result.stdout}`)
+  info.domEvidence = JSON.parse(await readFile(path.join(output, 'dom-evidence.json'), 'utf8'))
+  check(info.domEvidence.cases.length === 8 && info.domEvidence.chatReads === 0,
+    'production page adapter verifies exact records, manual compensation amounts and measured chatReads=0')
+}
+
 async function buildApp(module) {
   for (const name of ['electron/doudian-host.ts', 'electron/doudian-types.ts', 'electron/preload.ts',
-    'src/enterprise-client/payment-page.tsx', 'synthetic-shell-test/renderer.tsx']) {
+    'src/enterprise-client/payment-page.tsx', 'synthetic-shell-test/renderer.tsx', 'scripts/payment-controls-e2e.mjs']) {
     info.sourceHashes[`desktop/${name}`] = sha256(await readFile(path.join(desktop, name)))
   }
   await viteBuild({ configFile: false, root: path.join(desktop, 'synthetic-shell-test'), base: './',
@@ -175,7 +222,7 @@ const root = process.env.HERMES_PAYMENT_PIPE_ROOT
 if (!root || path.dirname(root).toLowerCase() !== process.env.TEMP.toLowerCase() || !path.basename(root).startsWith('hermes-payment-pipe-')) throw new Error('Unsafe test root')
 const output = ${JSON.stringify(output)}, moduleRoot = ${JSON.stringify(module)}
 app.setPath('userData', path.join(root, 'electron-user-data'))
-const trace = entry => appendFileSync(path.join(root, 'requests.jsonl'), JSON.stringify({ at: new Date().toISOString(), ...entry }) + '\\n')
+const trace = entry => appendFileSync(path.join(root, 'requests.jsonl'), JSON.stringify({ at: new Date().toISOString(), runId: process.env.HERMES_PAYMENT_PIPE_GATE, ...entry }) + '\\n')
 const identity = { principal_id: 'synthetic-operator', tenant_id: 'synthetic-tenant', tenant_name: '合成烟测企业', name: '合成烟测员工', role: 'operator', effective_permissions: ['*'], product_capabilities: { doudian_review: { enabled: true, status: 'LIVE' }, doudian_payment: { enabled: true, status: 'LIVE' } }, desktop_surfaces: { schema_version: 1, surfaces: {} } }
 const sessionId = 'synthetic-payment-controls-session'
 let loggedIn = false, win
@@ -186,7 +233,7 @@ const controller = new DoudianController({ platform: process.platform, root: mod
   chooseWorkbook: async () => path.join(root, 'fixture', 'synthetic.xlsx'),
   createHost: executable => {
     const launch = (target, args, options) => {
-      const child = spawn(target, args, { ...options, env: { ...process.env, HERMES_PAYMENT_PIPE_MODE: 'pause-resume' } })
+      const child = spawn(target, args, { ...options, env: { ...process.env, HERMES_PAYMENT_PIPE_MODE: 'cdp' } })
       children.push(child)
       trace({ channel: 'process', event: 'host-start', pid: child.pid })
       child.on('exit', (code, signal) => trace({ channel: 'process', event: 'host-exit', pid: child.pid, code, signal }))
@@ -194,9 +241,9 @@ const controller = new DoudianController({ platform: process.platform, root: mod
       return child
     }
     const host = new DoudianHost(executable, launch)
-    return { async request(method, params) {
-      trace({ channel: 'host', method, params })
-      try { const result = await host.request(method, params); trace({ channel: 'host-result', method, result }); return result }
+    return { async request(method, params, dispatch) {
+      trace({ channel: 'host', method, params, foreground: dispatch?.foreground })
+      try { const result = await host.request(method, params, dispatch); trace({ channel: 'host-result', method, result }); return result }
       catch (error) { trace({ channel: 'host-error', method, error: error.message }); throw error }
     }, close() { host.close() } }
   }
@@ -278,16 +325,23 @@ async function calls(root) {
 async function trace(root) {
   return (await readFile(path.join(root, 'requests.jsonl'), 'utf8')).trim().split(/\r?\n/).map(JSON.parse)
 }
+async function cdpEvents(root) {
+  return (await readFile(path.join(root, 'fixture/cdp-events.jsonl'), 'utf8')).trim().split(/\r?\n/).filter(Boolean).map(JSON.parse)
+}
 async function state(root, expected) {
-  await until(async () => (await trace(root)).some(entry => entry.channel === 'ui-result' && entry.action === 'status' && entry.result?.task?.state === expected), expected)
+  return until(async () => (await trace(root)).findLast(entry => entry.runId === activeGate &&
+    entry.channel === 'ui-result' && entry.action === 'status' && entry.result?.task?.state === expected), expected)
 }
 async function launch(root, name) {
   activeRoot = root
+  activeGate = name
+  activeAmount = scenarioAmounts[name]
   const environment = Object.fromEntries(['SystemRoot', 'WINDIR', 'SystemDrive', 'TEMP', 'TMP', 'COMSPEC', 'PATHEXT']
     .filter(key => process.env[key]).map(key => [key, process.env[key]]))
   Object.assign(environment, { PATH: path.join(process.env.SystemRoot, 'System32'), HOME: root, USERPROFILE: root,
     APPDATA: path.join(root, 'appdata'), LOCALAPPDATA: path.join(root, 'localappdata'), HERMES_HOME: path.join(root, 'hermes-home'),
-    HERMES_PAYMENT_PIPE_ROOT: root, HERMES_PAYMENT_PIPE_MODE: 'pause-resume' })
+    HERMES_PAYMENT_PIPE_ROOT: root, HERMES_PAYMENT_PIPE_MODE: 'cdp', HERMES_PAYMENT_PIPE_GATE: activeGate,
+    HERMES_PAYMENT_PIPE_AMOUNT: activeAmount })
   activeApp = await electron.launch({ executablePath: path.join(path.dirname(require.resolve('electron/package.json')), 'dist', 'electron.exe'),
     args: [path.join(output, 'main.cjs')], cwd: output, env: environment, timeout: 30000 })
   const child = activeApp.process()
@@ -307,12 +361,17 @@ async function launch(root, name) {
   await activePage.getByTestId('enterprise-client-workbench').waitFor({ timeout: 20000 })
   await activePage.getByRole('navigation', { name: '企业客户端主导航' }).getByRole('button', { name: '小额打款', exact: true }).click()
   await activePage.getByText('企业会话已核验，请核对准备结果后确认开始。', { exact: true }).waitFor()
-  const transport = activePage.locator('select').filter({ has: activePage.locator('option[value="desktop"]') })
-  await transport.selectOption('desktop')
-  check(await transport.inputValue() === 'desktop', `${name}: desktop transport explicitly selected`)
+  const transport = activePage.locator('select').filter({ has: activePage.locator('option[value="cdp"]') })
+  await transport.selectOption('cdp')
+  check(await transport.inputValue() === 'cdp', `${name}: CDP transport explicitly selected`)
   await activePage.getByRole('button', { name: '选择工作簿', exact: true }).click()
   await activePage.getByText('synthetic.xlsx', { exact: true }).waitFor()
-  await activePage.getByLabel('金额', { exact: true }).fill('3.25')
+  const amount = activePage.getByLabel('金额', { exact: true })
+  const mode = activePage.locator('select').filter({ has: activePage.locator('option[value="standard"]') })
+  await until(() => amount.isEnabled(), 'CDP amount is manually editable')
+  await amount.fill(activeAmount)
+  check(await amount.inputValue() === activeAmount &&
+    await mode.inputValue() === 'standard' && await mode.isDisabled(), `${name}: manually entered CDP amount ${activeAmount} retains standard compensation mode`)
   await activePage.getByLabel('起始行', { exact: true }).fill('2')
   await activePage.getByLabel('最多行（0 表示不限）', { exact: true }).fill('0')
   await shot(`${name}-ready`)
@@ -321,24 +380,41 @@ async function prepare(name) {
   await activePage.getByRole('button', { name: '检查并准备', exact: true }).click()
   await until(() => activePage.getByRole('button', { name: '确认开始打款', exact: true }).isEnabled(), 'start button enabled')
   await shot(`${name}-prepared`)
+  const prepared = (await trace(activeRoot)).findLast(entry => entry.runId === activeGate &&
+    entry.channel === 'ui-result' && entry.action === 'preparePayment')
+  check(prepared?.result?.ok === true && !!prepared.result.task?.taskId, `${name}: real preflight returns a task ID`)
+  return prepared.result.task.taskId
 }
 async function startAndPause(root, name, expectedCalls) {
   await activePage.getByRole('button', { name: '确认开始打款', exact: true }).click()
-  await until(async () => (await calls(root)).length === expectedCalls, 'first synthetic confirmation reached')
+  const gate = await until(() => disk(root, `${activeGate}.entered.json`), 'CDP confirmation response gate entered')
+  check(gate.method === 'confirmation' && (await calls(root)).length === expectedCalls,
+    `${name}: CDP submit persists intent before reaching the confirmation response gate`)
   await until(() => activePage.getByRole('button', { name: '暂停', exact: true }).isEnabled(), 'pause button enabled')
   await activePage.getByRole('button', { name: '暂停', exact: true }).click()
+  await until(async () => (await trace(root)).some(entry => entry.runId === activeGate && entry.channel === 'ui-result' &&
+    entry.action === 'pausePayment' && entry.result?.ok && entry.result.task?.state === 'pausing'), 'UI pause request accepted by real host')
+  await writeFile(path.join(root, 'fixture', `${activeGate}.release`), 'release synthetic Chrome response')
   await until(() => activePage.getByRole('button', { name: '继续', exact: true }).isEnabled(), 'resume button enabled')
   await activePage.getByText('打款已暂停。', { exact: true }).waitFor()
-  await state(root, 'paused')
-  assert.equal((await calls(root)).length, expectedCalls, 'Paused workflow cannot proceed to second confirm')
-  check(await activePage.getByLabel('金额', { exact: true }).isDisabled(), `${name}: parameters stay locked while paused`)
+  const paused = await state(root, 'paused')
+  const before = await cdpEvents(root)
+  await new Promise(resolve => setTimeout(resolve, 1700))
+  assert.deepEqual(await cdpEvents(root), before, 'Paused CDP workflow must remain at the same checkpoint')
+  check((await calls(root)).length === expectedCalls, `${name}: paused workflow dispatches no confirmation or next order`)
+  check(await activePage.getByLabel('起始行', { exact: true }).isDisabled() &&
+    await activePage.locator('select').filter({ has: activePage.locator('option[value="cdp"]') }).isDisabled(), `${name}: parameters stay locked while paused`)
+  check(await activePage.getByLabel('金额', { exact: true }).inputValue() === activeAmount &&
+    await activePage.getByLabel('金额', { exact: true }).isDisabled(), `${name}: paused task retains manually configured amount ${activeAmount}`)
   await shot(`${name}-paused`)
   await json(`${name}-paused-D.json`, await disk(root, 'persisted.json'))
+  return paused.result.task.taskId
 }
 async function close(name) {
   const child = activeApp.process()
   const root = activeRoot
-  const pids = (await trace(root)).filter(entry => entry.channel === 'process' && entry.event === 'host-start').map(entry => entry.pid)
+  const requests = await trace(root).catch(error => { if (error.code === 'ENOENT') return []; throw error })
+  const pids = requests.filter(entry => entry.runId === activeGate && entry.channel === 'process' && entry.event === 'host-start').map(entry => entry.pid)
   await activeApp.close()
   check(child.exitCode !== null, `${name}: Electron exited normally`)
   await until(() => pids.every(pid => {
@@ -348,45 +424,58 @@ async function close(name) {
   activeApp = undefined
   activePage = undefined
   activeRoot = undefined
+  activeGate = undefined
+  activeAmount = undefined
 }
 async function archive(root, name) {
-  for (const filename of ['requests.jsonl', 'fixture/persisted.json', 'fixture/calls.txt', 'fixture/io-events.jsonl', 'host-stderr.log']) {
+  for (const filename of ['requests.jsonl', 'fixture/persisted.json', 'fixture/calls.txt', 'fixture/io-events.jsonl', 'fixture/cdp-events.jsonl', 'host-stderr.log']) {
     try { await copyFile(path.join(root, filename), path.join(output, `${name}-${filename.replaceAll('/', '-')}`)) }
     catch (error) { if (error.code !== 'ENOENT') throw error }
   }
 }
 
 try {
+  await verifyPageAdapter()
   const module = await buildFixture()
   await buildApp(module)
   await json('run-info.json', info)
   const resumeRoot = await mkdtemp(path.join(os.tmpdir(), 'hermes-payment-pipe-'))
   const stopRoot = await mkdtemp(path.join(os.tmpdir(), 'hermes-payment-pipe-'))
   info.scenarios = { resumeRoot, stopRoot }
+  info.scenarioAmounts = scenarioAmounts
 
   await launch(resumeRoot, '01-resume')
-  await prepare('01-resume')
-  await startAndPause(resumeRoot, '01-resume', 1)
+  const resumeTask = await prepare('01-resume')
+  check(await startAndPause(resumeRoot, '01-resume', 1) === resumeTask, 'pause retains the prepared CDP task ID')
   let saved = await disk(resumeRoot, 'persisted.json')
-  check(saved['2']?.startsWith('需人工核验') && saved['3'] === undefined, 'pause saves only current row D intent')
+  check(saved['2']?.startsWith('需人工核验') && saved['2'].includes('提交处理中') &&
+    saved['3'] === undefined && saved['4'] === priorPaid && saved['5'] === undefined,
+  'pause persists current row D intent and preserves prior paid D4')
   await activePage.getByRole('button', { name: '继续', exact: true }).click()
   await activePage.getByText('任务已完成。', { exact: true }).waitFor({ timeout: 20000 })
+  check((await state(resumeRoot, 'completed')).result.task.taskId === resumeTask, 'resume completes the same CDP task ID')
+  check(await activePage.getByLabel('金额', { exact: true }).inputValue() === activeAmount,
+    'same-task resume preserves the manually entered 3.25 amount')
   saved = await disk(resumeRoot, 'persisted.json')
-  check(saved['2']?.startsWith('已打款') && saved['3']?.startsWith('已打款'), 'resume persists two synthetic success results in D')
-  assert.deepEqual(await calls(resumeRoot), ['confirm', 'second-confirm', 'confirm', 'second-confirm'])
+  check(saved['2']?.startsWith('已打款') && saved['3']?.startsWith('已打款') && saved['4'] === priorPaid,
+    'resume persists two synthetic CDP success results and preserves prior paid D4')
+  assert.deepEqual(await calls(resumeRoot), ['submit', 'confirm', 'submit', 'confirm'])
   check(true, 'same-task resume has exactly two synthetic submissions')
   await shot('02-resume-completed')
   await close('resume')
   await archive(resumeRoot, 'resume')
 
   await launch(stopRoot, '03-stop')
-  await prepare('03-stop')
-  await startAndPause(stopRoot, '03-stop', 1)
+  const stoppedTask = await prepare('03-stop')
+  check(await startAndPause(stopRoot, '03-stop', 1) === stoppedTask, 'stop scenario pauses the current CDP task')
   await activePage.getByRole('button', { name: '停止', exact: true }).click()
   await activePage.getByText('任务已停止。', { exact: true }).waitFor({ timeout: 20000 })
+  check((await state(stopRoot, 'stopped')).result.task.taskId === stoppedTask, 'stop terminates the current CDP task ID')
   saved = await disk(stopRoot, 'persisted.json')
-  check(saved['2']?.startsWith('需人工核验') && saved['3'] === undefined, 'stop preserves submitted intent and untouched next row')
-  assert.deepEqual(await calls(stopRoot), ['confirm'])
+  const unresolved = saved['2']
+  check(unresolved?.startsWith('需人工核验') && unresolved.includes('提交处理中') && saved['3'] === undefined && saved['4'] === priorPaid,
+    'stop preserves submitted intent, untouched next row and prior paid result')
+  assert.deepEqual(await calls(stopRoot), ['submit'])
   await shot('04-stopped')
   await close('stop')
   await archive(stopRoot, 'stopped')
@@ -395,18 +484,22 @@ try {
   // Excel adapter reloads persisted cells; the real preflight/policy/workflow
   // decides which rows are eligible. No state is restored by the renderer.
   await launch(stopRoot, '05-restart')
-  await prepare('05-restart')
+  const restartedTask = await prepare('05-restart')
+  check(restartedTask !== stoppedTask, 'fresh Electron and TD processes create a new task for persisted D-column resume')
   const summary = await activePage.getByLabel('工作簿和任务状态').innerText()
   check(summary.includes('从第 3 行') && summary.includes('需人工核对、不自动重试：1'), 'restart preflight identifies D2 review and resumes at row 3')
-  await startAndPause(stopRoot, '05-restart', 2)
+  check(await startAndPause(stopRoot, '05-restart', 2) === restartedTask, 'restarted task pauses only the next pending order')
   await activePage.getByRole('button', { name: '继续', exact: true }).click()
   await activePage.getByText('任务已完成。', { exact: true }).waitFor({ timeout: 20000 })
+  check(await activePage.getByLabel('金额', { exact: true }).inputValue() === activeAmount,
+    'D-column restart and resume preserve the manually entered 7.50 amount')
   saved = await disk(stopRoot, 'persisted.json')
-  check(saved['2']?.startsWith('需人工核验') && saved['3']?.startsWith('已打款'), 'restart preserves unresolved D2 and completes only pending D3')
-  assert.deepEqual(await calls(stopRoot), ['confirm', 'confirm', 'second-confirm'])
+  check(saved['2'] === unresolved && saved['3']?.startsWith('已打款') && saved['4'] === priorPaid,
+    'restart preserves unresolved D2 and paid D4 byte-for-byte and completes pending D3')
+  assert.deepEqual(await calls(stopRoot), ['submit', 'submit', 'confirm'])
   const io = (await readFile(path.join(stopRoot, 'fixture', 'io-events.jsonl'), 'utf8')).trim().split(/\r?\n/).map(JSON.parse)
-  assert.deepEqual(io.filter(entry => entry.kind === 'search').map(entry => entry.data.order), ['444444444444444444', '555555555555555555'])
-  check(io.filter(entry => entry.kind === 'write').every(entry => entry.data.column === 4), 'all persisted result writes target column D')
+  const writes = io.filter(entry => entry.kind === 'write')
+  check(writes.length > 0 && writes.every(entry => entry.data.column === 4), 'all persisted result writes target column D')
   await shot('06-restart-completed')
   const callsBefore = await calls(stopRoot)
   await activePage.getByRole('button', { name: '检查并准备', exact: true }).click()
@@ -422,7 +515,45 @@ try {
     check(all.some(entry => entry.channel === 'ui-request' && entry.request.action === action), `real button dispatches ${action} through preload IPC`)
   }
   const prepares = all.filter(entry => entry.channel === 'ui-request' && entry.request.action === 'preparePayment')
-  check(prepares.every(entry => entry.request.transport === 'desktop'), 'all payment requests explicitly use desktop transport')
+  check(prepares.length === 4 && prepares.every(entry => entry.request.transport === 'cdp' &&
+    entry.request.amount === scenarioAmounts[entry.runId] && entry.request.mode === 'standard'),
+  'all UI prepare requests retain manually entered 3.25/7.50 amounts and standard mode')
+  const dispatches = all.filter(entry => entry.channel === 'host' && ['startPayment', 'resumePayment'].includes(entry.method))
+  check(dispatches.length === 5 && dispatches.every(entry => entry.foreground === false),
+    'real Controller forwards CDP start/resume without foreground grants')
+  info.cdpEvidence = []
+  for (const [name, root] of [['resume', resumeRoot], ['restart', stopRoot]]) {
+    const configuredAmount = name === 'resume' ? 3.25 : 7.5
+    const events = await cdpEvents(root)
+    const methods = events.filter(entry => entry.kind === 'method').map(entry => entry.data)
+    assert.deepEqual(methods.filter(entry => entry.method === 'prepareSearch').map(entry => entry.order), searchedOrders)
+    check(true, `${name}: CDP searches eligible and nonexact records once and skips prior paid D4`)
+    const records = methods.filter(entry => entry.method === 'inspectPaymentRecord')
+    check(records.length === 5 && records.filter(entry => entry.reply.eligible).length === 2 &&
+      records.filter(entry => entry.reply.eligible).every(entry => entry.reply.recordText === '暂无记录，每个订单最多打款5次'),
+    `${name}: only the exact empty-record phrase is eligible at the Chrome boundary`)
+    const money = methods.filter(entry => ['fillCompensation', 'verifyPrepared', 'submit', 'confirmation', 'confirm'].includes(entry.method))
+    check(money.length > 0 && money.every(entry => entry.args[1] === configuredAmount && searchedOrders.slice(0, 2).includes(entry.order)),
+      `${name}: eligible CDP calls retain configured amount ${configuredAmount} through pause/resume`)
+    check(methods.filter(entry => ['fillCompensation', 'verifyPrepared'].includes(entry.method))
+      .every(entry => entry.reply.amount === configuredAmount && entry.reply.paymentType === '补差价'),
+    `${name}: CDP fill/verify replies confirm configured amount ${configuredAmount} and 补差价`)
+    const inputs = events.filter(entry => entry.kind === 'input').map(entry => entry.data.value)
+    check(inputs.filter(value => !searchedOrders.includes(value)).length === 2 &&
+      inputs.filter(value => !searchedOrders.includes(value)).every(value => Number(value) === configuredAmount),
+    `${name}: native CDP amount input matches the configured amount for both orders`)
+    const closes = events.filter(entry => entry.kind === 'close')
+    check(closes.length === (name === 'resume' ? 1 : 2) && closes.every(entry => entry.data.cancelledSession &&
+      entry.data.independentCleanup && entry.data.screenConfirms === 0 && entry.data.screenSecondConfirms === 0),
+    `${name}: each CDP session is cancelled and closed with zero screen confirmations`)
+    check(closes.every(entry => events.some(previous => previous.pid === entry.pid && previous.kind === 'method' &&
+      previous.data.method === 'cancel' && events.indexOf(previous) < events.indexOf(entry))), `${name}: current CDP order is cancelled before close`)
+    const persisted = await disk(root, 'persisted.json')
+    check(['5', '6', '7'].every(row => persisted[row]?.startsWith('跳过')), `${name}: incomplete, suffixed and prior-payment records persist skip in D`)
+    info.cdpEvidence.push({ scenario: name, configuredAmount, inputs, searchedOrders, submitOrders: methods.filter(entry => entry.method === 'submit').map(entry => entry.order),
+      confirmOrders: methods.filter(entry => entry.method === 'confirm').map(entry => entry.order), closes: closes.map(entry => entry.data), persisted })
+  }
+  await json('cdp-evidence.json', info.cdpEvidence)
   check(all.filter(entry => entry.channel === 'integrity').every(entry => entry.negative === 'corruption rejected'), 'real module verifier rejects corrupted fixture in every process')
   check(!all.some(entry => entry.channel === 'synthetic-api' && entry.route.includes('payment-grant')), 'no legacy grant API request')
   check(!entries.some(entry => entry.channel === 'renderer-error'), 'no renderer exceptions')
@@ -439,12 +570,24 @@ try {
   log('PAYMENT_CONTROLS_E2E_FAIL', { output, error: error.message })
   process.exitCode = 1
 } finally {
-  if (activeApp) await activeApp.close().catch(error => log('cleanup failed', { error: error.message }))
+  if (activeApp) {
+    // Release only this run's synthetic response so EOF can drain the real worker.
+    await writeFile(path.join(activeRoot, 'fixture', `${activeGate}.release`), 'cleanup synthetic Chrome response')
+      .catch(error => { if (error.code !== 'ENOENT') log('gate cleanup failed', { error: error.message }) })
+    await close('cleanup').catch(async error => {
+      info.cleanupFailure = error.message
+      info.result = 'failed'
+      process.exitCode = 1
+      log('cleanup failed', { error: error.message })
+      if (activeApp) await activeApp.close().catch(() => {})
+    })
+    for (const [name, root] of Object.entries(info.scenarios ?? {})) await archive(root, `failure-${name}`).catch(() => {})
+  }
   info.finishedAt = new Date().toISOString()
   await json('run-info.json', info)
   await json('assertions.json', assertions)
   await writeFile(path.join(output, 'run.log'), entries.map(entry => JSON.stringify(entry)).join('\n') + '\n')
   const links = screenshots.map(name => `<p><a href="${name}">${name}</a><br><img src="${name}" style="max-width:100%"></p>`).join('\n')
-  await writeFile(path.join(output, 'index.html'), `<!doctype html><meta charset="utf-8"><title>Payment controls synthetic smoke</title><h1>${info.result}</h1><p>Real Electron test-main, production UI/Controller, real TD host/PaymentWorkflow, synthetic I/O. Production main.ts is not covered.</p><p><a href="run-info.json">Run information</a> | <a href="assertions.json">Assertions</a> | <a href="run.log">Log</a> | <a href="resume-requests.jsonl">Resume trace</a> | <a href="restart-requests.jsonl">Restart trace</a></p>${links}`)
+  await writeFile(path.join(output, 'index.html'), `<!doctype html><meta charset="utf-8"><title>Payment controls CDP offline acceptance</title><h1>${info.result}</h1><p>Real Electron test-main, production UI/preload/Controller, real TD host/PaymentWorkflow.Cdp, synthetic auth/Excel/Chrome I/O. Production main.ts is outside this test coverage.</p><p>Production feige-payment.js runs separately in jsdom with poisoned chat/body getters.</p><p><a href="run-info.json">Run information</a> | <a href="assertions.json">Assertions</a> | <a href="run.log">Log</a> | <a href="cdp-evidence.json">CDP evidence</a> | <a href="dom-evidence.json">DOM evidence</a> | <a href="dom-tests.log">DOM tests</a> | <a href="resume-requests.jsonl">Resume trace</a> | <a href="restart-requests.jsonl">Restart trace</a></p>${links}`)
   console.log(`Evidence: ${output}`)
 }
