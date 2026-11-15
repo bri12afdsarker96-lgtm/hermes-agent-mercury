@@ -99,6 +99,16 @@ describe('persistent shop browser profiles', () => {
     expect(f.execution.close).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps the native page open for a recoverable identity read and permits retry', async () => {
+    const f = await fixture()
+    const profile = await f.create()
+    await f.open(profile.id)
+    f.identify.mockRejectedValueOnce(new Error('SHOP_PROFILE_PAGE_NOT_READY'))
+    expect((await f.call('identify', { profileId: profile.id })).error).toBe('SHOP_PROFILE_PAGE_NOT_READY')
+    expect(f.close).not.toHaveBeenCalled()
+    expect((await f.call('list')).openProfileId).toBe(profile.id)
+    expect((await f.call('identify', { profileId: profile.id })).profile?.shopId).toBe('10001')
+  })
   it('uses compact scope-bound storage paths and keeps legacy sessions until explicit relogin', async () => {
     const f = await fixture()
     const profile = await f.create()

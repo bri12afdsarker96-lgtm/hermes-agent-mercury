@@ -1,51 +1,93 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { useI18n } from '@/i18n/context'
+import { customerServiceCopy } from '@/i18n/customer-service'
+import { customerServiceLayoutCopy } from '@/i18n/customer-service-layout'
 import { shopBrowserCopy } from '@/i18n/shop-browser'
 
 import type { ShopBrowserProfile, ShopBrowserRequest } from '../../electron/shop-browser-types'
+import { recoverableShopBrowserErrors } from '../../electron/shop-browser-types'
+
 import type { EnterpriseClientRuntime } from './runtime'
 
-export function ShopBrowserProfilesPanel({ runtime }: { runtime: EnterpriseClientRuntime }) {
+export function ShopBrowserProfilesPanel({
+  runtime,
+  nativeLayout = false,
+  selectedProfileId,
+  onProfilesChange,
+  onSelectedProfile,
+  onOpenWorkflow,
+  initialTarget
+}: {
+  runtime: EnterpriseClientRuntime
+  nativeLayout?: boolean
+  selectedProfileId?: string
+  onProfilesChange?: (profiles: ShopBrowserProfile[]) => void
+  onSelectedProfile?: (id: string) => void
+  onOpenWorkflow?: () => void
+  initialTarget?: 'feige'
+}) {
   const { locale } = useI18n()
   const copy = shopBrowserCopy[locale]
+  const layout = customerServiceLayoutCopy[locale]
   const [profiles, setProfiles] = useState<ShopBrowserProfile[]>([])
-  const [selected, setSelected] = useState('')
+  const [selected, setSelected] = useState(selectedProfileId ?? '')
+  const [search, setSearch] = useState('')
   const [opened, setOpened] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [confirmation, setConfirmation] = useState<'relogin' | 'delete' | null>(null)
   const slot = useRef<HTMLDivElement>(null)
-  const lifecycle = useMemo(() => ({ alive: true, busy: false }), [runtime])
+  const initialNavigation = useMemo(() => ({ target: initialTarget, opened: false }), [initialTarget])
+  const lifecycle = useMemo(() => ({ runtime, alive: true, busy: false }), [runtime])
   const selectedProfile = profiles.find(profile => profile.id === selected)
 
   const refresh = useCallback(async () => {
-    const reply = await runtime.shopBrowser!({ action: 'list' })
-    if (!lifecycle.alive) return
+    const reply = await lifecycle.runtime.shopBrowser!({ action: 'list' })
+
+    if (!lifecycle.alive) {
+      return
+    }
+
     if (!reply.ok) {
       setOpened(null)
       throw new Error(reply.error)
     }
+
     setProfiles(reply.profiles ?? [])
+    onProfilesChange?.(reply.profiles ?? [])
     setOpened(reply.openProfileId ?? null)
-  }, [runtime, lifecycle])
+  }, [lifecycle, onProfilesChange])
+
   const run = useCallback(
     async (operation: () => Promise<void>) => {
-      if (lifecycle.busy) return
+      if (lifecycle.busy) {
+        return
+      }
+
       lifecycle.busy = true
       setBusy(true)
       setError('')
+
       try {
         await operation()
       } catch (reason) {
         if (lifecycle.alive) {
-          setError(reason instanceof Error ? reason.message : 'SHOP_PROFILE_FAILED')
-          setOpened(null)
+          const code = reason instanceof Error ? reason.message : 'SHOP_PROFILE_FAILED'
+          setError(code)
+
+          if (!(recoverableShopBrowserErrors as readonly string[]).includes(code)) {
+            setOpened(null)
+          }
         }
       } finally {
         lifecycle.busy = false
-        if (lifecycle.alive) setBusy(false)
+
+        if (lifecycle.alive) {
+          setBusy(false)
+        }
       }
     },
     [lifecycle]
@@ -54,10 +96,10 @@ export function ShopBrowserProfilesPanel({ runtime }: { runtime: EnterpriseClien
   useEffect(() => {
     lifecycle.alive = true
     setProfiles([])
-    setSelected('')
     setOpened(null)
     setConfirmation(null)
     void run(refresh)
+
     return () => {
       lifecycle.alive = false
       void runtime.shopBrowser!({ action: 'close' }).catch(() => {})
@@ -65,24 +107,52 @@ export function ShopBrowserProfilesPanel({ runtime }: { runtime: EnterpriseClien
   }, [runtime, lifecycle, refresh, run])
 
   useEffect(() => {
-    if (!opened) return
+    if (!opened) {
+      return
+    }
+
     const timer = setInterval(() => {
-      if (!lifecycle.busy) void run(refresh)
+      if (!lifecycle.busy) {
+        void run(refresh)
+      }
     }, 10000)
+
     return () => clearInterval(timer)
   }, [opened, refresh, run, lifecycle])
 
-  const bounds = () => {
+  const bounds = useCallback(() => {
     const rectangle = slot.current!.getBoundingClientRect()
-    return {
-      x: Math.max(0, Math.round(rectangle.x)),
-      y: Math.max(0, Math.round(rectangle.y)),
-      width: Math.round(rectangle.width),
-      height: Math.round(rectangle.height)
+    let left = Math.max(0, rectangle.left)
+    let top = Math.max(0, rectangle.top)
+    let right = Math.min(window.innerWidth, rectangle.right)
+    let bottom = Math.min(window.innerHeight, rectangle.bottom)
+
+    for (let ancestor = slot.current!.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      const style = getComputedStyle(ancestor)
+      const clip = ancestor.getBoundingClientRect()
+
+      if (/(auto|scroll|hidden|clip)/.test(style.overflowX)) {
+        left = Math.max(left, clip.left + ancestor.clientLeft)
+        right = Math.min(right, clip.left + ancestor.clientLeft + ancestor.clientWidth)
+      }
+
+      if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) {
+        top = Math.max(top, clip.top + ancestor.clientTop)
+        bottom = Math.min(bottom, clip.top + ancestor.clientTop + ancestor.clientHeight)
+      }
     }
-  }
+
+    const x = Math.max(0, Math.min(window.innerWidth, Math.round(left)))
+    const y = Math.max(0, Math.min(window.innerHeight, Math.round(top)))
+
+    return { x, y, width: Math.max(0, Math.floor(right - x)), height: Math.max(0, Math.floor(bottom - y)) }
+  }, [])
+
   useEffect(() => {
-    if (!opened || !slot.current) return
+    if (!opened || !slot.current) {
+      return
+    }
+
     const resize = () => {
       void runtime.shopBrowser!({ action: 'bounds', profileId: opened, bounds: bounds() })
         .then(reply => {
@@ -92,44 +162,248 @@ export function ShopBrowserProfilesPanel({ runtime }: { runtime: EnterpriseClien
           }
         })
         .catch(() => {
-          if (lifecycle.alive) setOpened(null)
+          if (lifecycle.alive) {
+            setOpened(null)
+          }
         })
     }
+
     const observer = new ResizeObserver(resize)
     observer.observe(slot.current)
     window.addEventListener('resize', resize)
     window.addEventListener('scroll', resize, true)
     resize()
+
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', resize)
       window.removeEventListener('scroll', resize, true)
     }
-  }, [opened, runtime, lifecycle])
+  }, [opened, runtime, lifecycle, bounds])
 
-  const invoke = (request: Omit<ShopBrowserRequest, 'sessionId'>) =>
-    void run(async () => {
-      const reply = await runtime.shopBrowser!(request)
-      if (!reply.ok) throw new Error(reply.error)
-      if (!lifecycle.alive) return
-      if (reply.profile) setSelected(request.action === 'delete' ? '' : reply.profile.id)
-      setConfirmation(null)
-      await refresh()
-    })
-  const open = (target: 'merchant' | 'feige') =>
-    invoke({ action: 'open', profileId: selected, target, bounds: bounds() })
+  const invoke = useCallback(
+    (request: Omit<ShopBrowserRequest, 'sessionId'>) =>
+      void run(async () => {
+        const reply = await runtime.shopBrowser!(request)
+
+        if (!reply.ok) {
+          throw new Error(reply.error)
+        }
+
+        if (!lifecycle.alive) {
+          return
+        }
+
+        if (reply.profile) {
+          const id = request.action === 'delete' ? '' : reply.profile.id
+          setSelected(id)
+          onSelectedProfile?.(id)
+        }
+
+        setConfirmation(null)
+        await refresh()
+      }),
+    [run, runtime, lifecycle, onSelectedProfile, refresh]
+  )
+
+  const open = useCallback(
+    (target: 'merchant' | 'feige') => invoke({ action: 'open', profileId: selected, target, bounds: bounds() }),
+    [invoke, selected, bounds]
+  )
+
   const confirm = (action: 'relogin' | 'delete') =>
     void run(async () => {
       const reply = await runtime.shopBrowser!({ action: 'close' })
-      if (!reply.ok) throw new Error(reply.error)
+
+      if (!reply.ok) {
+        throw new Error(reply.error)
+      }
+
       if (lifecycle.alive) {
         setOpened(null)
         setConfirmation(action)
       }
     })
 
+  const openWorkspace = () =>
+    void run(async () => {
+      const reply = await runtime.shopBrowser!({ action: 'close' })
+
+      if (!reply.ok) {
+        throw new Error(reply.error)
+      }
+
+      if (lifecycle.alive) {
+        setOpened(null)
+
+        onOpenWorkflow?.()
+      }
+    })
+
+  useEffect(() => {
+    if (initialNavigation.target && selectedProfile && !busy && !initialNavigation.opened) {
+      initialNavigation.opened = true
+      open(initialNavigation.target)
+    }
+  }, [selectedProfile, busy, initialNavigation, open])
+
+  if (nativeLayout) {
+    return (
+      <section aria-label={layout.shops} className="cs-native-page cs-shops">
+        <h2>{layout.shops}</h2>
+        <div className="cs-toolbar">
+          <Button disabled={busy} onClick={() => invoke({ action: 'create' })}>
+            {copy.create}
+          </Button>
+          <Button disabled={busy} onClick={() => void run(refresh)} variant="secondary">
+            {copy.refresh}
+          </Button>
+          <Input
+            aria-label={layout.searchShops}
+            onChange={event => setSearch(event.target.value)}
+            placeholder={layout.searchShops}
+            value={search}
+          />
+          {busy ? <span role="status">{copy.pending}</span> : null}
+        </div>
+        {error ? (
+          <p className="cs-error" role="alert">
+            {copy.failed} ({error})
+          </p>
+        ) : null}
+        <div className="cs-summary">
+          <span>
+            {layout.total} <b>{profiles.length}</b>
+          </span>
+          <span>
+            {layout.verified} <b>{profiles.filter(profile => profile.loginState === 'verified').length}</b>
+          </span>
+        </div>
+        <div className="cs-table-wrap">
+          <table className="cs-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>{layout.shopName}</th>
+                <th>{layout.shopId}</th>
+                <th>{layout.loginState}</th>
+                <th>{layout.checkedAt}</th>
+                <th>{layout.operations}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {profiles
+                .filter(profile =>
+                  `${profile.displayName} ${profile.shopName ?? ''} ${profile.shopId ?? ''}`
+                    .toLowerCase()
+                    .includes(search.toLowerCase())
+                )
+                .map((profile, index) => (
+                  <tr
+                    data-profile-id={profile.id}
+                    data-selected={selected === profile.id}
+                    key={profile.id}
+                    onClick={() => {
+                      if (!opened) {
+                        setSelected(profile.id)
+                        onSelectedProfile?.(profile.id)
+                        setConfirmation(null)
+                      }
+                    }}
+                  >
+                    <td>{index + 1}</td>
+                    <td>
+                      <button
+                        className="cs-link"
+                        disabled={!!opened}
+                        onClick={() => {
+                          setSelected(profile.id)
+                          onSelectedProfile?.(profile.id)
+                        }}
+                        type="button"
+                      >
+                        {profile.shopName || profile.displayName}
+                      </button>
+                    </td>
+                    <td>{profile.shopId ?? '—'}</td>
+                    <td>
+                      <span className={`cs-badge ${profile.loginState === 'verified' ? 'is-verified' : ''}`}>
+                        {copy[profile.loginState]}
+                      </span>
+                    </td>
+                    <td>{profile.checkedAt ? new Date(profile.checkedAt).toLocaleString(locale) : '—'}</td>
+                    <td>
+                      <Button
+                        disabled={busy || !!opened}
+                        onClick={() => {
+                          setSelected(profile.id)
+                          onSelectedProfile?.(profile.id)
+                        }}
+                        variant="secondary"
+                      >
+                        {layout.select}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+          {!profiles.length ? <p className="cs-empty">{copy.empty}</p> : null}
+        </div>
+        {selectedProfile ? (
+          <div className="cs-profile-actions">
+            <span role="status">
+              {copy[selectedProfile.loginState]} · {selectedProfile.shopName || selectedProfile.displayName}
+            </span>
+            <div className="cs-actions">
+              <Button disabled={busy} onClick={() => open('merchant')} variant="secondary">
+                {copy.merchant}
+              </Button>
+              <Button disabled={busy} onClick={() => open('feige')} variant="secondary">
+                {copy.feige}
+              </Button>
+              <Button
+                disabled={busy || opened !== selected}
+                onClick={() => invoke({ action: 'identify', profileId: selected })}
+                variant="secondary"
+              >
+                {copy.identify}
+              </Button>
+              <Button disabled={busy || !opened} onClick={() => invoke({ action: 'close' })} variant="secondary">
+                {copy.close}
+              </Button>
+              <Button disabled={busy} onClick={() => confirm('relogin')} variant="secondary">
+                {copy.relogin}
+              </Button>
+              <Button disabled={busy} onClick={() => confirm('delete')} variant="secondary">
+                {copy.remove}
+              </Button>
+              {runtime.customerService && onOpenWorkflow ? (
+                <Button disabled={busy} onClick={openWorkspace} variant="secondary">
+                  {customerServiceCopy[locale].title}
+                </Button>
+              ) : null}
+            </div>
+            {confirmation ? (
+              <div className="cs-confirm" role="alert">
+                <p>{confirmation === 'delete' ? copy.deleteWarning : copy.resetWarning}</p>
+                <Button disabled={busy} onClick={() => invoke({ action: confirmation, profileId: selected })}>
+                  {confirmation === 'delete' ? copy.confirmDelete : copy.confirmReset}
+                </Button>
+                <Button disabled={busy} onClick={() => setConfirmation(null)} variant="secondary">
+                  {copy.cancel}
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        <div aria-label={copy.browser} className="cs-native-browser" ref={slot} style={{ height: opened ? 500 : 0 }} />
+      </section>
+    )
+  }
+
   return (
-    <section className="space-y-3" aria-label={copy.title}>
+    <section aria-label={copy.title} className="space-y-3">
       <h3>{copy.title}</h3>
       <div className="flex flex-wrap items-center gap-2">
         <Button disabled={busy} onClick={() => invoke({ action: 'create' })} variant="secondary">
@@ -149,12 +423,12 @@ export function ShopBrowserProfilesPanel({ runtime }: { runtime: EnterpriseClien
         <label>
           {copy.profile}
           <select
-            value={selected}
             disabled={busy || !!opened}
             onChange={event => {
               setSelected(event.target.value)
               setConfirmation(null)
             }}
+            value={selected}
           >
             <option value="">—</option>
             {profiles.map(profile => (
@@ -209,7 +483,7 @@ export function ShopBrowserProfilesPanel({ runtime }: { runtime: EnterpriseClien
           ) : null}
         </>
       ) : null}
-      <div ref={slot} aria-label={copy.browser} className="w-full" style={{ height: opened ? 600 : 0 }} />
+      <div aria-label={copy.browser} className="w-full" ref={slot} style={{ height: opened ? 600 : 0 }} />
     </section>
   )
 }

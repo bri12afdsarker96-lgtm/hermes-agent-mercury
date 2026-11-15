@@ -6,6 +6,8 @@ import { ShopBrowserProfiles, validShopBounds } from './shop-browser-profiles'
 import { clearShopBrowserStorage, createShopBrowserView, createShopExecutionPage, shopBrowserTargets } from './shop-browser-electron'
 import { createShopExecutionTransport } from './shop-browser-execution'
 import type { ShopBrowserRequest } from './shop-browser-types'
+import { CustomerServicePreview } from './customer-service-preview'
+import type { CustomerServiceRequest } from './customer-service-types'
 import fs from 'node:fs'
 import http from 'node:http'
 import https from 'node:https'
@@ -34,7 +36,7 @@ import {
   shell,
   systemPreferences
 } from 'electron'
-import type { WebContents } from 'electron'
+import type { IpcMainInvokeEvent, WebContents } from 'electron'
 import nodePty from 'node-pty'
 
 import enterpriseDeployment from '../assets/enterprise-deployment.json'
@@ -13646,7 +13648,7 @@ ipcMain.handle('hermes:api', async (_event, request) => {
 // posture stays intact). Consumed by the independent client's runtime adapter.
 const enterpriseSessions = new EnterpriseSessionStore()
 
-const shopBrowserControllers = new Map<number, { sessionId: string; controller: ShopBrowserProfiles; current(): boolean }>()
+const shopBrowserControllers = new Map<number, { sessionId: string; controller: ShopBrowserProfiles; preview?: CustomerServicePreview; current(): boolean }>()
 function invalidateShopBrowser(senderId: number) {
   shopBrowserControllers.get(senderId)?.controller.invalidate()
   shopBrowserControllers.delete(senderId)
@@ -13663,8 +13665,11 @@ app.on('before-quit', () => {
   for (const entry of shopBrowserControllers.values()) entry.controller.invalidate()
   shopBrowserControllers.clear()
 })
-function shopBrowserController(event: Electron.IpcMainInvokeEvent,
-  activeSession: NonNullable<ReturnType<typeof enterpriseSessions.resolve>>, parent: BrowserWindow) {
+function shopBrowserController(event: IpcMainInvokeEvent, sessionId: string) {
+  if (!isEnterpriseUpdateSender(event)) return undefined
+  const activeSession = enterpriseSessions.resolve(event.sender.id, sessionId)
+  const parent = BrowserWindow.fromWebContents(event.sender)
+  if (!activeSession || !parent) return undefined
   let entry = shopBrowserControllers.get(event.sender.id)
   if (entry && entry.sessionId !== activeSession.sessionId) {
     entry.controller.invalidate(); shopBrowserControllers.delete(event.sender.id); entry = undefined
@@ -13696,18 +13701,36 @@ function shopBrowserController(event: Electron.IpcMainInvokeEvent,
     entry = { sessionId: activeSession.sessionId, controller, current }
     shopBrowserControllers.set(event.sender.id, entry)
   }
-  return entry.controller
+  return entry
 }
 ipcMain.handle('hermes:enterprise:shop-browser', async (event, payload: ShopBrowserRequest) => {
   if (!isEnterpriseUpdateSender(event)) return { ok: false, error: 'SHOP_PROFILE_FORBIDDEN' }
   if (payload?.bounds !== undefined && !validShopBounds(payload.bounds)) return { ok: false, error: 'SHOP_PROFILE_INVALID_REQUEST' }
-  const activeSession = enterpriseSessions.resolve(event.sender.id, payload?.sessionId)
-  const parent = BrowserWindow.fromWebContents(event.sender)
-  if (!activeSession || !parent) return { ok: false, error: 'SHOP_PROFILE_OWNER_CHANGED' }
-  const controller = shopBrowserController(event, activeSession, parent)
+  const entry = shopBrowserController(event, payload?.sessionId)
+  if (!entry) return { ok: false, error: 'SHOP_PROFILE_OWNER_CHANGED' }
   const zoom = event.sender.getZoomFactor()
   const request = payload?.bounds ? { ...payload, bounds: Object.fromEntries(Object.entries(payload.bounds).map(([key, value]) => [key, Math.round(value * zoom)])) as unknown as ShopBrowserRequest['bounds'] } : payload
-  return controller.operate(request)
+  return entry.controller.operate(request)
+})
+ipcMain.handle('hermes:enterprise:customer-service-preview', async (event, payload: CustomerServiceRequest) => {
+  const entry = shopBrowserController(event, payload?.sessionId)
+  if (!entry) return { ok: false, error: 'CUSTOMER_OWNER_CHANGED' }
+  if (!entry.preview) {
+    entry.preview = new CustomerServicePreview({
+      root: path.join(app.getPath('userData'), 'customer-service-preview'),
+      isCurrent: entry.current,
+      async authorize(profileId) {
+        const reply = await entry.controller.operate({ sessionId: entry.sessionId, action: 'list' })
+        if (!reply.ok) throw new Error(reply.error)
+        const profile = reply.profiles?.find(profile => profile.id === profileId)
+        const active = enterpriseSessions.resolve(event.sender.id, entry.sessionId)
+        if (!active || !entry.current()) throw new Error('CUSTOMER_OWNER_CHANGED')
+        if (!profile) throw new Error('CUSTOMER_PROFILE_NOT_FOUND')
+        return { origin: new URL(active.baseUrl).origin, tenantId: profile.tenantId, principalId: profile.principalId, profile }
+      }
+    })
+  }
+  return entry.preview.operate(payload)
 })
 
 const doudianControllers = new Map<number, { sessionId: string; controller: DoudianController; current(): boolean }>()
@@ -13760,11 +13783,17 @@ ipcMain.handle('hermes:enterprise:doudian', async (event, payload: DoudianReques
         return selection.canceled ? null : selection.filePaths[0] ?? null
       },
       async listBrowserProfiles() {
-        const result = await shopBrowserController(event, session, parent).operate({ action: 'list', sessionId: session.sessionId })
+        const profiles = shopBrowserController(event, session.sessionId)?.controller
+        if (!profiles) throw new Error('SHOP_PROFILE_OWNER_CHANGED')
+        const result = await profiles.operate({ action: 'list', sessionId: session.sessionId })
         if (!result.ok) throw new Error(result.error)
         return result.profiles ?? []
       },
-      connectBrowser: (profileId, target) => shopBrowserController(event, session, parent).acquireExecution(profileId, target)
+      connectBrowser: (profileId, target) => {
+        const profiles = shopBrowserController(event, session.sessionId)?.controller
+        if (!profiles) throw new Error('SHOP_PROFILE_OWNER_CHANGED')
+        return profiles.acquireExecution(profileId, target)
+      }
     })
     entry = { sessionId: session.sessionId, controller, current }
     doudianControllers.set(event.sender.id, entry)

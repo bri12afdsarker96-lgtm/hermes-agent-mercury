@@ -6,6 +6,7 @@
 
 import type { DoudianReply, DoudianRequest } from '../../electron/doudian-types'
 import type { ShopBrowserReply, ShopBrowserRequest } from '../../electron/shop-browser-types'
+import type { CustomerServiceReply, CustomerServiceRequest } from '../../electron/customer-service-types'
 
 import {
   EnterpriseClientError,
@@ -78,6 +79,7 @@ export interface EnterpriseMultipartUpload {
 export interface EnterpriseClientRuntime {
   doudian?: (payload: Omit<DoudianRequest, 'sessionId'>) => Promise<DoudianReply>
   shopBrowser?: (payload: Omit<ShopBrowserRequest, 'sessionId'>) => Promise<ShopBrowserReply>
+  customerService?: (payload: Omit<CustomerServiceRequest, 'sessionId'>) => Promise<CustomerServiceReply>
   /** Non-secret scope for this device's per-seat presentation preferences. */
   serverOrigin?: string
   speech?: {
@@ -269,6 +271,10 @@ function enterpriseRuntimeFromSession(
     shopBrowser: enterpriseBridge.shopBrowser ? async payload => {
       if (disconnected) return { ok: false, error: 'SHOP_PROFILE_OWNER_CHANGED' }
       return enterpriseBridge.shopBrowser!({ ...payload, sessionId })
+    } : undefined,
+    customerService: enterpriseBridge.customerService ? async payload => {
+      if (disconnected) return { ok: false, error: 'CUSTOMER_OWNER_CHANGED' }
+      return enterpriseBridge.customerService!({ ...payload, sessionId })
     } : undefined,
     doudian: enterpriseBridge.doudian ? async payload => {
       if (disconnected) { return { ok: false, error: 'DOUDIAN_OWNER_CHANGED' } }

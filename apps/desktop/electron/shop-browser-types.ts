@@ -32,7 +32,6 @@ export interface ShopBrowserReply {
   profile?: ShopBrowserProfile
   openProfileId?: string | null
 }
-
 export function isShopBrowserUrl(raw: string): boolean {
   try {
     const url = new URL(raw)
@@ -40,3 +39,11 @@ export function isShopBrowserUrl(raw: string): boolean {
       ['jinritemai.com', 'douyin.com'].some(host => url.hostname === host || url.hostname.endsWith(`.${host}`))
   } catch { return false }
 }
+export const recoverableShopBrowserErrors = [
+  'SHOP_PROFILE_INVALID_REQUEST',
+  'SHOP_PROFILE_NOT_FOUND',
+  'SHOP_PROFILE_NOT_OPEN',
+  'SHOP_PROFILE_IN_USE',
+  'SHOP_PROFILE_PAGE_NOT_READY',
+  'SHOP_PROFILE_IDENTITY_UNAVAILABLE'
+] as const

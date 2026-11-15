@@ -4,6 +4,7 @@ import path from 'node:path'
 
 import type { ShopBrowserBounds, ShopBrowserProfile, ShopBrowserReply, ShopBrowserRequest } from './shop-browser-types'
 import type { BoundShopExecution, ShopExecutionTransport } from './shop-browser-execution'
+import { recoverableShopBrowserErrors } from './shop-browser-types'
 
 export interface ShopBrowserAuthority {
   origin: string
@@ -220,7 +221,7 @@ export class ShopBrowserProfiles {
       .then(() => this.perform(request))
       .catch(async error => {
         const code = error instanceof Error ? error.message : 'SHOP_PROFILE_FAILED'
-        if (!['SHOP_PROFILE_INVALID_REQUEST', 'SHOP_PROFILE_NOT_FOUND', 'SHOP_PROFILE_NOT_OPEN', 'SHOP_PROFILE_IN_USE'].includes(code))
+        if (!(recoverableShopBrowserErrors as readonly string[]).includes(code))
           await this.closeView().catch(() => {})
         return { ok: false, error: code }
       })

@@ -36,6 +36,7 @@ import { SeatRequestPanel } from './seat-request-panel'
 import { ToolsPage } from './tools-page'
 import { ReviewCapturePage } from './review-capture-page'
 import { PaymentPage } from './payment-page'
+import { CustomerServicePage } from './customer-service-page'
 import {
   enterpriseRoleLabel,
   enterpriseWorkbenchPresentation,
@@ -87,7 +88,7 @@ function reminderWhen(row: PersonalReminder | ReminderCenterTask, beijing = fals
 }
 
 // Tools is renderer-local; the AI configuration destination is still guarded by its server-owned permission.
-const ALWAYS_VISIBLE_WORKSPACES = new Set<WorkspaceId>(['ai_config', 'assistant', 'platform', 'tools', 'workbench', 'review-capture', 'payment'])
+const ALWAYS_VISIBLE_WORKSPACES = new Set<WorkspaceId>(['ai_config', 'assistant', 'platform', 'tools', 'workbench', 'review-capture', 'payment', 'customer-service'])
 
 /**
  * Hermes_AI owns availability. The local role only changes product wording;
@@ -561,7 +562,7 @@ function EnterpriseClientContent({ additionalAccountActions, onBeforeLogout, rec
     // The existing desktop diagnostic bridge deliberately accepts a fixed
     // legacy enum.  Do not expand telemetry merely because a new local page
     // exists; the configuration page is still a normal visible workspace.
-    window.hermesDesktop?.reportEnterpriseActivity?.({ event, workspace: workspace === 'ai_config' || workspace === 'receivables' || workspace === 'overdue' || workspace === 'review-capture' || workspace === 'payment' ? undefined : workspace })
+    window.hermesDesktop?.reportEnterpriseActivity?.({ event, workspace: workspace === 'ai_config' || workspace === 'receivables' || workspace === 'overdue' || workspace === 'review-capture' || workspace === 'payment' || workspace === 'customer-service' ? undefined : workspace })
   }, [])
 
   useEffect(() => {
@@ -789,6 +790,7 @@ function EnterpriseClientContent({ additionalAccountActions, onBeforeLogout, rec
         ) : null}
         {activeDefinition.id === 'review-capture' ? <ReviewCapturePage key={JSON.stringify([authoritySnapshot?.identity.tenant_id, authoritySnapshot?.identity.principal_id])} runtime={authorityRuntime} /> : null}
         {activeDefinition.id === 'payment' ? <PaymentPage key={JSON.stringify([authoritySnapshot?.identity.tenant_id, authoritySnapshot?.identity.principal_id])} runtime={authorityRuntime} /> : null}
+        {activeDefinition.id === 'customer-service' ? <CustomerServicePage key={JSON.stringify([authorityRuntime?.serverOrigin, authoritySnapshot?.identity.tenant_id, authoritySnapshot?.identity.principal_id])} runtime={authorityRuntime} employeeId={authoritySnapshot?.identity.principal_id} /> : null}
         {activeDefinition.id === 'conversations' ? <ConversationsPage runtime={authorityRuntime} /> : null}
         {activeDefinition.id === 'handoffs' ? (
           <HandoffsPage principalId={authoritySnapshot?.identity.principal_id} runtime={authorityRuntime} />
@@ -839,6 +841,7 @@ function EnterpriseClientContent({ additionalAccountActions, onBeforeLogout, rec
         {activeDefinition.id !== 'assistant' &&
         activeDefinition.id !== 'review-capture' &&
         activeDefinition.id !== 'payment' &&
+        activeDefinition.id !== 'customer-service' &&
         activeDefinition.id !== 'knowledge_qa' &&
         activeDefinition.id !== 'customer_replies' &&
         activeDefinition.id !== 'conversations' &&
