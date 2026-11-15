@@ -2,6 +2,7 @@ import type { GatewayWsUrlResult } from '@hermes/shared'
 import type { TranslucencyState } from '@hermes/shared/translucency'
 
 import type { DoudianReply, DoudianRequest } from '../electron/doudian-types'
+import type { ShopBrowserReply, ShopBrowserRequest } from '../electron/shop-browser-types'
 import type { EnterprisePackageUpdateState } from '../electron/enterprise-package-updater-types'
 
 import type { WakeIndicatorState } from './lib/wake-indicator'
@@ -188,6 +189,7 @@ declare global {
        */
       enterprise?: {
         doudian?: (payload: DoudianRequest) => Promise<DoudianReply>
+        shopBrowser?: (payload: ShopBrowserRequest) => Promise<ShopBrowserReply>
         /** Local package updates are available independently of login and role. */
         packageUpdate?: {
           status(): Promise<EnterprisePackageUpdateState>

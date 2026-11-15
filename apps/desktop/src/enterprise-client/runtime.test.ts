@@ -28,6 +28,17 @@ afterEach(() => {
 })
 
 describe('Enterprise client runtime adapter', () => {
+  it('fences the shop browser bridge to the connected session and rejects after logout', async () => {
+    const bridge = installBridge()
+    const shopBrowser = vi.fn(async () => ({ ok: true }))
+    Object.assign(bridge, { shopBrowser })
+    const runtime = await connectEnterpriseClient()
+    await runtime.shopBrowser!({ action: 'list' })
+    expect(shopBrowser).toHaveBeenCalledWith({ action: 'list', sessionId: 'opaque-session' })
+    await runtime.disconnect()
+    await expect(runtime.shopBrowser!({ action: 'create' })).resolves.toEqual({ ok: false, error: 'SHOP_PROFILE_OWNER_CHANGED' })
+    expect(shopBrowser).toHaveBeenCalledTimes(1)
+  })
   it('binds doudian requests to the session and refuses them after disconnect', async () => {
     const bridge = installBridge()
     const doudian = vi.fn(async () => ({ ok: true }))

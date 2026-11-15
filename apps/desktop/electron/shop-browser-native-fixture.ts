@@ -1,0 +1,95 @@
+import { app, BrowserWindow, session } from 'electron'
+import path from 'node:path'
+
+import { createShopBrowserView, clearShopBrowserStorage } from './shop-browser-electron'
+import { ShopBrowserProfiles } from './shop-browser-profiles'
+import type { ShopBrowserRequest } from './shop-browser-types'
+
+// Standalone storage acceptance. Platform HTTPS is served locally, never logged in.
+const root = process.env.HERMES_SHOP_NATIVE_ROOT
+if (!root || !path.isAbsolute(root)) throw new Error('HERMES_SHOP_NATIVE_ROOT must be absolute')
+app.setPath('userData', path.join(root, 'electron'))
+app
+  .whenReady()
+  .then(async () => {
+    const window = new BrowserWindow({
+      width: 1100,
+      height: 780,
+      title: 'Hermes shop profile storage acceptance',
+      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false }
+    })
+    await window.loadURL(
+      'data:text/html;charset=utf-8,' +
+        encodeURIComponent(
+          '<title>Hermes shop profile storage acceptance</title><h2>Local Chromium profile storage acceptance</h2><p>Synthetic storage only. No platform login, messages or payment.</p>'
+        )
+    )
+    let allowed = true
+    let activeStorage = ''
+    const configured = new Set<string>()
+    const controller = new ShopBrowserProfiles({
+      root: path.join(root, 'profiles'),
+      isCurrent: () => true,
+      async authorize() {
+        if (!allowed) throw new Error('REVOKED')
+        return { origin: 'https://enterprise.example', tenantId: 'storage-test', principalId: 'storage-test' }
+      },
+      async createView(storage, target, bounds) {
+        const browserSession = session.fromPath(storage)
+        if (!configured.has(storage)) {
+          await browserSession.setProxy({
+            mode: 'fixed_servers',
+            proxyRules: '127.0.0.1:9',
+            proxyBypassRules: '<-loopback>'
+          })
+          await browserSession.protocol.handle(
+            'https',
+            () =>
+              new Response(
+                '<title>Local storage fixture</title><h3>Persistent profile storage</h3><p>This page is a local fixture, without a shop account.</p>',
+                { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+              )
+          )
+          configured.add(storage)
+        }
+        activeStorage = storage
+        return createShopBrowserView(window, storage, target, bounds)
+      },
+      clearStorage: clearShopBrowserStorage
+    })
+    Object.assign(globalThis, {
+      shopBrowserNative: {
+        call: (request: ShopBrowserRequest) => controller.operate(request),
+        async putSyntheticCookie() {
+          await session.fromPath(activeStorage).cookies.set({
+            url: 'https://fxg.jinritemai.com/',
+            name: 'hermes_storage_test',
+            value: 'synthetic',
+            expirationDate: Date.now() / 1000 + 3600,
+            secure: true
+          })
+          await session.fromPath(activeStorage).cookies.flushStore()
+        },
+        async cookieNames() {
+          return (await session.fromPath(activeStorage).cookies.get({})).map(cookie => cookie.name)
+        },
+        async revoke() {
+          allowed = false
+          await controller.revalidate()
+        },
+        state() {
+          return {
+            storage: activeStorage,
+            views: window.contentView.children.length,
+            pid: process.pid,
+            title: window.getTitle()
+          }
+        }
+      }
+    })
+    app.on('window-all-closed', () => app.quit())
+  })
+  .catch(error => {
+    console.error(error)
+    app.exit(1)
+  })

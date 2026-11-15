@@ -2,6 +2,9 @@ import { execFile, execFileSync, spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import { allowForegroundLocalDoudian, assertDoudianCapability, DoudianController, doudianScope, doudianWorkbookExtensions } from './doudian-host'
 import type { DoudianRequest } from './doudian-types'
+import { ShopBrowserProfiles, validShopBounds } from './shop-browser-profiles'
+import { clearShopBrowserStorage, createShopBrowserView } from './shop-browser-electron'
+import type { ShopBrowserRequest } from './shop-browser-types'
 import fs from 'node:fs'
 import http from 'node:http'
 import https from 'node:https'
@@ -13642,6 +13645,63 @@ ipcMain.handle('hermes:api', async (_event, request) => {
 // posture stays intact). Consumed by the independent client's runtime adapter.
 const enterpriseSessions = new EnterpriseSessionStore()
 
+const shopBrowserControllers = new Map<number, { sessionId: string; controller: ShopBrowserProfiles; current(): boolean }>()
+function invalidateShopBrowser(senderId: number) {
+  shopBrowserControllers.get(senderId)?.controller.invalidate()
+  shopBrowserControllers.delete(senderId)
+}
+const shopBrowserFence = setInterval(() => {
+  for (const [senderId, entry] of shopBrowserControllers) {
+    if (!entry.current()) { entry.controller.invalidate(); shopBrowserControllers.delete(senderId) }
+    else void entry.controller.revalidate()
+  }
+}, 15000)
+shopBrowserFence.unref()
+app.on('before-quit', () => {
+  clearInterval(shopBrowserFence)
+  for (const entry of shopBrowserControllers.values()) entry.controller.invalidate()
+  shopBrowserControllers.clear()
+})
+ipcMain.handle('hermes:enterprise:shop-browser', async (event, payload: ShopBrowserRequest) => {
+  if (!isEnterpriseUpdateSender(event)) return { ok: false, error: 'SHOP_PROFILE_FORBIDDEN' }
+  if (payload?.bounds !== undefined && !validShopBounds(payload.bounds)) return { ok: false, error: 'SHOP_PROFILE_INVALID_REQUEST' }
+  const activeSession = enterpriseSessions.resolve(event.sender.id, payload?.sessionId)
+  const parent = BrowserWindow.fromWebContents(event.sender)
+  if (!activeSession || !parent) return { ok: false, error: 'SHOP_PROFILE_OWNER_CHANGED' }
+  let entry = shopBrowserControllers.get(event.sender.id)
+  if (entry && entry.sessionId !== activeSession.sessionId) {
+    entry.controller.invalidate(); shopBrowserControllers.delete(event.sender.id); entry = undefined
+  }
+  if (!entry) {
+    const current = () => isEnterpriseUpdateSender(event) && enterpriseSessions.resolve(event.sender.id, activeSession.sessionId) === activeSession
+    const controller = new ShopBrowserProfiles({
+      root: path.join(app.getPath('userData'), 'shop-browser-profiles'),
+      isCurrent: current,
+      async authorize() {
+        const active = await refreshedEnterpriseSession(event.sender.id, activeSession.sessionId)
+        if (!active || !current()) throw new Error('SHOP_PROFILE_OWNER_CHANGED')
+        let identity: { tenant_id?: string; principal_id?: string }
+        try {
+          identity = await fetchJson(resolveEnterpriseUrl(active.baseUrl, '/api/whoami'), '', {
+            bearer: active.token, headers: { Origin: new URL(active.baseUrl).origin }, method: 'GET', timeoutMs: 15000
+          })
+          assertDoudianCapability(identity, 'shopManagementList')
+          doudianScope(active.baseUrl, identity)
+        } catch { throw new Error('SHOP_PROFILE_ACCESS_UNAVAILABLE') }
+        if (!current()) throw new Error('SHOP_PROFILE_OWNER_CHANGED')
+        return { origin: new URL(active.baseUrl).origin, tenantId: identity.tenant_id!, principalId: identity.principal_id! }
+      },
+      createView: (storage, target, bounds) => createShopBrowserView(parent, storage, target, bounds),
+      clearStorage: clearShopBrowserStorage
+    })
+    entry = { sessionId: activeSession.sessionId, controller, current }
+    shopBrowserControllers.set(event.sender.id, entry)
+  }
+  const zoom = event.sender.getZoomFactor()
+  const request = payload?.bounds ? { ...payload, bounds: Object.fromEntries(Object.entries(payload.bounds).map(([key, value]) => [key, Math.round(value * zoom)])) as unknown as ShopBrowserRequest['bounds'] } : payload
+  return entry.controller.operate(request)
+})
+
 const doudianControllers = new Map<number, { sessionId: string; controller: DoudianController; current(): boolean }>()
 const localForegroundDoudian = allowForegroundLocalDoudian(app.isPackaged, enterpriseOriginSelection.local, process.env.HERMES_DOUDIAN_FOREGROUND_TEST)
 if (localForegroundDoudian) console.warn('[doudian] foreground local test enabled; TD and its browser run without a verified sandbox')
@@ -13840,6 +13900,7 @@ function destroyAllEnterpriseSessions(): void {
   enterpriseSpeech.stopAll()
 
   for (const senderId of enterpriseWiredSenders) {
+    invalidateShopBrowser(senderId)
     enterpriseSessions.destroySender(senderId)
   }
 
@@ -14232,6 +14293,7 @@ ipcMain.handle('hermes:enterprise:login-password', async (event, payload) => {
     // sender session instead of silently refreshing a different identity.
     enterpriseSpeech.stop(String(event.sender.id))
     sessionId = enterpriseSessions.connect(event.sender.id, enterpriseOrigin, bearer)
+    invalidateShopBrowser(event.sender.id)
   } catch (err) {
     rememberLog('[enterprise-login] password sign-in rejected: session creation failed')
 
@@ -14241,6 +14303,7 @@ ipcMain.handle('hermes:enterprise:login-password', async (event, payload) => {
   if (!enterpriseWiredSenders.has(event.sender.id)) {
     enterpriseWiredSenders.add(event.sender.id)
     event.sender.once('destroyed', () => {
+      invalidateShopBrowser(event.sender.id)
       enterpriseSessions.destroySender(event.sender.id)
       enterpriseWiredSenders.delete(event.sender.id)
     })
@@ -14327,6 +14390,8 @@ ipcMain.handle('hermes:enterprise:auto-connect', async event => {
 
   try {
     sessionId = enterpriseSessions.autoConnect(senderId, enterpriseOrigin, bearer)
+    const browser = shopBrowserControllers.get(senderId)
+    if (browser && browser.sessionId !== sessionId) invalidateShopBrowser(senderId)
   } catch (err) {
     rememberLog('[enterprise-auth] auto-connect rejected: session creation failed')
 
@@ -14336,6 +14401,7 @@ ipcMain.handle('hermes:enterprise:auto-connect', async event => {
   if (!enterpriseWiredSenders.has(senderId)) {
     enterpriseWiredSenders.add(senderId)
     event.sender.once('destroyed', () => {
+      invalidateShopBrowser(senderId)
       enterpriseSessions.destroySender(senderId)
       enterpriseWiredSenders.delete(senderId)
     })
@@ -14389,6 +14455,9 @@ ipcMain.handle('hermes:enterprise:disconnect', (event, payload) => {
     enterpriseSpeech.stop(String(event.sender.id))
   }
   const removed = enterpriseSessions.disconnect(event.sender.id, payload?.sessionId)
+  if (removed) {
+    invalidateShopBrowser(event.sender.id)
+  }
 
   return { ok: removed }
 })

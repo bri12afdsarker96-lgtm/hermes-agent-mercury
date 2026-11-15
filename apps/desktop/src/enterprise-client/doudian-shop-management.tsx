@@ -6,6 +6,7 @@ import { useI18n } from '@/i18n/context'
 
 import type { DoudianRequest, DoudianShopOperation, ManagedDoudianShop } from '../../electron/doudian-types'
 import type { EnterpriseClientRuntime } from './runtime'
+import { ShopBrowserProfilesPanel } from './shop-browser-profiles'
 
 const labels = {
   zh: { title: '店铺管理', refresh: '刷新', close: '关闭', name: '店铺', status: '后台状态', remark: '备注', save: '保存备注', pin: '置顶', unpin: '取消置顶', up: '上移', down: '下移', remove: '删除店铺', cancel: '取消', confirm: '确认删除', warning: '将删除本机店铺记录及其 Chrome 和 WebView 登录资料，无法撤销。平台店铺及历史业务记录会保留。', pending: '等待登录', deleting: '删除未完成', empty: '暂无店铺', unavailable: '当前模块暂不支持内嵌店铺管理。', busy: '正在处理，请稍候', failed: '操作未完成，请刷新后重试', loginPending: '新增店铺及登录功能正在接入。' },
@@ -127,6 +128,7 @@ export function DoudianShopManagement({ runtime, onClose, onChanged, operationsS
   })
 
   return <section aria-label={copy.title} className="space-y-3 border-t border-(--ui-stroke-tertiary) pt-4">
+    {runtime.shopBrowser ? <ShopBrowserProfilesPanel runtime={runtime} /> : null}
     <div className="flex flex-wrap items-center gap-2"><h2>{copy.title}</h2>
       <Button disabled={busy} onClick={() => void run(refresh)} variant="secondary">{copy.refresh}</Button>
       <Button disabled={busy || operationActive} onClick={onClose} variant="secondary">{copy.close}</Button>
