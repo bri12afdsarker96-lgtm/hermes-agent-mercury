@@ -39,7 +39,7 @@ import { registerDesktopProtocol } from '../scripts/local-deployment.mjs'
 import { applyEnterpriseWindowIdentity, ENTERPRISE_APP_ID, repairEnterpriseShortcuts } from './enterprise-windows-identity'
 
 import { classifyActiveRuntime } from './active-runtime-state'
-import { stopBackendChild as stopBackendChildImpl, stopBackendTreesForUpdate } from './backend-child'
+import { observeBackendStartup, stopBackendChild as stopBackendChildImpl, stopBackendTreesForUpdate } from './backend-child'
 import { dashboardFallbackArgs, sourceDeclaresServe } from './backend-command'
 import { createBackendConnectionState } from './backend-connection-state'
 import { assertBootstrapAllowed, buildDesktopBackendEnv, buildDesktopChildEnv, hermesManagedNodePathEntries, normalizeHermesHomeRoot, localVerificationHome } from './backend-env'
@@ -3379,6 +3379,7 @@ const desktopParentStartMarker = createParentStartMarkerResolver({
 })
 
 async function claimBackendChild(child, command, profile, nonce) {
+  const startup = observeBackendStartup(child)
   try {
     const identity = await backendOwnership.claim({
       command,
@@ -3397,9 +3398,13 @@ async function claimBackendChild(child, command, profile, nonce) {
 
     return identity
   } catch (error) {
+    const startupFailed = startup.failed
     stopBackendChild(child)
     await waitForBackendExit(child)
+    if (startupFailed) throw startup.error(error)
     throw new Error(`Could not persist ownership for the Hermes backend: ${error.message}`)
+  } finally {
+    startup.dispose()
   }
 }
 
@@ -4217,6 +4222,7 @@ function isActiveRuntimeUsable() {
     fileExists(venvPython) &&
     canImportHermesCli(venvPython, {
       env: {
+        HERMES_HOME,
         PYTHONPATH: [ACTIVE_HERMES_ROOT, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter)
       }
     })
@@ -4596,7 +4602,10 @@ function resolveHermesBackend(backendArgs) {
       // the Nix wrapper), not a discovered PATH candidate. It must not fall
       // through to the install-script bootstrap if the optional probe times
       // out under load; the pinned backend is the only valid runtime there.
-      if (shouldTrustHermesOverride(hermesOverride) || verifyHermesCli(hermesCommand, { shell: shellForProbe })) {
+      if (shouldTrustHermesOverride(hermesOverride) || verifyHermesCli(hermesCommand, {
+        shell: shellForProbe,
+        env: backendChildEnv({ kind: 'command', env: {} })
+      })) {
         // `unwrapped` above already answered "is this a Windows venv shim?" —
         // it was null (not a shim, or its import probe failed). Do NOT re-run
         // unwrapWindowsVenvHermesCommand here: the second call repeats the
@@ -4633,7 +4642,7 @@ function resolveHermesBackend(backendArgs) {
     // Verify the import works before trusting the candidate; on
     // failure, fall through to step 6 so the bootstrap runner pulls
     // a uv-managed 3.11 into %LOCALAPPDATA%\hermes\hermes-agent\venv.
-    if (canImportHermesCli(python)) {
+    if (canImportHermesCli(python, { env: { HERMES_HOME } })) {
       return {
         kind: 'python',
         label: `installed hermes_cli module via ${python}`,

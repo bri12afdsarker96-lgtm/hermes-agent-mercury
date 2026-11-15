@@ -102,6 +102,24 @@ test('verifyHermesCli returns true when --version exits 0', () => {
   }
 })
 
+test('verifyHermesCli probes the same home and environment as the backend child', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-probe-home-'))
+  const script = path.join(directory, 'candidate.cjs')
+  const windows = process.platform === 'win32'
+  const command = path.join(directory, windows ? 'hermes.cmd' : 'hermes')
+  fs.writeFileSync(script, 'if (process.argv.includes("--help") && process.env.HERMES_HOME === "missing-dependencies") process.exit(23)\n')
+  fs.writeFileSync(command, windows
+    ? `@"${NODE_BIN}" "${script}" %*\r\n`
+    : `#!/bin/sh\nexec '${NODE_BIN}' '${script}' "$@"\n`, { mode: 0o700 })
+
+  try {
+    assert.equal(verifyHermesCli(command, { shell: windows, env: { ...process.env, HERMES_HOME: 'healthy-install' } }), true)
+    assert.equal(verifyHermesCli(command, { shell: windows, env: { ...process.env, HERMES_HOME: 'missing-dependencies' } }), false)
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+})
+
 test('verifyHermesCli swallows timeouts (does not throw)', () => {
   // We can't easily provoke a real hang in CI without slowing the
   // suite, but we CAN confirm that an invocation that DOES throw

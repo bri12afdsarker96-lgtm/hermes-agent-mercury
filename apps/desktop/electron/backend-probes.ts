@@ -161,16 +161,16 @@ function canImportHermesCli(pythonPath: string, opts: { env?: Record<string, str
 }
 
 /**
- * Return true iff `<hermesCommand> --version` exits 0.
+ * Return true iff version and CLI-import probes both exit 0.
  *
  * Used to gate the "existing `hermes` on PATH" rung. Without this, a
  * stale hermes.cmd shim left behind by an uninstalled pip install (or
  * a half-built venv whose `hermes` entry-point points at a deleted
  * Python) survives findOnPath() and gets selected as the backend.
  *
- * We intentionally avoid invoking the command with the dashboard args
- * here -- `--version` is the cheapest "is this binary alive" smoke
- * test that every hermes_cli entry-point has supported since 0.1.
+ * Some launchers answer --version before importing CLI dependencies. --help
+ * exercises those imports without starting a server or requiring `serve`
+ * support from legacy runtimes. Both probes use the eventual child environment.
  *
  * @param {string} hermesCommand - Resolved absolute path to a hermes
  *   executable (or an interpreter+script wrapper).
@@ -190,18 +190,21 @@ function shouldTrustHermesOverride(hermesOverride?: string) {
   return typeof hermesOverride === 'string' && hermesOverride.trim().length > 0
 }
 
-function verifyHermesCli(hermesCommand: string, opts?: { shell?: boolean }) {
+function verifyHermesCli(hermesCommand: string, opts?: { shell?: boolean; env?: NodeJS.ProcessEnv }) {
   if (!hermesCommand) {
     return false
   }
 
   try {
-    execProbeSync(hermesCommand, ['--version'], {
+    const options = {
       stdio: 'ignore',
       timeout: PROBE_TIMEOUT_MS,
       shell: Boolean(opts?.shell),
+      env: opts?.env,
       windowsHide: true
-    })
+    } as const
+    execProbeSync(hermesCommand, ['--version'], options)
+    execProbeSync(hermesCommand, ['--help'], options)
 
     return true
   } catch {

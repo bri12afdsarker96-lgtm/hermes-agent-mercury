@@ -138,6 +138,14 @@ test('resolveVenvHermesCommand: returns the resolved python backend descriptor w
   assert.deepEqual(result.env, { FAKE_ENV: '1' })
 })
 
+test('resolveVenvHermesCommand: import probe uses the selected data root', () => {
+  const deps = makeDeps({
+    hermesHome: '/selected/home',
+    canImportHermesCli: (_python, options) => options?.env?.HERMES_HOME === '/selected/home'
+  })
+  assert.ok(resolveVenvHermesCommand('/root/venv/Scripts/hermes.exe', ['serve'], deps))
+})
+
 test('resolveVenvHermesCommand: is case-insensitive on hermes.exe and the Scripts dir name', () => {
   const deps = makeDeps()
 

@@ -261,6 +261,7 @@ export function resolveVenvHermesCommand(
   if (
     !canImportHermesCli(python, {
       env: {
+        HERMES_HOME: hermesHome,
         PYTHONPATH: [...(directoryExists(root) ? [root] : []), process.env.PYTHONPATH]
           .filter((entry): entry is string => Boolean(entry))
           .join(path.delimiter)

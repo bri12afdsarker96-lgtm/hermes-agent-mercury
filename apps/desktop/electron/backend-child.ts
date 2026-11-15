@@ -20,6 +20,32 @@
  * the function body.
  */
 
+import type { ChildProcess } from 'node:child_process'
+
+/** Capture failures while the asynchronous OS identity probe is still running. */
+export function observeBackendStartup(child: ChildProcess) {
+  let stderr = ''
+  let spawnError: Error | undefined
+  const onData = (chunk: Buffer | string) => { stderr = (stderr + chunk.toString()).slice(-8192) }
+  const onError = (error: Error) => { spawnError = error }
+  child.stderr?.on('data', onData)
+  child.on('error', onError)
+
+  return {
+    get failed() {
+      return Boolean(spawnError) || child.exitCode !== null || child.signalCode !== null
+    },
+    error(cause: unknown) {
+      const detail = spawnError?.message || stderr.trim() || (cause instanceof Error ? cause.message : String(cause))
+      return new Error(`Hermes backend failed before ownership registration (${child.signalCode ?? child.exitCode ?? 'spawn'}): ${detail}`)
+    },
+    dispose() {
+      child.stderr?.off('data', onData)
+      child.off('error', onError)
+    }
+  }
+}
+
 export interface StopBackendChildDeps {
   /** Defaults to the real platform check; injectable for tests. */
   isWindows?: boolean
