@@ -3,7 +3,8 @@ import crypto from 'node:crypto'
 import { allowForegroundLocalDoudian, assertDoudianCapability, DoudianController, doudianScope, doudianWorkbookExtensions } from './doudian-host'
 import type { DoudianRequest } from './doudian-types'
 import { ShopBrowserProfiles, validShopBounds } from './shop-browser-profiles'
-import { clearShopBrowserStorage, createShopBrowserView } from './shop-browser-electron'
+import { clearShopBrowserStorage, createShopBrowserView, createShopExecutionPage, shopBrowserTargets } from './shop-browser-electron'
+import { createShopExecutionTransport } from './shop-browser-execution'
 import type { ShopBrowserRequest } from './shop-browser-types'
 import fs from 'node:fs'
 import http from 'node:http'
@@ -13662,12 +13663,8 @@ app.on('before-quit', () => {
   for (const entry of shopBrowserControllers.values()) entry.controller.invalidate()
   shopBrowserControllers.clear()
 })
-ipcMain.handle('hermes:enterprise:shop-browser', async (event, payload: ShopBrowserRequest) => {
-  if (!isEnterpriseUpdateSender(event)) return { ok: false, error: 'SHOP_PROFILE_FORBIDDEN' }
-  if (payload?.bounds !== undefined && !validShopBounds(payload.bounds)) return { ok: false, error: 'SHOP_PROFILE_INVALID_REQUEST' }
-  const activeSession = enterpriseSessions.resolve(event.sender.id, payload?.sessionId)
-  const parent = BrowserWindow.fromWebContents(event.sender)
-  if (!activeSession || !parent) return { ok: false, error: 'SHOP_PROFILE_OWNER_CHANGED' }
+function shopBrowserController(event: Electron.IpcMainInvokeEvent,
+  activeSession: NonNullable<ReturnType<typeof enterpriseSessions.resolve>>, parent: BrowserWindow) {
   let entry = shopBrowserControllers.get(event.sender.id)
   if (entry && entry.sessionId !== activeSession.sessionId) {
     entry.controller.invalidate(); shopBrowserControllers.delete(event.sender.id); entry = undefined
@@ -13692,14 +13689,25 @@ ipcMain.handle('hermes:enterprise:shop-browser', async (event, payload: ShopBrow
         return { origin: new URL(active.baseUrl).origin, tenantId: identity.tenant_id!, principalId: identity.principal_id! }
       },
       createView: (storage, target, bounds) => createShopBrowserView(parent, storage, target, bounds),
+      createExecution: (storage, target) => createShopExecutionTransport(shopBrowserTargets[target],
+        url => createShopExecutionPage(storage, url), current),
       clearStorage: clearShopBrowserStorage
     })
     entry = { sessionId: activeSession.sessionId, controller, current }
     shopBrowserControllers.set(event.sender.id, entry)
   }
+  return entry.controller
+}
+ipcMain.handle('hermes:enterprise:shop-browser', async (event, payload: ShopBrowserRequest) => {
+  if (!isEnterpriseUpdateSender(event)) return { ok: false, error: 'SHOP_PROFILE_FORBIDDEN' }
+  if (payload?.bounds !== undefined && !validShopBounds(payload.bounds)) return { ok: false, error: 'SHOP_PROFILE_INVALID_REQUEST' }
+  const activeSession = enterpriseSessions.resolve(event.sender.id, payload?.sessionId)
+  const parent = BrowserWindow.fromWebContents(event.sender)
+  if (!activeSession || !parent) return { ok: false, error: 'SHOP_PROFILE_OWNER_CHANGED' }
+  const controller = shopBrowserController(event, activeSession, parent)
   const zoom = event.sender.getZoomFactor()
   const request = payload?.bounds ? { ...payload, bounds: Object.fromEntries(Object.entries(payload.bounds).map(([key, value]) => [key, Math.round(value * zoom)])) as unknown as ShopBrowserRequest['bounds'] } : payload
-  return entry.controller.operate(request)
+  return controller.operate(request)
 })
 
 const doudianControllers = new Map<number, { sessionId: string; controller: DoudianController; current(): boolean }>()
@@ -13726,6 +13734,8 @@ ipcMain.handle('hermes:enterprise:doudian', async (event, payload: DoudianReques
   }
   if (!entry) {
     const current = () => isEnterpriseUpdateSender(event) && enterpriseSessions.resolve(event.sender.id, session.sessionId) === session
+    const parent = BrowserWindow.fromWebContents(event.sender)
+    if (!parent) return { ok: false, error: 'DOUDIAN_FORBIDDEN' }
     const controller = new DoudianController({
       platform: process.platform,
       localVerification: enterpriseOriginSelection.local,
@@ -13748,7 +13758,13 @@ ipcMain.handle('hermes:enterprise:doudian', async (event, payload: DoudianReques
           filters: [{ name: 'Excel / WPS', extensions: doudianWorkbookExtensions }]
         })
         return selection.canceled ? null : selection.filePaths[0] ?? null
-      }
+      },
+      async listBrowserProfiles() {
+        const result = await shopBrowserController(event, session, parent).operate({ action: 'list', sessionId: session.sessionId })
+        if (!result.ok) throw new Error(result.error)
+        return result.profiles ?? []
+      },
+      connectBrowser: (profileId, target) => shopBrowserController(event, session, parent).acquireExecution(profileId, target)
     })
     entry = { sessionId: session.sessionId, controller, current }
     doudianControllers.set(event.sender.id, entry)

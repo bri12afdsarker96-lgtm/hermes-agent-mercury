@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { zh } from '@/i18n/zh'
 
-import type { DoudianReply, DoudianRequest, DoudianTask } from '../../electron/doudian-types'
+import type { DoudianReply, DoudianRequest, DoudianShop, DoudianTask } from '../../electron/doudian-types'
 
 import { DoudianWorkbench } from './doudian-workbench'
 import { ReviewCapturePage } from './review-capture-page'
@@ -11,7 +11,17 @@ import type { EnterpriseClientRuntime } from './runtime'
 
 vi.mock('@/i18n/context', () => ({ useI18n: () => ({ t: zh }) }))
 
-function setup(reviewOptions?: number) {
+const legacyShop: DoudianShop = { id: 'a'.repeat(32), name: '模拟店铺', platformId: '123', status: 'Valid' }
+
+const profileShop: DoudianShop = {
+  id: 'e641158c-bb4a-4a9c-98e1-faf88f0cf965',
+  browserProfileId: 'e641158c-bb4a-4a9c-98e1-faf88f0cf965',
+  name: '已登录店铺',
+  platformId: '1234567890123456789',
+  status: 'verified'
+}
+
+function setup(reviewOptions?: number, shops: DoudianShop[] = [legacyShop], reviewPage = false) {
   let task: DoudianTask = { taskId: null, state: 'idle', saved: 0, summary: '', error: '', messages: [] }
 
   const send = vi.fn(async (request: Omit<DoudianRequest, 'sessionId'>): Promise<DoudianReply> => {
@@ -23,7 +33,7 @@ function setup(reviewOptions?: number) {
     }
 
     if (request.action === 'shops') {
-      return { ok: true, shops: [{ id: 'a'.repeat(32), name: '模拟店铺', platformId: '123', status: 'Valid' }] }
+      return { ok: true, shops }
     }
 
     if (request.action === 'chooseWorkbook') {
@@ -52,7 +62,12 @@ function setup(reviewOptions?: number) {
 
   const runtime = { doudian: send } as unknown as EnterpriseClientRuntime
 
-  return { send, runtime, setReviewOptions: (value: number | undefined) => { reviewOptions = value }, view: render(<DoudianWorkbench runtime={runtime} />) }
+  return {
+    send,
+    runtime,
+    setReviewOptions: (value: number | undefined) => { reviewOptions = value },
+    view: render(reviewPage ? <ReviewCapturePage runtime={runtime} /> : <DoudianWorkbench runtime={runtime} />)
+  }
 }
 
 describe('Doudian workbench (offline fixtures)', () => {
@@ -65,10 +80,13 @@ describe('Doudian workbench (offline fixtures)', () => {
   })
   it('shows the integrated screenshot page without an activation-code form or request', async () => {
     const send = vi.fn(async (request: Omit<DoudianRequest, 'sessionId'>): Promise<DoudianReply> => {
-      if (request.action === 'capabilities') return { ok: true, capabilities: { protocol: 1, version: '1.0.54', authorized: true, chrome: true, spreadsheet: true, authorizationMode: 'enterprise-session-v1' } }
-      if (request.action === 'shops') return { ok: true, shops: [] }
+      if (request.action === 'capabilities') {return { ok: true, capabilities: { protocol: 1, version: '1.0.54', authorized: true, chrome: true, spreadsheet: true, authorizationMode: 'enterprise-session-v1' } }}
+
+      if (request.action === 'shops') {return { ok: true, shops: [] }}
+
       return { ok: true, task: { taskId: null, state: 'idle', saved: 0, summary: '', error: '', messages: [] } }
     })
+
     render(<ReviewCapturePage runtime={{ doudian: send } as unknown as EnterpriseClientRuntime} />)
     await screen.findByText('请选择店铺')
     expect(screen.queryByText(/激活码/)).toBeNull()
@@ -85,6 +103,51 @@ describe('Doudian workbench (offline fixtures)', () => {
     await screen.findByText('测试副本.xlsx')
     fireEvent.click(screen.getByText('检查待回填表格'))
     await waitFor(() => expect(send).toHaveBeenCalledWith({ action: 'prepare', shopId: 'a'.repeat(32), workbookId: 'b'.repeat(32), startRow: '7', maxRows: '13', concurrency: '4' }))
+  })
+  it.each([undefined, 1])('binds the selected signed-in profile with review options capability %s', async reviewOptions => {
+    const { send } = setup(reviewOptions, [legacyShop, profileShop], true)
+    await screen.findByRole('option', { name: `${profileShop.name} (${profileShop.platformId})` })
+    expect(screen.getByTestId('review-capture-page')).toBeTruthy()
+    expect(screen.getByRole('option', { name: '模拟店铺 (123)' })).toBeTruthy()
+    fireEvent.change(screen.getByRole('combobox', { name: '店铺' }), { target: { value: profileShop.id } })
+    fireEvent.click(screen.getByText('选择工作簿副本'))
+    await screen.findByText('测试副本.xlsx')
+    fireEvent.click(screen.getByText('检查待回填表格'))
+    await waitFor(() => expect(send).toHaveBeenCalledWith({
+      action: 'prepare',
+      shopId: profileShop.id,
+      browserProfileId: profileShop.browserProfileId,
+      workbookId: 'b'.repeat(32),
+      ...(reviewOptions === 1 ? { startRow: '2', maxRows: '0', concurrency: '1' } : {})
+    }))
+    expect((screen.getByRole('combobox', { name: '店铺' }) as HTMLSelectElement).disabled).toBe(true)
+    expect(send.mock.calls.some(([request]) => ['start', 'openReview', 'openFeige'].includes(request.action))).toBe(false)
+  })
+  it('requires a fresh shop selection after switching runtimes even when the profile id is unchanged', async () => {
+    const { view } = setup(1, [profileShop])
+    await screen.findByRole('option', { name: `${profileShop.name} (${profileShop.platformId})` })
+    fireEvent.change(screen.getByRole('combobox', { name: '店铺' }), { target: { value: profileShop.id } })
+    let finish!: (reply: DoudianReply) => void
+
+    const send = vi.fn(async (request: Omit<DoudianRequest, 'sessionId'>): Promise<DoudianReply> => {
+      if (request.action === 'capabilities') {
+        return { ok: true, capabilities: { protocol: 1, version: '1', authorized: true, chrome: true, spreadsheet: true } }
+      }
+
+      if (request.action === 'shops') {
+        return new Promise(resolve => { finish = resolve })
+      }
+
+      return { ok: true }
+    })
+
+    view.rerender(<DoudianWorkbench runtime={{ doudian: send } as unknown as EnterpriseClientRuntime} />)
+    expect(screen.queryByRole('option', { name: `${profileShop.name} (${profileShop.platformId})` })).toBeNull()
+    await waitFor(() => expect(finish).toBeTypeOf('function'))
+    await act(async () => { finish({ ok: true, shops: [profileShop] }) })
+    expect((screen.getByRole('combobox', { name: '店铺' }) as HTMLSelectElement).value).toBe('')
+    expect((screen.getByText('检查待回填表格').closest('button') as HTMLButtonElement).disabled).toBe(true)
+    expect(send.mock.calls.some(([request]) => request.action === 'prepare')).toBe(false)
   })
   it('shows old host limitations and preserves the old no-options request', async () => {
     const { send } = setup()

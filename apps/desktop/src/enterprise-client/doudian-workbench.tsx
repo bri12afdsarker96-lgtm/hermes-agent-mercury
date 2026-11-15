@@ -10,8 +10,8 @@ import { FolderOpen, LogIn, Play, RefreshCw, Square } from '@/lib/icons'
 import type { DoudianReply, DoudianRequest, DoudianShop, DoudianTask } from '../../electron/doudian-types'
 
 import { useDoudianEntryCopy } from './doudian-entry-copy'
-import { DoudianShopManagement } from './doudian-shop-management'
 import { authorizationErrors, DoudianEntryStatus } from './doudian-entry-state'
+import { DoudianShopManagement } from './doudian-shop-management'
 import type { EnterpriseClientRuntime } from './runtime'
 
 interface Props {
@@ -40,8 +40,10 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
   const lifecycle = useMemo(() => ({ runtime, alive: true, inFlight: false }), [runtime])
   const [owner, setOwner] = useState(runtime)
   const service = runtime.doudian
+  const selectedShop = shops.find(shop => shop.id === shopId)
   const locked = managingShops || busy || active(task) || task?.state === 'awaiting_confirmation' || unknown
   const optionsSupported = capabilities?.reviewOptions === 1
+
   const validRange = /^\d+$/.test(startRow) && Number(startRow) >= 1 && Number(startRow) <= 1000000 &&
     /^\d+$/.test(maxRows) && Number(maxRows) <= 1000000
 
@@ -312,9 +314,12 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
             void action(async () => {
               if (!optionsSupported && optionsChanged) {
                 setError('REVIEW_OPTIONS_UNSUPPORTED')
+
                 return
               }
+
               await call({ action: 'prepare', shopId, workbookId: workbook!.id,
+                ...(selectedShop?.browserProfileId ? { browserProfileId: selectedShop.browserProfileId } : {}),
                 ...(optionsSupported ? { startRow, maxRows, concurrency } : {}) })
             })
           }

@@ -22,6 +22,7 @@ const zh = {
   pending: '正在处理',
   failed: '操作失败，请重试',
   profile: '登录档案',
+  selectProfile: '请选择登录档案',
   browser: '店铺登录页面'
 }
 
@@ -49,6 +50,7 @@ export const shopBrowserCopy: Record<Locale, Record<keyof typeof zh, string>> = 
     pending: '處理中',
     failed: '操作失敗，請重試',
     profile: '登入檔案',
+    selectProfile: '請選擇登入檔案',
     browser: '店鋪登入頁面'
   },
   en: {
@@ -73,6 +75,7 @@ export const shopBrowserCopy: Record<Locale, Record<keyof typeof zh, string>> = 
     pending: 'Processing',
     failed: 'Operation failed. Try again.',
     profile: 'Sign-in profile',
+    selectProfile: 'Select a sign-in profile',
     browser: 'Shop sign-in page'
   },
   ja: {
@@ -97,6 +100,7 @@ export const shopBrowserCopy: Record<Locale, Record<keyof typeof zh, string>> = 
     pending: '処理中',
     failed: '操作に失敗しました。再試行してください。',
     profile: 'ログインプロファイル',
+    selectProfile: 'ログインプロファイルを選択',
     browser: '店舗ログイン画面'
   },
   ar: {
@@ -121,6 +125,7 @@ export const shopBrowserCopy: Record<Locale, Record<keyof typeof zh, string>> = 
     pending: 'جارٍ التنفيذ',
     failed: 'فشلت العملية. أعد المحاولة.',
     profile: 'ملف الدخول',
+    selectProfile: 'اختر ملف دخول',
     browser: 'صفحة دخول المتجر'
   }
 }

@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 
 import type { ShopBrowserBounds, ShopBrowserProfile, ShopBrowserReply, ShopBrowserRequest } from './shop-browser-types'
+import type { BoundShopExecution, ShopExecutionTransport } from './shop-browser-execution'
 
 export interface ShopBrowserAuthority {
   origin: string
@@ -24,6 +25,7 @@ export interface ShopBrowserDependencies {
   isCurrent(): boolean
   createView(storagePath: string, target: 'merchant' | 'feige', bounds: ShopBrowserBounds): Promise<ShopBrowserView>
   clearStorage(storagePath: string): Promise<void>
+  createExecution?(storagePath: string, target: 'merchant' | 'feige'): Promise<ShopExecutionTransport>
 }
 
 const uuid = (value: unknown): value is string =>
@@ -67,6 +69,7 @@ export class ShopBrowserProfiles {
   private scope?: ShopBrowserAuthority
   private invalidated = false
   private opened?: { id: string; view: ShopBrowserView }
+  private executions = new Set<BoundShopExecution>()
 
   constructor(private deps: ShopBrowserDependencies) {}
 
@@ -158,15 +161,58 @@ export class ShopBrowserProfiles {
     this.invalidated = true
     // Detaching is immediate even when an identify request is still in flight.
     void this.closeView().catch(() => {})
+    for (const execution of this.executions) void execution.close().catch(() => {})
   }
 
   async revalidate() {
-    if (!this.opened) return
+    if (!this.opened && this.executions.size === 0) return
     try {
       await this.authority()
     } catch {
       await this.closeView()
+      await Promise.all([...this.executions].map(execution => execution.close()))
     }
+  }
+
+  acquireExecution(profileId: string, target: 'merchant' | 'feige'): Promise<BoundShopExecution> {
+    const operation = this.tail.then(async () => {
+      if (!uuid(profileId) || !this.deps.createExecution) fail('SHOP_PROFILE_INVALID_REQUEST')
+      const scope = await this.authority()
+      const profile = (await this.read(scope)).find(item => item.id === profileId)
+      if (!profile || profile.loginState !== 'verified' || !profile.shopId || !profile.shopName)
+        fail('SHOP_PROFILE_UNVERIFIED')
+      if ([...this.executions].some(item => item.profileId === profileId)) fail('SHOP_PROFILE_IN_USE')
+      const transport = await this.deps.createExecution(this.storage(scope, profile), target)
+      let released = false
+      const execution: BoundShopExecution = {
+        connectionId: randomUUID().replaceAll('-', ''), profileId,
+        shopId: profile.shopId, shopName: profile.shopName,
+        identify: () => transport.identify(),
+        async command(targetId, method, params) {
+          if (released) fail('SHOP_PROFILE_OWNER_CHANGED')
+          return transport.command(targetId, method, params)
+        },
+        validate: async () => {
+          if (released) fail('SHOP_PROFILE_OWNER_CHANGED')
+          await this.authority()
+          const identity = await transport.identify()
+          await this.authority()
+          if (!identity || identity.shopId !== profile.shopId || identity.shopName !== profile.shopName)
+            fail('SHOP_PROFILE_IDENTITY_CHANGED')
+        },
+        close: async () => {
+          if (released) return
+          released = true
+          this.executions.delete(execution)
+          await transport.close()
+        }
+      }
+      this.executions.add(execution)
+      try { await execution.validate(); return execution }
+      catch (error) { await execution.close(); throw error }
+    })
+    this.tail = operation.catch(() => {})
+    return operation
   }
 
   operate(request: ShopBrowserRequest): Promise<ShopBrowserReply> {
@@ -174,7 +220,7 @@ export class ShopBrowserProfiles {
       .then(() => this.perform(request))
       .catch(async error => {
         const code = error instanceof Error ? error.message : 'SHOP_PROFILE_FAILED'
-        if (!['SHOP_PROFILE_INVALID_REQUEST', 'SHOP_PROFILE_NOT_FOUND', 'SHOP_PROFILE_NOT_OPEN'].includes(code))
+        if (!['SHOP_PROFILE_INVALID_REQUEST', 'SHOP_PROFILE_NOT_FOUND', 'SHOP_PROFILE_NOT_OPEN', 'SHOP_PROFILE_IN_USE'].includes(code))
           await this.closeView().catch(() => {})
         return { ok: false, error: code }
       })
@@ -266,6 +312,7 @@ export class ShopBrowserProfiles {
       await this.save(scope, profiles)
     }
     if (request.action === 'relogin' || request.action === 'delete') {
+      if ([...this.executions].some(item => item.profileId === profile.id)) fail('SHOP_PROFILE_IN_USE')
       if (this.opened?.id === profile.id) {
         await this.closeView()
       }

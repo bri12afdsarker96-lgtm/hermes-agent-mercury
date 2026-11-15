@@ -5,6 +5,15 @@ import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 
 import type { DoudianReply, DoudianRequest, DoudianTask } from './doudian-types'
+import type { BoundShopExecution } from './shop-browser-execution'
+import type { ShopBrowserProfile } from './shop-browser-types'
+
+export interface DoudianBrowserCommand {
+  connectionId: string
+  targetId: string
+  method: string
+  params: Record<string, unknown>
+}
 
 const id = () => randomBytes(16).toString('hex')
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
@@ -153,7 +162,9 @@ export class DoudianHost {
   private buffer = ''
   private decoder = new StringDecoder('utf8')
   private closed = false
-  constructor(private readonly executable: string, spawnHost: typeof spawn = spawn, private readonly spawnForeground: typeof spawn = spawn) {
+  private browserPending = new Set<string>()
+  constructor(private readonly executable: string, spawnHost: typeof spawn = spawn, private readonly spawnForeground: typeof spawn = spawn,
+    private readonly browserCommand?: (command: DoudianBrowserCommand) => Promise<unknown>) {
     this.child = spawnHost(executable, ['--hermes-review-host'], {
       shell: false,
       // The host creates the original WinForms windows in this process.
@@ -196,6 +207,19 @@ export class DoudianHost {
           return
         }
 
+        if (message.event === 'browserCommand') {
+          if (!this.browserCommand || !validId(message.id) || !validId(message.connectionId) ||
+              typeof message.targetId !== 'string' || !/^(root|[a-f0-9]{32})$/.test(message.targetId) ||
+              typeof message.method !== 'string' || !message.params || typeof message.params !== 'object' ||
+              Array.isArray(message.params) || this.browserPending.has(message.id) || this.browserPending.size >= 16) {
+            this.protocolFailure()
+            return
+          }
+          this.browserPending.add(message.id)
+          void this.replyBrowserCommand(message.id, message)
+          continue
+        }
+
         if (!validId(message.id) || typeof message.ok !== 'boolean' ||
             (message.ok === false && typeof message.error !== 'string')) {
           this.protocolFailure()
@@ -224,6 +248,14 @@ export class DoudianHost {
         return
       }
     }
+  }
+  private async replyBrowserCommand(commandId: string, command: DoudianBrowserCommand) {
+    let payload: { ok: boolean; result?: unknown; error?: string }
+    try { payload = { ok: true, result: await this.browserCommand!(command) } }
+    catch (error) { payload = { ok: false, error: error instanceof Error ? error.message.slice(0, 200) || 'SHOP_BROWSER_FAILED' : 'SHOP_BROWSER_FAILED' } }
+    this.browserPending.delete(commandId)
+    if (!this.closed) this.child.stdin.write(JSON.stringify({ id: id(), method: 'browserResult',
+      params: { commandId, payload: JSON.stringify(payload) } }) + '\n')
   }
   private protocolFailure() {
     this.fail('DOUDIAN_PROTOCOL_ERROR')
@@ -303,6 +335,8 @@ export interface DoudianDependencies {
   chooseWorkbook(): Promise<string | null>
   createHost?(executable: string): Pick<DoudianHost, 'request' | 'close'>
   verify?(root: string): Promise<string>
+  listBrowserProfiles?(): Promise<ShopBrowserProfile[]>
+  connectBrowser?(profileId: string, target: 'merchant' | 'feige'): Promise<BoundShopExecution>
   /** @deprecated Ignored; payment controls use the host protocol. */
   acquirePaymentShortcut?(stop: () => void): () => void
 }
@@ -317,6 +351,7 @@ export class DoudianController {
   private taskKind?: DoudianTask['kind']
   private taskState?: DoudianTask['state']
   private paymentTransport?: DoudianRequest['transport']
+  private browserExecution?: BoundShopExecution
   private shopOperation?: { taskId: string; shopId: string; kind: 'shop-login' | 'shop-check' }
   constructor(private deps: DoudianDependencies) {}
   close() {
@@ -324,6 +359,18 @@ export class DoudianController {
     this.host?.close()
     this.files.clear()
     this.shopOperation = undefined
+    this.releaseBrowser()
+  }
+  private releaseBrowser() {
+    const execution = this.browserExecution
+    this.browserExecution = undefined
+    if (execution) void execution.close().catch(() => {})
+  }
+  private async browserCommand(command: DoudianBrowserCommand) {
+    this.current()
+    const execution = this.browserExecution
+    if (!execution || command.connectionId !== execution.connectionId) throw new Error('SHOP_BROWSER_CONNECTION_NOT_FOUND')
+    return execution.command(command.targetId, command.method, command.params)
   }
   private current() {
     if (this.lost || !this.deps.isCurrent()) {
@@ -333,6 +380,7 @@ export class DoudianController {
     }
   }
   async operate(request: DoudianRequest): Promise<DoudianReply> {
+    let acquiredExecution: BoundShopExecution | undefined
     try {
       // Foreground developer testing is explicit; packaged local builds remain blocked.
       if (this.deps.localVerification && !this.deps.localForeground) return bad('DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE')
@@ -375,14 +423,16 @@ export class DoudianController {
 
       const allowed = Object.hasOwn(fields, request?.action ?? '') ? fields[request.action] : undefined
       const reviewOptions = ['startRow', 'maxRows', 'concurrency'] as const
-      const optional = request.action === 'prepare' ? reviewOptions : request.action === 'preparePayment' ? ['transport'] as const : []
+      const optional = request.action === 'prepare' ? [...reviewOptions, 'browserProfileId'] as const :
+        request.action === 'preparePayment' ? ['transport', 'browserProfileId'] as const : []
 
       if (
         !allowed ||
         Object.keys(request).some(key => !['sessionId', 'action', ...allowed, ...optional].includes(key)) ||
         allowed.some(key => typeof request[key as keyof DoudianRequest] !== 'string') ||
         optional.some(key => Object.hasOwn(request, key) && typeof request[key] !== 'string') ||
-        ['shopId', 'workbookId', 'taskId', 'confirmation'].some(key => allowed.includes(key) && !validId(request[key as keyof DoudianRequest])) ||
+        ['shopId', 'workbookId', 'taskId', 'confirmation'].some(key => allowed.includes(key) &&
+          !(key === 'shopId' && request.browserProfileId === request.shopId) && !validId(request[key as keyof DoudianRequest])) ||
         (request.action === 'shopManagementRename' && (request.alias!.length > 80 || /[\x00-\x1f\x7f]/.test(request.alias!))) ||
         (request.action === 'shopManagementPin' && !['true', 'false'].includes(request.pinned!)) ||
         (request.action === 'shopManagementMove' && !['up', 'down'].includes(request.direction!)) ||
@@ -392,6 +442,9 @@ export class DoudianController {
       }
       if (request.action === 'preparePayment' && request.transport !== undefined &&
           request.transport !== 'desktop' && request.transport !== 'cdp') return bad('INVALID_TRANSPORT')
+      if (request.browserProfileId !== undefined && (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(request.browserProfileId) ||
+          (request.action === 'preparePayment' && request.transport !== 'cdp') ||
+          (request.action === 'prepare' && request.shopId !== request.browserProfileId))) return bad('SHOP_PROFILE_INVALID_REQUEST')
 
       // Cancellation remains available to the same fenced session during an enterprise network outage.
       if (request.action !== 'stop' && request.action !== 'shopOperationCancel') {
@@ -435,7 +488,8 @@ export class DoudianController {
             this.current()
           }
 
-          this.host = this.deps.createHost?.(executable) ?? new DoudianHost(executable)
+          this.host = this.deps.createHost?.(executable) ?? new DoudianHost(executable, spawn, spawn,
+            command => this.browserCommand(command))
 
           const init = (await this.host.request('initialize', { scope: this.owner! })) as {
             protocol?: number
@@ -471,6 +525,7 @@ export class DoudianController {
           const cdpPayment = request.action === 'preparePayment' ? request.transport === 'cdp' :
             ['startPayment', 'resumePayment'].includes(request.action) && this.paymentTransport === 'cdp'
           if (cdpPayment && checkedCapabilities.paymentCdp !== 1) return bad('PAYMENT_CDP_UNSUPPORTED')
+          if (request.browserProfileId && checkedCapabilities.embeddedBrowser !== 1) return bad('SHOP_BROWSER_MODULE_INCOMPATIBLE')
         }
 
         if (request.action === 'openPayment') {
@@ -590,6 +645,19 @@ export class DoudianController {
           args = { taskId: request.taskId! }
         }
 
+        if (request.browserProfileId) {
+          if (!this.deps.connectBrowser) return bad('SHOP_BROWSER_MODULE_INCOMPATIBLE')
+          acquiredExecution = await this.deps.connectBrowser(request.browserProfileId, request.action === 'prepare' ? 'merchant' : 'feige')
+          this.current()
+          this.browserExecution = acquiredExecution
+          args.browserConnectionId = acquiredExecution.connectionId
+          args.platformShopId = acquiredExecution.shopId
+          args.platformShopName = acquiredExecution.shopName
+        }
+        if (['start', 'startPayment', 'resumePayment'].includes(request.action) && this.browserExecution)
+          await this.browserExecution.validate()
+        this.current()
+
         const result = request.action === 'startPayment' || request.action === 'resumePayment'
           ? await this.host.request(request.action, args, { before: () => this.current(), foreground: this.paymentTransport !== 'cdp' })
           : await this.host.request(request.action, args)
@@ -604,7 +672,13 @@ export class DoudianController {
         }
 
         if (request.action === 'shops') {
-          return { ok: true, shops: result as DoudianReply['shops'] }
+          if (!Array.isArray(result)) return bad('DOUDIAN_PROTOCOL_ERROR')
+          const profiles = await this.deps.listBrowserProfiles?.() ?? []
+          this.current()
+          const embedded = profiles.filter(profile => profile.loginState === 'verified' && profile.shopId && profile.shopName)
+            .map(profile => ({ id: profile.id, name: profile.displayName, platformId: profile.shopId!,
+              status: 'verified', browserProfileId: profile.id }))
+          return { ok: true, shops: [...embedded, ...result.filter(shop => !embedded.some(profile => profile.id === shop.id))] }
         }
 
         if (request.action === 'manageShops') {
@@ -703,6 +777,8 @@ export class DoudianController {
         this.taskId = task.taskId ?? undefined
         this.taskKind = task.kind
         this.taskState = task.state
+        acquiredExecution = undefined
+        if (['completed', 'stopped', 'failed', 'paused_balance', 'paused_review'].includes(task.state)) this.releaseBrowser()
         if (request.action === 'preparePayment') this.paymentTransport = request.transport ?? 'desktop'
         else if (task.kind !== 'payment') this.paymentTransport = undefined
 
@@ -711,6 +787,10 @@ export class DoudianController {
         this.exclusive = false
       }
     } catch (error) {
+      if (acquiredExecution) {
+        if (this.browserExecution === acquiredExecution) this.releaseBrowser()
+        else void acquiredExecution.close().catch(() => {})
+      }
       const rawCode = error instanceof Error ? error.message : 'DOUDIAN_FAILED'
       const code = rawCode
 

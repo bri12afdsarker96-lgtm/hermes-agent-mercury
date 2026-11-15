@@ -31,7 +31,10 @@ async function fixture(existingRoot?: string, initialScope?: ShopBrowserAuthorit
     if (!allowed) throw new Error('REVOKED')
     return scope
   })
-  const controller = new ShopBrowserProfiles({ root, createView, clearStorage, authorize, isCurrent: () => current })
+  const execution = { identify: vi.fn(async () => ({ shopId: '10001', shopName: 'Shop A' })),
+    command: vi.fn(async () => ({})), close: vi.fn(async () => {}) }
+  const createExecution = vi.fn(async (_storage: string, _target: string) => execution)
+  const controller = new ShopBrowserProfiles({ root, createView, clearStorage, authorize, isCurrent: () => current, createExecution })
   const call = (action: ShopBrowserRequest['action'], rest: Partial<ShopBrowserRequest> = {}) =>
     controller.operate({ sessionId: 'test', action, ...rest })
   const create = async () => (await call('create')).profile!
@@ -47,6 +50,8 @@ async function fixture(existingRoot?: string, initialScope?: ShopBrowserAuthorit
     close,
     clearStorage,
     authorize,
+    createExecution,
+    execution,
     setScope: (value: ShopBrowserAuthority) => {
       scope = value
     },
@@ -60,6 +65,40 @@ async function fixture(existingRoot?: string, initialScope?: ShopBrowserAuthorit
 }
 
 describe('persistent shop browser profiles', () => {
+  it('binds execution to the saved verified profile and keeps it while the visible page closes', async () => {
+    const f = await fixture()
+    const profile = await f.create()
+    await expect(f.controller.acquireExecution(profile.id, 'merchant')).rejects.toThrow('UNVERIFIED')
+    expect(f.createExecution).not.toHaveBeenCalled()
+    await f.open(profile.id)
+    await f.call('identify', { profileId: profile.id })
+    const execution = await f.controller.acquireExecution(profile.id, 'merchant')
+    expect(f.createExecution).toHaveBeenCalledWith(f.createView.mock.calls[0][0], 'merchant')
+    expect(execution).toMatchObject({ profileId: profile.id, shopId: '10001', shopName: 'Shop A' })
+    await f.call('close')
+    await execution.command('root', 'Runtime.evaluate', {})
+    expect(f.execution.close).not.toHaveBeenCalled()
+    expect((await f.call('delete', { profileId: profile.id })).error).toBe('SHOP_PROFILE_IN_USE')
+    expect((await f.call('list')).profiles).toHaveLength(1)
+    await execution.close()
+    expect((await f.call('delete', { profileId: profile.id })).ok).toBe(true)
+  })
+
+  it('closes execution on revoked authority and rejects a changed platform shop', async () => {
+    const f = await fixture()
+    const profile = await f.create()
+    await f.open(profile.id)
+    await f.call('identify', { profileId: profile.id })
+    f.execution.identify.mockResolvedValueOnce({ shopId: '20002', shopName: 'Other' })
+    await expect(f.controller.acquireExecution(profile.id, 'feige')).rejects.toThrow('IDENTITY_CHANGED')
+    expect(f.execution.close).toHaveBeenCalledTimes(1)
+    const execution = await f.controller.acquireExecution(profile.id, 'feige')
+    f.setAllowed(false)
+    await f.controller.revalidate()
+    await expect(execution.command('root', 'Runtime.evaluate', {})).rejects.toThrow('OWNER_CHANGED')
+    expect(f.execution.close).toHaveBeenCalledTimes(2)
+  })
+
   it('uses compact scope-bound storage paths and keeps legacy sessions until explicit relogin', async () => {
     const f = await fixture()
     const profile = await f.create()

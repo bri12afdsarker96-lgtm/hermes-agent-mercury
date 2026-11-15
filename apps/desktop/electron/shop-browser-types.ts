@@ -32,3 +32,11 @@ export interface ShopBrowserReply {
   profile?: ShopBrowserProfile
   openProfileId?: string | null
 }
+
+export function isShopBrowserUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw)
+    return url.protocol === 'https:' && !url.username && !url.password && !url.port &&
+      ['jinritemai.com', 'douyin.com'].some(host => url.hostname === host || url.hostname.endsWith(`.${host}`))
+  } catch { return false }
+}

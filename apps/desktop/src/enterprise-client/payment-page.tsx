@@ -3,8 +3,9 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useI18n } from '@/i18n/context'
+import { shopBrowserCopy } from '@/i18n/shop-browser'
 
-import type { DoudianReply, DoudianRequest, DoudianTask } from '../../electron/doudian-types'
+import type { DoudianReply, DoudianRequest, DoudianShop, DoudianTask } from '../../electron/doudian-types'
 
 import type { DoudianPageProps } from './doudian-entry-state'
 
@@ -144,6 +145,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
   const language = locale === 'zh' || locale === 'zh-hant' ? 'zh' : 'en'
   const t = labels[language]
   const states = taskStateLabels[language]
+  const browserCopy = shopBrowserCopy[locale]
   const [workbook, setWorkbook] = useState<{ id: string; name: string }>()
   const [mode, setMode] = useState<'standard' | 'new-order'>('standard')
   const [transport, setTransport] = useState<NonNullable<DoudianRequest['transport']>>('cdp')
@@ -154,6 +156,10 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
   const [capability, setCapability] = useState<Capability>('checking')
   const [paymentControls, setPaymentControls] = useState(false)
   const [paymentCdp, setPaymentCdp] = useState(false)
+  const [embeddedBrowser, setEmbeddedBrowser] = useState(false)
+  const [shops, setShops] = useState<DoudianShop[]>([])
+  const [browserProfileId, setBrowserProfileId] = useState('')
+  const [profilesLoading, setProfilesLoading] = useState(false)
   const [securityBlocked, setSecurityBlocked] = useState(false)
   const [sessionOwner, setSessionOwner] = useState(runtime)
   const [error, setError] = useState('')
@@ -168,6 +174,8 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
   const busy = pendingAction !== undefined
   const paymentAmount = amount
   const paymentMode = transport === 'cdp' ? 'standard' : mode
+  const profileCdp = current && embeddedBrowser && transport === 'cdp'
+  const selectedProfile = current ? shops.find(shop => shop.browserProfileId === browserProfileId) : undefined
 
   const active = !!displayedTask &&
     ['preparing', 'awaiting_confirmation', 'running', 'pausing', 'paused', 'stopping', 'unknown'].includes(displayedTask.state)
@@ -191,6 +199,10 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
     setCapability('checking')
     setPaymentControls(false)
     setPaymentCdp(false)
+    setEmbeddedBrowser(false)
+    setShops([])
+    setBrowserProfileId('')
+    setProfilesLoading(false)
     setTransport('cdp')
     setSecurityBlocked(false)
 
@@ -209,6 +221,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
           setCapability(paymentCapability(result))
           setPaymentControls(result.ok && result.capabilities?.paymentControls === 1)
           setPaymentCdp(result.ok && result.capabilities?.paymentCdp === 1)
+          setEmbeddedBrowser(result.ok && result.capabilities?.embeddedBrowser === 1)
           setSecurityBlocked(!result.ok && result.error === 'DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE')
         }
       })
@@ -223,6 +236,45 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
       revision.current++
     } // Invalidate any pending operation.
   }, [runtime])
+
+  useEffect(() => {
+    setShops([])
+    setBrowserProfileId('')
+    setProfilesLoading(false)
+
+    if (!runtime?.doudian || !current || !embeddedBrowser) {
+      return
+    }
+
+    let alive = true
+    setProfilesLoading(true)
+    void runtime.doudian({ action: 'shops' })
+      .then(result => {
+        if (!alive || runtimeRef.current !== runtime) {
+          return
+        }
+
+        if (result.ok) {
+          setShops((result.shops ?? []).filter(shop => !!shop.browserProfileId))
+        } else {
+          setError(result.error || 'DOUDIAN_FAILED')
+        }
+      })
+      .catch(() => {
+        if (alive && runtimeRef.current === runtime) {
+          setError('DOUDIAN_FAILED')
+        }
+      })
+      .finally(() => {
+        if (alive && runtimeRef.current === runtime) {
+          setProfilesLoading(false)
+        }
+      })
+
+    return () => {
+      alive = false
+    }
+  }, [runtime, current, embeddedBrowser])
 
   useEffect(() => {
     if (!runtime?.doudian || !current || (gate !== 'ready' && gate !== 'unverified')) {
@@ -275,7 +327,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
       flight.current ||
       (action === 'chooseWorkbook' && (active || (gate !== 'ready' && gate !== 'unverified'))) ||
       ((action === 'preparePayment' || action === 'startPayment' || action === 'resumePayment') && gate !== 'ready') ||
-      (action === 'preparePayment' && (!workbook || !paymentAmount.trim() || !startRow.trim() || !maxRows.trim() || active || (transport === 'cdp' && !paymentCdp))) ||
+      (action === 'preparePayment' && (!workbook || !paymentAmount.trim() || !startRow.trim() || !maxRows.trim() || active || (transport === 'cdp' && !paymentCdp) || (profileCdp && !selectedProfile))) ||
       (action === 'startPayment' &&
         (displayedTask?.kind !== 'payment' ||
           displayedTask.state !== 'awaiting_confirmation' ||
@@ -293,6 +345,8 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
     setError('')
 
     try {
+      let paymentBrowserProfileId: string | undefined
+
       if (action === 'preparePayment' || action === 'startPayment' || action === 'resumePayment') {
         const verification = await runtime.doudian({ action: 'capabilities' })
 
@@ -304,6 +358,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
         setCapability(verified)
         setPaymentControls(verification.ok && verification.capabilities?.paymentControls === 1)
         setPaymentCdp(verification.ok && verification.capabilities?.paymentCdp === 1)
+        setEmbeddedBrowser(verification.ok && verification.capabilities?.embeddedBrowser === 1)
         setSecurityBlocked(!verification.ok && verification.error === 'DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE')
 
         if (verified !== 'ready') {
@@ -317,10 +372,21 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
 
           return
         }
+
         if (action === 'preparePayment' && transport === 'cdp' && verification.capabilities?.paymentCdp !== 1) {
           setError(t[37])
 
           return
+        }
+
+        if (action === 'preparePayment' && transport === 'cdp' && verification.capabilities?.embeddedBrowser === 1) {
+          paymentBrowserProfileId = selectedProfile?.browserProfileId
+
+          if (!paymentBrowserProfileId) {
+            setError(browserCopy.selectProfile)
+
+            return
+          }
         }
       }
 
@@ -351,7 +417,8 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
       let request: Omit<DoudianRequest, 'sessionId'>
 
       if (action === 'preparePayment') {
-        request = { action, workbookId: workbook!.id, amount: paymentAmount, startRow, maxRows, mode: paymentMode, transport }
+        request = { action, workbookId: workbook!.id, amount: paymentAmount, startRow, maxRows, mode: paymentMode, transport,
+          ...(paymentBrowserProfileId ? { browserProfileId: paymentBrowserProfileId } : {}) }
       } else if (action === 'chooseWorkbook') {
         request = { action }
       } else {
@@ -426,6 +493,24 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
             <option value="desktop">{t[35]}</option>
           </select>
         </label>
+        {profileCdp && (
+          <label className="flex min-w-48 max-w-full flex-col gap-2">
+            {browserCopy.profile}
+            <select
+              className="max-w-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) p-2"
+              disabled={busy || !!active || profilesLoading || gate !== 'ready'}
+              onChange={event => setBrowserProfileId(event.target.value)}
+              value={selectedProfile?.browserProfileId ?? ''}
+            >
+              <option value="">{profilesLoading ? browserCopy.pending : shops.length ? browserCopy.selectProfile : browserCopy.empty}</option>
+              {shops.map(shop => (
+                <option key={shop.id} value={shop.browserProfileId}>
+                  {shop.name} ({shop.platformId})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label className="flex flex-col gap-2">
           {t[3]}
           <select
@@ -468,7 +553,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
       <div className="flex flex-wrap gap-2">
         <Button
           disabled={
-            busy || gate !== 'ready' || !!active || !workbook || !paymentAmount.trim() || !startRow.trim() || !maxRows.trim() || (transport === 'cdp' && !paymentCdp)
+            busy || gate !== 'ready' || !!active || !workbook || !paymentAmount.trim() || !startRow.trim() || !maxRows.trim() || (transport === 'cdp' && !paymentCdp) || (profileCdp && !selectedProfile)
           }
           onClick={() => void operate('preparePayment')}
         >

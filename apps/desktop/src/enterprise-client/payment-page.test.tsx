@@ -2,8 +2,10 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { I18nProvider } from '@/i18n/context'
+import { shopBrowserCopy } from '@/i18n/shop-browser'
+import type { Locale } from '@/i18n/types'
 
-import type { DoudianReply, DoudianRequest, DoudianTask } from '../../electron/doudian-types'
+import type { DoudianReply, DoudianRequest, DoudianShop, DoudianTask } from '../../electron/doudian-types'
 
 import { PaymentPage } from './payment-page'
 import type { EnterpriseClientRuntime } from './runtime'
@@ -18,21 +20,34 @@ const prepared: DoudianTask = {
   messages: []
 }
 
-const capability = (authorized = true, authorizationMode?: string): DoudianReply => ({
+const profileShop: DoudianShop = {
+  id: 'e641158c-bb4a-4a9c-98e1-faf88f0cf965',
+  browserProfileId: 'e641158c-bb4a-4a9c-98e1-faf88f0cf965',
+  name: '已登录店铺',
+  platformId: '1234567890123456789',
+  status: 'verified'
+}
+
+const legacyShop: DoudianShop = { id: 'a'.repeat(32), name: '旧 TD 店铺', platformId: '123', status: 'Valid' }
+
+const capability = (authorized = true, authorizationMode?: string, embeddedBrowser?: number): DoudianReply => ({
   ok: true,
-  capabilities: { protocol: 1, version: '1.0.54', authorized, chrome: true, spreadsheet: true, authorizationMode, paymentControls: 1, paymentCdp: 1 }
+  capabilities: { protocol: 1, version: '1.0.54', authorized, chrome: true, spreadsheet: true, authorizationMode, paymentControls: 1, paymentCdp: 1, embeddedBrowser }
 })
 
 function setup(
   initialCapability = capability(true, 'enterprise-session-v1'),
   initialTask?: DoudianTask,
-  locale: 'zh' | 'zh-hant' | 'en' = 'zh'
+  locale: Locale = 'zh',
+  shops: DoudianShop[] = []
 ) {
   let cap = initialCapability
   let task = initialTask
 
   const send = vi.fn(async (request: Omit<DoudianRequest, 'sessionId'>): Promise<DoudianReply> => {
     if (request.action === 'capabilities') {return cap}
+
+    if (request.action === 'shops') {return { ok: true, shops }}
 
     if (request.action === 'chooseWorkbook') {return { ok: true, workbook: { id: 'b'.repeat(32), name: '副本.xlsx' } }}
 
@@ -59,6 +74,7 @@ function setup(
 
   return {
     send,
+    runtime,
     view,
     setCapability: (next: DoudianReply) => {
       cap = next
@@ -122,6 +138,201 @@ describe('payment page offline', () => {
     expect(send.mock.calls.some(([request]) => ['preparePayment', 'startPayment', 'openPayment'].includes(request.action))).toBe(false)
   })
 
+  it.each(['0.01', '7.50', '+100,000.00'])('requires an explicit embedded profile and preserves the entered amount %s', async amount => {
+    const { send } = setup(capability(true, 'enterprise-session-v1', 1), undefined, 'zh', [legacyShop, profileShop])
+    await screen.findByRole('option', { name: `${profileShop.name} (${profileShop.platformId})` })
+    const profile = screen.getByRole('combobox', { name: shopBrowserCopy.zh.profile }) as HTMLSelectElement
+    expect(profile.value).toBe('')
+    expect(screen.queryByRole('option', { name: `${legacyShop.name} (${legacyShop.platformId})` })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '选择工作簿' }))
+    await screen.findByText('副本.xlsx')
+    expect((screen.getByLabelText('金额') as HTMLInputElement).value).toBe('')
+    fireEvent.change(screen.getByLabelText('金额'), { target: { value: amount } })
+    fireEvent.change(screen.getByLabelText('起始行'), { target: { value: '7' } })
+    fireEvent.change(screen.getByLabelText('最多行（0 表示不限）'), { target: { value: '13' } })
+    const prepare = screen.getByRole('button', { name: '检查并准备' }) as HTMLButtonElement
+    expect(prepare.disabled).toBe(true)
+    fireEvent.click(prepare)
+    expect(send.mock.calls.some(([request]) => request.action === 'preparePayment')).toBe(false)
+    fireEvent.change(profile, { target: { value: profileShop.browserProfileId } })
+    expect(prepare.disabled).toBe(false)
+    fireEvent.click(prepare)
+    await screen.findByText(prepared.summary)
+    expect(send).toHaveBeenCalledWith({
+      action: 'preparePayment', workbookId: 'b'.repeat(32), amount, startRow: '7', maxRows: '13',
+      mode: 'standard', transport: 'cdp', browserProfileId: profileShop.browserProfileId
+    })
+    expect(profile.disabled).toBe(true)
+    expect(send.mock.calls.some(([request]) => ['startPayment', 'openPayment', 'openFeige'].includes(request.action))).toBe(false)
+  })
+
+  it('keeps desktop preparation parameters intact after selecting an embedded profile', async () => {
+    const { send } = setup(capability(true, 'enterprise-session-v1', 1), undefined, 'zh', [profileShop])
+    await screen.findByRole('option', { name: `${profileShop.name} (${profileShop.platformId})` })
+    fireEvent.change(screen.getByLabelText(shopBrowserCopy.zh.profile), { target: { value: profileShop.browserProfileId } })
+    await chooseAndFill('+100,000.00', '2147483647', '2147483647', 'new-order')
+    expect(screen.queryByLabelText(shopBrowserCopy.zh.profile)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '检查并准备' }))
+    await screen.findByText(prepared.summary)
+    expect(send).toHaveBeenCalledWith({
+      action: 'preparePayment', workbookId: 'b'.repeat(32), amount: '+100,000.00',
+      startRow: '2147483647', maxRows: '2147483647', mode: 'new-order', transport: 'desktop'
+    })
+  })
+
+  it.each(['empty', 'failed', 'rejected'] as const)('blocks profile CDP preparation with an %s profile list and keeps desktop usable', async result => {
+    const fixture = setup(capability(true, 'enterprise-session-v1'), undefined, 'zh', [legacyShop])
+    await waitFor(() => expect((screen.getByRole('button', { name: '选择工作簿' }) as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(screen.getByRole('button', { name: '选择工作簿' }))
+    await screen.findByText('副本.xlsx')
+    fireEvent.change(screen.getByLabelText('金额'), { target: { value: '3.25' } })
+    const implementation = fixture.send.getMockImplementation()!
+    fixture.send.mockImplementation(async request => {
+      if (request.action === 'shops') {
+        if (result === 'rejected') { throw new Error('offline profile failure') }
+
+        return result === 'failed' ? { ok: false, error: 'DOUDIAN_FORBIDDEN' } : { ok: true, shops: [legacyShop] }
+      }
+
+      return implementation(request)
+    })
+    fixture.setCapability(capability(true, 'enterprise-session-v1', 1))
+    fireEvent.click(screen.getByRole('button', { name: '检查并准备' }))
+    await screen.findByRole('option', { name: shopBrowserCopy.zh.empty })
+    expect((screen.getByRole('button', { name: '检查并准备' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(fixture.send.mock.calls.some(([request]) => request.action === 'preparePayment')).toBe(false)
+    fireEvent.change(screen.getByLabelText('操作方式'), { target: { value: 'desktop' } })
+    fireEvent.click(screen.getByRole('button', { name: '检查并准备' }))
+    await screen.findByText(prepared.summary)
+    expect(fixture.send).toHaveBeenCalledWith({
+      action: 'preparePayment', workbookId: 'b'.repeat(32), amount: '3.25', startRow: '1', maxRows: '0',
+      mode: 'standard', transport: 'desktop'
+    })
+  })
+
+  it.each([undefined, 0, 2])('preserves the old CDP path with embedded browser capability %s', async embeddedBrowser => {
+    const { send } = setup(capability(true, 'enterprise-session-v1', embeddedBrowser), undefined, 'zh', [profileShop])
+    await waitFor(() => expect((screen.getByRole('button', { name: '选择工作簿' }) as HTMLButtonElement).disabled).toBe(false))
+    expect(screen.queryByLabelText(shopBrowserCopy.zh.profile)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '选择工作簿' }))
+    await screen.findByText('副本.xlsx')
+    fireEvent.change(screen.getByLabelText('金额'), { target: { value: '3.25' } })
+    fireEvent.click(screen.getByRole('button', { name: '检查并准备' }))
+    await screen.findByText(prepared.summary)
+    expect(send).toHaveBeenCalledWith({
+      action: 'preparePayment', workbookId: 'b'.repeat(32), amount: '3.25', startRow: '1', maxRows: '0',
+      mode: 'standard', transport: 'cdp'
+    })
+    expect(send.mock.calls.some(([request]) => request.action === 'shops')).toBe(false)
+  })
+
+  it('clears the selected profile and workbook on runtime changes and requires a new selection', async () => {
+    const fixture = setup(capability(true, 'enterprise-session-v1', 1), undefined, 'zh', [profileShop])
+    await screen.findByRole('option', { name: `${profileShop.name} (${profileShop.platformId})` })
+    fireEvent.change(screen.getByLabelText(shopBrowserCopy.zh.profile), { target: { value: profileShop.browserProfileId } })
+    fireEvent.click(screen.getByRole('button', { name: '选择工作簿' }))
+    await screen.findByText('副本.xlsx')
+    const pending = deferredReply()
+
+    const nextSend = vi.fn(async (request: Omit<DoudianRequest, 'sessionId'>): Promise<DoudianReply> => {
+      if (request.action === 'capabilities') { return capability(true, 'enterprise-session-v1', 1) }
+
+      if (request.action === 'shops') { return pending.promise }
+
+      if (request.action === 'chooseWorkbook') { return { ok: true, workbook: { id: 'd'.repeat(32), name: '新租户副本.xlsx' } } }
+
+      if (request.action === 'preparePayment') { return { ok: true, task: prepared } }
+
+      return { ok: true }
+    })
+
+    fixture.view.rerender(<I18nProvider configClient={null} initialLocale="zh"><PaymentPage runtime={{ doudian: nextSend } as unknown as EnterpriseClientRuntime} /></I18nProvider>)
+    expect(screen.queryByText('副本.xlsx')).toBeNull()
+    expect(screen.queryByRole('option', { name: `${profileShop.name} (${profileShop.platformId})` })).toBeNull()
+    await waitFor(() => expect(nextSend).toHaveBeenCalledWith({ action: 'shops' }))
+    expect((screen.getByLabelText(shopBrowserCopy.zh.profile) as HTMLSelectElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '选择工作簿' }))
+    await screen.findByText('新租户副本.xlsx')
+    fireEvent.change(screen.getByLabelText('金额'), { target: { value: '2.50' } })
+    await act(async () => { pending.resolve({ ok: true, shops: [profileShop] }) })
+    const profile = screen.getByLabelText(shopBrowserCopy.zh.profile) as HTMLSelectElement
+    expect(profile.value).toBe('')
+    expect((screen.getByRole('button', { name: '检查并准备' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(profile, { target: { value: profileShop.browserProfileId } })
+    fireEvent.click(screen.getByRole('button', { name: '检查并准备' }))
+    await screen.findByText(prepared.summary)
+    expect(nextSend).toHaveBeenCalledWith({
+      action: 'preparePayment', workbookId: 'd'.repeat(32), amount: '2.50', startRow: '1', maxRows: '0',
+      mode: 'standard', transport: 'cdp', browserProfileId: profileShop.browserProfileId
+    })
+    expect(fixture.send.mock.calls.some(([request]) => request.action === 'preparePayment')).toBe(false)
+  })
+
+  it('ignores a late profile list from the previous runtime', async () => {
+    const pending = deferredReply()
+
+    const oldSend = vi.fn(async (request: Omit<DoudianRequest, 'sessionId'>): Promise<DoudianReply> => {
+      if (request.action === 'capabilities') { return capability(true, 'enterprise-session-v1', 1) }
+
+      if (request.action === 'shops') { return pending.promise }
+
+      return { ok: true }
+    })
+
+    const view = render(<I18nProvider configClient={null} initialLocale="zh"><PaymentPage runtime={{ doudian: oldSend } as unknown as EnterpriseClientRuntime} /></I18nProvider>)
+    await waitFor(() => expect(oldSend).toHaveBeenCalledWith({ action: 'shops' }))
+    const nextShop: DoudianShop = { ...profileShop, id: 'f'.repeat(32), browserProfileId: 'f'.repeat(32), name: '当前租户店铺' }
+
+    const nextSend = vi.fn(async (request: Omit<DoudianRequest, 'sessionId'>): Promise<DoudianReply> => {
+      if (request.action === 'capabilities') { return capability(true, 'enterprise-session-v1', 1) }
+
+      if (request.action === 'shops') { return { ok: true, shops: [nextShop] } }
+
+      return { ok: true }
+    })
+
+    view.rerender(<I18nProvider configClient={null} initialLocale="zh"><PaymentPage runtime={{ doudian: nextSend } as unknown as EnterpriseClientRuntime} /></I18nProvider>)
+    await screen.findByRole('option', { name: `${nextShop.name} (${nextShop.platformId})` })
+    fireEvent.change(screen.getByLabelText(shopBrowserCopy.zh.profile), { target: { value: nextShop.browserProfileId } })
+    await act(async () => { pending.resolve({ ok: true, shops: [profileShop] }) })
+    expect(screen.queryByRole('option', { name: `${profileShop.name} (${profileShop.platformId})` })).toBeNull()
+    expect((screen.getByLabelText(shopBrowserCopy.zh.profile) as HTMLSelectElement).value).toBe(nextShop.browserProfileId)
+  })
+
+  it('requires profile selection if embedded browser support appears during capability revalidation', async () => {
+    const fixture = setup(capability(true, 'enterprise-session-v1'), undefined, 'zh', [profileShop])
+    await waitFor(() => expect((screen.getByRole('button', { name: '选择工作簿' }) as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(screen.getByRole('button', { name: '选择工作簿' }))
+    await screen.findByText('副本.xlsx')
+    fireEvent.change(screen.getByLabelText('金额'), { target: { value: '3.25' } })
+    fixture.setCapability(capability(true, 'enterprise-session-v1', 1))
+    fireEvent.click(screen.getByRole('button', { name: '检查并准备' }))
+    await screen.findByRole('option', { name: `${profileShop.name} (${profileShop.platformId})` })
+    expect((await screen.findByRole('alert')).textContent).toContain(shopBrowserCopy.zh.selectProfile)
+    expect((screen.getByLabelText(shopBrowserCopy.zh.profile) as HTMLSelectElement).value).toBe('')
+    expect(fixture.send.mock.calls.some(([request]) => request.action === 'preparePayment')).toBe(false)
+    fireEvent.change(screen.getByLabelText(shopBrowserCopy.zh.profile), { target: { value: profileShop.browserProfileId } })
+    fireEvent.click(screen.getByRole('button', { name: '检查并准备' }))
+    await screen.findByText(prepared.summary)
+    expect(fixture.send).toHaveBeenCalledWith(expect.objectContaining({ action: 'preparePayment', browserProfileId: profileShop.browserProfileId, amount: '3.25' }))
+  })
+
+  it.each(['preparing', 'awaiting_confirmation', 'running', 'pausing', 'paused', 'stopping', 'unknown'] as const)(
+    'locks the profile selection for an active %s task', async state => {
+      setup(capability(true, 'enterprise-session-v1', 1), { ...prepared, state }, 'zh', [profileShop])
+      await screen.findByText(prepared.summary)
+      await screen.findByRole('option', { name: `${profileShop.name} (${profileShop.platformId})` })
+      expect((screen.getByLabelText(shopBrowserCopy.zh.profile) as HTMLSelectElement).disabled).toBe(true)
+    }
+  )
+
+  it.each(['zh', 'zh-hant', 'en', 'ja', 'ar'] as const)('uses localized profile and empty labels for %s', async locale => {
+    const { send } = setup(capability(true, 'enterprise-session-v1', 1), undefined, locale, [legacyShop])
+    await screen.findByRole('option', { name: shopBrowserCopy[locale].empty })
+    expect((screen.getByLabelText(shopBrowserCopy[locale].profile) as HTMLSelectElement).value).toBe('')
+    expect(send.mock.calls.some(([request]) => request.action === 'preparePayment')).toBe(false)
+  })
+
   it.each(['3.25', '7.50'])('prepares the manually entered CDP amount %s and starts only on confirmation', async amount => {
     const { send } = setup()
     await waitFor(() => expect((screen.getByRole('button', { name: '选择工作簿' }) as HTMLButtonElement).disabled).toBe(false))
@@ -133,9 +344,11 @@ describe('payment page offline', () => {
     fireEvent.click(screen.getByRole('button', { name: '检查并准备' }))
     await screen.findByText(prepared.summary)
     expect(send).toHaveBeenCalledWith({ action: 'preparePayment', workbookId: 'b'.repeat(32), amount, startRow: '2', maxRows: '4', mode: 'standard', transport: 'cdp' })
+
     for (const label of ['操作方式', '模式', '金额', '起始行', '最多行（0 表示不限）']) {
       expect((screen.getByLabelText(label) as HTMLInputElement | HTMLSelectElement).disabled).toBe(true)
     }
+
     expect((screen.getByRole('button', { name: '检查并准备' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: '确认开始打款' }) as HTMLButtonElement).disabled).toBe(false)
     expect(send.mock.calls.some(([request]) => request.action === 'startPayment')).toBe(false)

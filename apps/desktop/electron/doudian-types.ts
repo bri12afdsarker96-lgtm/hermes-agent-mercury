@@ -24,6 +24,7 @@ export interface DoudianRequest {
   decision?: string
   mode?: 'standard' | 'new-order'
   transport?: 'desktop' | 'cdp'
+  browserProfileId?: string
 }
 
 export interface DoudianShop {
@@ -31,6 +32,7 @@ export interface DoudianShop {
   name: string
   platformId: string
   status: string
+  browserProfileId?: string
 }
 export interface ManagedDoudianShop {
   id: string
@@ -101,6 +103,7 @@ export interface DoudianReply {
     reviewOptions?: number
     shopManagement?: number
     shopOperations?: number
+    embeddedBrowser?: number
   }
   shops?: DoudianShop[]
   managedShops?: ManagedDoudianShop[]
