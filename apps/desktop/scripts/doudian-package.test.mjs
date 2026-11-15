@@ -119,7 +119,7 @@ test('BUILD_INFO identifies a verified artifact and refuses failed or incomplete
   assert.throws(() => makeBuildInfo({ ...input, assetContract: { ...input.assetContract, source_commit: undefined } }))
 })
 
-test('candidate manifests remain unapproved and are restricted to localprep records', async () => {
+test('candidate manifests require explicit candidate builds and remain unpublished', async () => {
   await fixture(async ({ contract }) => {
     const json = JSON.parse(await readFile(contract, 'utf8'))
     for (const status of ['UNTRUSTED', 'LOCAL VERIFICATION ONLY; NOT AN APPROVED RELEASE TRUST MANIFEST']) {
@@ -127,8 +127,9 @@ test('candidate manifests remain unapproved and are restricted to localprep reco
       const candidate = await readAssetContract(contract)
       assert.equal(candidate.asset_approval, 'UNTRUSTED')
       assert.equal(candidate.candidate_status, status)
-      assert.throws(() => assertAssetPolicy(candidate, false), /restricted to localprep/)
+      assert.throws(() => assertAssetPolicy(candidate, false), /explicit candidate or localprep/)
       assert.doesNotThrow(() => assertAssetPolicy(candidate, true))
+      assert.doesNotThrow(() => assertAssetPolicy(candidate, false, true))
       const input = { version: '1', commit: 'a'.repeat(40), branch: 'test', electron: '1', node: '1',
         artifact: 'test-localprep.exe', bytes: 1, sha512: 'b'.repeat(128), assetContract: candidate,
         verified: { passed: true, matched_count: candidate.file_count, total_bytes: candidate.total_bytes },
@@ -138,7 +139,15 @@ test('candidate manifests remain unapproved and are restricted to localprep reco
       assert.equal(info.doudian.candidate_status, status)
       assert.equal(info.publication_allowed, false)
       assert.equal(info.published, false)
-      assert.throws(() => makeBuildInfo({ ...input, localprep: false }), /restricted to localprep/)
+      assert.throws(() => makeBuildInfo({ ...input, localprep: false }), /explicit candidate or localprep/)
+      const productionCandidate = makeBuildInfo({ ...input, localprep: false, candidate: true,
+        artifact: 'test-candidate.exe', enterpriseOrigin: 'https://example.test' })
+      assert.equal(productionCandidate.candidate_build, true)
+      assert.equal(productionCandidate.local_verification_only, false)
+      assert.equal(productionCandidate.publication_allowed, false)
+      assert.equal(productionCandidate.published, false)
+      assert.equal(productionCandidate.doudian.asset_approval, 'UNTRUSTED')
+      assert.throws(() => makeBuildInfo({ ...input, localprep: false, candidate: true }), /distinct candidate artifact/)
       assert.throws(() => makeBuildInfo({ ...input, artifact: 'release.exe' }), /localprep artifact/)
       assert.throws(() => makeBuildInfo({ ...input, enterpriseOrigin: 'https://example.test' }), /Local origin/)
     }
@@ -150,7 +159,8 @@ test('candidate manifests remain unapproved and are restricted to localprep reco
     await assert.rejects(readAssetContract(contract), /Unrecognized candidate asset status/)
     await writeFile(contract, JSON.stringify(json))
     const missing = await readAssetContract(contract)
-    assert.throws(() => assertAssetPolicy(missing, false), /restricted to localprep/)
+    assert.throws(() => assertAssetPolicy(missing, false), /explicit candidate or localprep/)
+    assert.throws(() => assertAssetPolicy(missing, false, true), /explicitly unapproved/)
     assert.throws(() => assertAssetPolicy(missing, true), /explicitly unapproved/)
     assert.throws(() => assertAssetPolicy({ asset_approval: 'UNVERIFIED', candidate_status: 'UNTRUSTED' }, false))
   })

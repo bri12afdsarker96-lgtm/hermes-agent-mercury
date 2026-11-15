@@ -13,20 +13,23 @@ const desktopRoot = path.resolve(import.meta.dirname, '..')
 const repoRoot = path.resolve(desktopRoot, '../..')
 const require = createRequire(import.meta.url)
 
-export function assertAssetPolicy(assetContract, localprep) {
+export function assertAssetPolicy(assetContract, localprep, candidate = false) {
   if (!['UNTRUSTED', 'UNVERIFIED'].includes(assetContract?.asset_approval)) throw new Error('Asset approval status is missing or invalid')
   if (assetContract.asset_approval === 'UNVERIFIED' && Object.hasOwn(assetContract, 'candidate_status')) throw new Error('Candidate assets cannot be marked unverified')
-  if (!localprep) throw new Error('This packaging path is restricted to localprep')
+  if (!localprep && !candidate) throw new Error('Unapproved assets require an explicit candidate or localprep build')
   if (assetContract.asset_approval !== 'UNTRUSTED' || !['UNTRUSTED', 'LOCAL VERIFICATION ONLY; NOT AN APPROVED RELEASE TRUST MANIFEST'].includes(assetContract.candidate_status)) {
-    throw new Error('Localprep requires an explicitly unapproved candidate asset status')
+    throw new Error('Packaging requires an explicitly unapproved candidate asset status')
   }
 }
 
 export function makeBuildInfo({ version, commit, branch, electron, node, artifact, bytes,
-  sha512, assetContract, verified, enterpriseOrigin, localprep = false, builtAt = new Date().toISOString() }) {
-  assertAssetPolicy(assetContract, localprep)
+  sha512, assetContract, verified, enterpriseOrigin, localprep = false, candidate = false, builtAt = new Date().toISOString() }) {
+  assertAssetPolicy(assetContract, localprep, candidate)
   if (localprep && (!artifact.endsWith('-localprep.exe') || validateLocalOrigin(enterpriseOrigin) !== enterpriseOrigin)) {
     throw new Error('Local verification requires a localprep artifact and canonical loopback origin')
+  }
+  if (candidate && (localprep || !artifact.endsWith('-candidate.exe'))) {
+    throw new Error('Candidate builds require a distinct candidate artifact name')
   }
   if (!verified?.passed || verified.matched_count !== assetContract.file_count ||
       !/^[a-f0-9]{40}$/.test(commit) || !branch || branch === 'HEAD' ||
@@ -36,7 +39,7 @@ export function makeBuildInfo({ version, commit, branch, electron, node, artifac
   }
   return { version, commit, branch, built_at: builtAt, built_by: { electron, node },
     artifact, bytes, sha512, sha512_encoding: 'hex', local_verification_only: localprep,
-    published: false, publication_allowed: false, ...(enterpriseOrigin ? { enterprise_origin: enterpriseOrigin } : {}), doudian: { source_commit: assetContract.source_commit,
+    published: false, publication_allowed: false, ...(candidate ? { candidate_build: true } : {}), ...(enterpriseOrigin ? { enterprise_origin: enterpriseOrigin } : {}), doudian: { source_commit: assetContract.source_commit,
       asset_approval: assetContract.asset_approval, ...(assetContract.candidate_status ? { candidate_status: assetContract.candidate_status } : {}),
       assets_manifest_sha256: assetContract.manifest_sha256, profile: 'hermes-module',
       files: verified.matched_count, bytes: verified.total_bytes } }
@@ -58,6 +61,7 @@ async function main() {
     'assets-manifest': { type: 'string' }, output: { type: 'string' },
     'seven-zip': { type: 'string' }, 'npm-cli': { type: 'string' },
     'localprep': { type: 'boolean', default: false }, 'local-origin': { type: 'string' },
+    'candidate': { type: 'boolean', default: false },
     'nsis-dir': { type: 'string' }, 'nsis-resources-dir': { type: 'string' },
   } })
   if (values['local-origin']) validateLocalOrigin(values['local-origin'])
@@ -127,7 +131,7 @@ async function main() {
     throw new Error('Commit desktop sources/packaging scripts before building an attributable verification package')
   }
   const contract = await readAssetContract(path.resolve(values['assets-manifest']))
-  assertAssetPolicy(contract, values.localprep)
+  assertAssetPolicy(contract, values.localprep, values.candidate)
   const staged = await verifyStagedModule(path.join(desktopRoot, 'build', 'doudian'))
   const stageReport = compareFiles(contract.files, staged)
   await writeReport(path.join(output, 'staged-assets'), stageReport)
@@ -161,8 +165,9 @@ async function main() {
     await run('local-bundle', process.execPath, ['scripts/bundle-electron-main.mjs', '--local-deployment', localFile])
   }
   const localOptions = localBuilderConfig ? ['--config', localBuilderConfig] : []
+  const candidateOptions = values.candidate ? ['-c.artifactName=Hermes-企业助手-${version}-${arch}-candidate.${ext}'] : []
   await run('nsis', process.execPath, ['scripts/run-electron-builder.mjs', '--win', 'nsis', '--x64',
-    '--publish', 'never', `-c.directories.output=${output}`, ...localOptions])
+    '--publish', 'never', `-c.directories.output=${output}`, ...localOptions, ...candidateOptions])
   const installers = (await readdir(output)).filter(name => name.endsWith('.exe'))
   if (installers.length !== 1) throw new Error(`Expected one NSIS installer, found ${installers.length}`)
   const installer = path.join(output, installers[0])
@@ -201,10 +206,12 @@ async function main() {
       throw new Error('Production deployment file changed during local build')
     }
   }
+  const productionDeployment = JSON.parse(await readFile(path.join(desktopRoot, 'assets', 'enterprise-deployment.json'), 'utf8'))
   const buildInfo = makeBuildInfo({ version: pkg.version, commit, branch,
     electron: electronVersion, node: process.version, artifact: installers[0],
     bytes: (await stat(installer)).size, sha512: await hashFile(installer, 'sha512'),
-    assetContract: contract, verified: report, localprep: values.localprep, enterpriseOrigin: localDeployment?.enterprise_api_origin })
+    assetContract: contract, verified: report, localprep: values.localprep, candidate: values.candidate,
+    enterpriseOrigin: localDeployment?.enterprise_api_origin || productionDeployment.enterprise_api_origin })
   await writeFile(path.join(output, 'BUILD_INFO.json'), JSON.stringify(buildInfo, null, 2) + '\n', { flag: 'wx' })
   console.log(JSON.stringify(buildInfo, null, 2))
 }
