@@ -222,6 +222,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
           setPaymentControls(result.ok && result.capabilities?.paymentControls === 1)
           setPaymentCdp(result.ok && result.capabilities?.paymentCdp === 1)
           setEmbeddedBrowser(result.ok && result.capabilities?.embeddedBrowser === 1)
+          setProfilesLoading(result.ok && result.capabilities?.embeddedBrowser === 1)
           setSecurityBlocked(!result.ok && result.error === 'DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE')
         }
       })
@@ -277,7 +278,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
   }, [runtime, current, embeddedBrowser])
 
   useEffect(() => {
-    if (!runtime?.doudian || !current || (gate !== 'ready' && gate !== 'unverified')) {
+    if (!runtime?.doudian || !current || profilesLoading || (gate !== 'ready' && gate !== 'unverified')) {
       return
     }
 
@@ -298,7 +299,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
         if (alive && observed === revision.current) {
           if (result.ok) {
             setTask(result.task?.kind === 'payment' ? result.task : undefined)
-          } else {
+          } else if (result.error !== 'TASK_BUSY') {
             setError(result.error || t[14])
           }
         }
@@ -318,7 +319,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
       alive = false
       clearInterval(timer)
     }
-  }, [runtime, current, gate, t])
+  }, [runtime, current, gate, profilesLoading, t])
 
   async function operate(action: PaymentAction) {
     if (

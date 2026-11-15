@@ -138,6 +138,28 @@ describe('payment page offline', () => {
     expect(send.mock.calls.some(([request]) => ['preparePayment', 'startPayment', 'openPayment'].includes(request.action))).toBe(false)
   })
 
+  it('waits for embedded profile discovery before polling the exclusive execution host', async () => {
+    const fixture = setup(capability(true, 'enterprise-session-v1', 1))
+    const profiles = deferredReply()
+    const implementation = fixture.send.getMockImplementation()!
+    fixture.send.mockImplementation(request => request.action === 'shops' ? profiles.promise : implementation(request))
+    await waitFor(() => expect(fixture.send).toHaveBeenCalledWith({ action: 'shops' }))
+    expect(fixture.send.mock.calls.some(([request]) => request.action === 'status')).toBe(false)
+    await act(async () => profiles.resolve({ ok: true, shops: [profileShop] }))
+    await waitFor(() => expect(fixture.send).toHaveBeenCalledWith({ action: 'status' }))
+    expect(screen.queryByText(/TASK_BUSY/)).toBeNull()
+  })
+
+  it('retains the current view when background status temporarily reports a busy host', async () => {
+    const fixture = setup()
+    const implementation = fixture.send.getMockImplementation()!
+    fixture.send.mockImplementation(async request => request.action === 'status'
+      ? { ok: false, error: 'TASK_BUSY' }
+      : implementation(request))
+    await waitFor(() => expect(fixture.send).toHaveBeenCalledWith({ action: 'status' }))
+    expect(screen.queryByText(/TASK_BUSY/)).toBeNull()
+  })
+
   it.each(['0.01', '7.50', '+100,000.00'])('requires an explicit embedded profile and preserves the entered amount %s', async amount => {
     const { send } = setup(capability(true, 'enterprise-session-v1', 1), undefined, 'zh', [legacyShop, profileShop])
     await screen.findByRole('option', { name: `${profileShop.name} (${profileShop.platformId})` })
