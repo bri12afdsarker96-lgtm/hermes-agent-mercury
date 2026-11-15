@@ -29,7 +29,7 @@ for (const [entry, output, format] of [
 }
 function protocolSnapshot() {
   const reg = path.join(process.env.SystemRoot, 'System32', 'reg.exe')
-  const result = spawnSync(reg, ['query', 'HKCU\\Software\\Classes\\hermes', '/s'], { encoding: 'utf8', windowsHide: true })
+  const result = spawnSync(reg, ['query', 'HKCU\\Software\\Classes\\hermes', '/s'], { windowsHide: true })
   if (result.status !== 0) throw new Error('Unable to verify the existing hermes protocol association')
   return result.stdout
 }
@@ -94,8 +94,11 @@ try {
   await new Promise(resolve => server.close(resolve))
   try {
     const protocolAfter = protocolSnapshot()
-    const unchanged = protocolBefore === protocolAfter
-    await writeFile(path.join(output, 'protocol-check.json'), JSON.stringify({ unchanged, before: protocolBefore, after: protocolAfter }, null, 2))
+    const unchanged = protocolBefore.equals(protocolAfter)
+    const digest = value => createHash('sha256').update(value).digest('hex')
+    await writeFile(path.join(output, 'protocol-check.json'), JSON.stringify({ unchanged,
+      beforeSha256: digest(protocolBefore), afterSha256: digest(protocolAfter),
+      beforeBase64: protocolBefore.toString('base64'), afterBase64: protocolAfter.toString('base64') }, null, 2))
     if (!unchanged) { console.error('FAIL hermes protocol association changed'); process.exitCode = 1 }
   } catch (error) {
     console.error(`FAIL protocol verification: ${error.message}`)
