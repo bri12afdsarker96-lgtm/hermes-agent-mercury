@@ -117,6 +117,27 @@ export async function createShopBrowserView(
   return {
     setBounds,
     async identify() {
+      if (!contents.isDestroyed() && !isShopBrowserUrl(contents.getURL())) {
+        await new Promise<void>((resolve, reject) => {
+          const finish = (error?: Error) => {
+            clearTimeout(timer)
+            contents.removeListener('did-navigate', ready)
+            contents.removeListener('dom-ready', ready)
+            contents.removeListener('destroyed', destroyed)
+            if (error) reject(error)
+            else resolve()
+          }
+          const ready = () => {
+            if (!contents.isDestroyed() && isShopBrowserUrl(contents.getURL())) finish()
+          }
+          const destroyed = () => finish(new Error('SHOP_PROFILE_PAGE_NOT_READY'))
+          const timer = setTimeout(() => finish(new Error('SHOP_PROFILE_PAGE_NOT_READY')), 8000)
+          contents.on('did-navigate', ready)
+          contents.on('dom-ready', ready)
+          contents.once('destroyed', destroyed)
+          ready()
+        })
+      }
       if (contents.isDestroyed() || !isShopBrowserUrl(contents.getURL())) throw new Error('SHOP_PROFILE_PAGE_NOT_READY')
       const attached = !contents.debugger.isAttached()
       if (attached) contents.debugger.attach('1.3')

@@ -57,9 +57,10 @@ describe('embedded Chromium shop adapter', () => {
       flushStorageData: vi.fn(),
       cookies: { flushStore: vi.fn(async () => {}) }
     })
+    let currentUrl = 'about:blank'
     const contents = Object.assign(new EventEmitter(), {
       loadURL: vi.fn(async () => {}),
-      getURL: () => 'https://fxg.jinritemai.com/',
+      getURL: () => currentUrl,
       isDestroyed: () => false,
       setWindowOpenHandler: vi.fn(),
       close: vi.fn(() => contents.emit('destroyed')),
@@ -97,8 +98,33 @@ describe('embedded Chromium shop adapter', () => {
       }
     })
     expect(view.setBounds).toHaveBeenCalledWith({ x: 100, y: 100, width: 900, height: 700 })
-    await expect(browser.identify()).resolves.toEqual({ shopId: '123', shopName: 'Shop' })
+    const identification = browser.identify()
+    const identified = expect(identification).resolves.toEqual({ shopId: '123', shopName: 'Shop' })
+    expect(contents.debugger.attach).not.toHaveBeenCalled()
+    currentUrl = 'https://fxg.jinritemai.com/'
+    contents.emit('did-navigate')
+    await identified
     expect(contents.debugger.sendCommand.mock.calls[0][0]).toBe('Runtime.evaluate')
+    expect(contents.listenerCount('did-navigate')).toBe(0)
+    expect(contents.listenerCount('dom-ready')).toBe(0)
+    expect(contents.listenerCount('destroyed')).toBe(0)
+
+    await expect(browser.identify()).resolves.toEqual({ shopId: '123', shopName: 'Shop' })
+    expect(contents.debugger.sendCommand).toHaveBeenCalledTimes(2)
+
+    vi.useFakeTimers()
+    try {
+      currentUrl = 'about:blank'
+      const unavailable = expect(browser.identify()).rejects.toThrow('SHOP_PROFILE_PAGE_NOT_READY')
+      await vi.advanceTimersByTimeAsync(8000)
+      await unavailable
+      expect(contents.debugger.sendCommand).toHaveBeenCalledTimes(2)
+      expect(contents.listenerCount('did-navigate')).toBe(0)
+      expect(contents.listenerCount('dom-ready')).toBe(0)
+      expect(contents.listenerCount('destroyed')).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
     await browser.close()
     await browser.close()
     expect(contents.close).toHaveBeenCalledOnce()
