@@ -107,3 +107,26 @@ TD 从 `客户定制/早鸟Ai专用版/代码仓/01_外呼截图系统_桌面工
 ```
 
 工作簿独立复核可运行仓外 `verify-engine-workbooks.py`。实际图片、订单副本、浏览器轨迹、店铺档案和登录数据均留在本地验收目录中。
+
+## 新版组合候选归档
+
+2026-11-16 00:50（Asia/Shanghai）收到独立打包工作线交付后，本工作线复核了实际包文件、BUILD_INFO、提取载荷与源码树。
+
+| 项目 | 归档结果 |
+| --- | --- |
+| 安装包 | `Hermes-企业助手-0.20.13-x64-candidate.exe` |
+| 字节数 | 286760052 |
+| SHA256 | `FCDE12DC0CF46253B2AD72935031C63DF149389ABBB2D9D38972C916E00EB814` |
+| BUILD_INFO SHA512 | `99d1e3e9f3822967abcc8cdadd2c0accdfaba526e831d0f15ad1ca8227b4b6b458462f96c42a96fdfb13f25c8e1764884423c458e50b3e250a5d580648f3c833`，实际文件复算一致 |
+| 包对应桌面提交 | `77cd61e4e01de739ea43c66030f2b2ecf3804d37`，与 `e428e4f0f` 的 `apps/desktop` 差异为零 |
+| 包对应 TD 提交 | `2615caa6496c42e64268aae290b92fb13b879c3f` |
+| 载荷复核 | `extracted-payload/resources/doudian` 实际 85 个文件、514340675 字节，逐项路径、字节数和 SHA256 匹配 |
+| 发布状态 | `candidate_build=true`、`asset_approval=UNTRUSTED`、`published=false`、`publication_allowed=false` |
+
+包目录为 `D:\文档\抖店自动化\_codex_verify\results\ui-shop-merged-package-20261116\installer-77cd61e4e-r2`。本工作线新增的独立复算输出为证据根目录下的 `packaged-artifact-verification.txt`。
+
+独立打包工作线的 `desktop-regression-final.txt` 原始输出为 23 文件、395 通过、1 跳过。其 49 条桌面流程、实际打包程序登录与整进程重开、实时店铺识别、多标签及收藏恢复结果，详见同级 `交付验收记录.md`、`desktop-e2e-final/desktop-results.json`、`packaged-desktop/restore-result.json`。本工作线读取了这些交付记录，沿用该工作线的运行证据。
+
+实际窗口截图为 `packaged-desktop/computer-use-final.png`。桌面入口为 `D:\桌面\Hermes-企业助手-新版体验-0.20.13.lnk`。归档时候选 PID 42268、原安装版 PID 24704、原后台 PID 49436 均存在。当前候选保持打开供用户体验。
+
+已知范围继续保留。两个 Electron 文件仍有历史格式检查项。订单待办的服务端读取待补证。多标签跨进程重开创建首页标签，登录档案和收藏恢复。空款项记录后的金额表单分支仍未完成真实验证。真实消息与真实付款均未执行。
