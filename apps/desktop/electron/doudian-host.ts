@@ -345,7 +345,7 @@ export class DoudianController {
   private host?: Pick<DoudianHost, 'request' | 'close'>
   private owner?: string
   private files = new Map<string, string>()
-  private exclusive = false
+  private exclusive?: Promise<void>
   private lost = false
   private taskId?: string
   private taskKind?: DoudianTask['kind']
@@ -465,15 +465,20 @@ export class DoudianController {
       }
       if (request.action === 'shopOperationCancel' && (!this.host || !this.shopOperation || request.taskId !== this.shopOperation.taskId)) return bad('TASK_NOT_FOUND')
 
-      if (this.exclusive) {
-        return bad('TASK_BUSY')
+      while (this.exclusive) {
+        // Pages can unmount while their read is still in flight. Navigation
+        // reads wait for that command, while mutations retain the busy guard.
+        if (!['capabilities', 'shops', 'status'].includes(request.action)) return bad('TASK_BUSY')
+        await this.exclusive
+        this.current()
       }
       if (['preparing', 'awaiting_confirmation', 'running', 'pausing', 'paused', 'stopping', 'unknown'].includes(this.taskState ?? '') &&
           ['chooseWorkbook', 'prepare', 'preparePayment', 'openPayment', 'openReview', 'openFeige', 'manageShops', 'shopLoginStart', 'shopCheckStart', 'shopManagementDelete'].includes(request.action)) {
         return bad('TASK_BUSY')
       }
 
-      this.exclusive = true
+      let release!: () => void
+      this.exclusive = new Promise<void>(resolve => { release = resolve })
 
       try {
         if (!this.host) {
@@ -784,7 +789,8 @@ export class DoudianController {
 
         return { ok: true, task }
       } finally {
-        this.exclusive = false
+        this.exclusive = undefined
+        release()
       }
     } catch (error) {
       if (acquiredExecution) {

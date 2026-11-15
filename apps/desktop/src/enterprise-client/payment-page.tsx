@@ -160,19 +160,20 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
   const t = labels[language]
   const states = taskStateLabels[language]
   const browserCopy = shopBrowserCopy[locale]
-  const [workbook, setWorkbook] = useState<{ id: string; name: string }>()
-  const [mode, setMode] = useState<'standard' | 'new-order'>('standard')
-  const [transport, setTransport] = useState<NonNullable<DoudianRequest['transport']>>('cdp')
-  const [amount, setAmount] = useState('')
-  const [startRow, setStartRow] = useState('1')
-  const [maxRows, setMaxRows] = useState('0')
+  const draft = runtime ? paymentFormDrafts.get(runtime) : undefined
+  const [workbook, setWorkbook] = useState<{ id: string; name: string } | undefined>(draft?.workbook)
+  const [mode, setMode] = useState<'standard' | 'new-order'>(draft?.mode ?? 'standard')
+  const [transport, setTransport] = useState<NonNullable<DoudianRequest['transport']>>(draft?.transport ?? 'cdp')
+  const [amount, setAmount] = useState(draft?.amount ?? '')
+  const [startRow, setStartRow] = useState(draft?.startRow ?? '1')
+  const [maxRows, setMaxRows] = useState(draft?.maxRows ?? '0')
   const [task, setTask] = useState<DoudianTask>()
   const [capability, setCapability] = useState<Capability>('checking')
   const [paymentControls, setPaymentControls] = useState(false)
   const [paymentCdp, setPaymentCdp] = useState(false)
   const [embeddedBrowser, setEmbeddedBrowser] = useState(false)
   const [shops, setShops] = useState<DoudianShop[]>([])
-  const [browserProfileId, setBrowserProfileId] = useState('')
+  const [browserProfileId, setBrowserProfileId] = useState(draft?.browserProfileId ?? '')
   const [profilesLoading, setProfilesLoading] = useState(false)
   const [securityBlocked, setSecurityBlocked] = useState(false)
   const [sessionOwner, setSessionOwner] = useState(runtime)
@@ -220,7 +221,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
     setPaymentCdp(false)
     setEmbeddedBrowser(false)
     setShops([])
-    setBrowserProfileId('')
+    setBrowserProfileId(draft?.browserProfileId ?? '')
     setProfilesLoading(false)
     setTransport(draft?.transport ?? 'cdp')
     setSecurityBlocked(false)
@@ -258,8 +259,9 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
   }, [runtime])
 
   useEffect(() => {
+    const draftProfileId = runtime ? paymentFormDrafts.get(runtime)?.browserProfileId : undefined
     setShops([])
-    setBrowserProfileId('')
+    setBrowserProfileId(draftProfileId ?? '')
     setProfilesLoading(false)
 
     if (!runtime?.doudian || !current || !embeddedBrowser) {
@@ -267,7 +269,6 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
     }
 
     let alive = true
-    const draftProfileId = paymentFormDrafts.get(runtime)?.browserProfileId
     setProfilesLoading(true)
     void runtime.doudian({ action: 'shops' })
       .then(result => {
@@ -279,9 +280,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
           const profiles = (result.shops ?? []).filter(shop => !!shop.browserProfileId)
           setShops(profiles)
 
-          if (profiles.some(shop => shop.browserProfileId === draftProfileId)) {
-            setBrowserProfileId(draftProfileId!)
-          }
+          setBrowserProfileId(profiles.some(shop => shop.browserProfileId === draftProfileId) ? draftProfileId! : '')
         } else {
           setError(result.error || 'DOUDIAN_FAILED')
         }
@@ -303,12 +302,12 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
   }, [runtime, current, embeddedBrowser])
 
   useEffect(() => {
-    if (!runtime || !current || profilesLoading || (gate !== 'ready' && gate !== 'unverified')) {
+    if (!runtime || !current) {
       return
     }
 
     paymentFormDrafts.set(runtime, { workbook, mode, transport, amount, startRow, maxRows, browserProfileId })
-  }, [runtime, current, gate, profilesLoading, workbook, mode, transport, amount, startRow, maxRows, browserProfileId])
+  }, [runtime, current, workbook, mode, transport, amount, startRow, maxRows, browserProfileId])
 
   useEffect(() => {
     if (!runtime?.doudian || !current || profilesLoading || (gate !== 'ready' && gate !== 'unverified')) {

@@ -591,6 +591,32 @@ describe('payment page offline', () => {
     expect(send.mock.calls.some(([request]) => ['chooseWorkbook', 'preparePayment', 'startPayment'].includes(request.action))).toBe(false)
   })
 
+  it('keeps edits made while shop profiles are loading across rapid navigation', async () => {
+    const fixture = setup(capability(true, 'enterprise-session-v1', 1), undefined, 'zh', [profileShop])
+    await chooseAndFill('5', '2', '1')
+    fireEvent.change(screen.getByLabelText('操作方式'), { target: { value: 'cdp' } })
+    await screen.findByRole('option', { name: '已登录店铺 (1234567890123456789)' })
+    fireEvent.change(screen.getByLabelText(shopBrowserCopy.zh.profile), { target: { value: profileShop.browserProfileId } })
+    fixture.view.unmount()
+    const loadingShops = deferredReply()
+    const original = fixture.send.getMockImplementation()!
+    fixture.send.mockImplementation(request => request.action === 'shops' ? loadingShops.promise : original(request))
+    const returning = render(<I18nProvider configClient={null} initialLocale="zh"><PaymentPage runtime={fixture.runtime} /></I18nProvider>)
+    await screen.findByRole('option', { name: shopBrowserCopy.zh.pending })
+    fireEvent.change(screen.getByLabelText('金额'), { target: { value: '7.50' } })
+    fireEvent.change(screen.getByLabelText('起始行'), { target: { value: '3' } })
+    returning.unmount()
+    fixture.send.mockImplementation(original)
+    render(<I18nProvider configClient={null} initialLocale="zh"><PaymentPage runtime={fixture.runtime} /></I18nProvider>)
+    await screen.findByRole('option', { name: '已登录店铺 (1234567890123456789)' })
+    expect((screen.getByLabelText('金额') as HTMLInputElement).value).toBe('7.50')
+    expect((screen.getByLabelText('起始行') as HTMLInputElement).value).toBe('3')
+    expect((screen.getByLabelText(shopBrowserCopy.zh.profile) as HTMLSelectElement).value).toBe(profileShop.browserProfileId)
+    await act(async () => loadingShops.resolve({ ok: true, shops: [] }))
+    expect((screen.getByLabelText(shopBrowserCopy.zh.profile) as HTMLSelectElement).value).toBe(profileShop.browserProfileId)
+    expect(fixture.send.mock.calls.some(([request]) => request.action === 'startPayment')).toBe(false)
+  })
+
   it('restores the same session payment form after navigating away during a task', async () => {
     const fixture = setup(capability(true, 'enterprise-session-v1', 1), undefined, 'zh', [profileShop])
     await chooseAndFill('7.50', '2', '1')

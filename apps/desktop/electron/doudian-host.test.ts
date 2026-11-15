@@ -317,4 +317,44 @@ describe.runIf(process.platform === 'win32')('Windows controller flow (synthetic
     finish({ closed: true })
     expect((await first).ok).toBe(true)
   })
+
+  it('serializes navigation reads behind an in-flight command without replaying mutations', async () => {
+    const f = fixture()
+    f.deps.platform = 'win32'
+    await f.call('capabilities')
+    let finish!: (value: unknown) => void
+    const original = f.host.request.getMockImplementation()!
+    f.host.request.mockImplementation(method => method === 'manageShops'
+      ? new Promise(resolve => { finish = resolve })
+      : method === 'shops' ? Promise.resolve([]) : original(method))
+    const operation = f.call('manageShops')
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    const reads = ['capabilities', 'status', 'shops', 'capabilities'] as const
+    const pending = reads.map(action => f.call(action))
+    expect((await f.call('manageShops')).error).toBe('TASK_BUSY')
+    finish({ closed: true })
+    expect((await operation).ok).toBe(true)
+    expect((await Promise.all(pending)).every(reply => reply.ok)).toBe(true)
+    expect(f.host.request.mock.calls.filter(([method]) => method === 'manageShops')).toHaveLength(1)
+    expect(f.deps.createHost).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects a queued navigation read when the enterprise owner is released', async () => {
+    const f = fixture()
+    f.deps.platform = 'win32'
+    await f.call('capabilities')
+    let finish!: (value: unknown) => void
+    const original = f.host.request.getMockImplementation()!
+    f.host.request.mockImplementation(method => method === 'manageShops'
+      ? new Promise(resolve => { finish = resolve }) : original(method))
+    const operation = f.call('manageShops')
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    const pending = f.call('capabilities')
+    await vi.waitFor(() => expect(f.deps.authorize).toHaveBeenCalledTimes(3))
+    f.deps.isCurrent.mockReturnValue(false)
+    finish({ closed: true })
+    await operation
+    expect(await pending).toEqual({ ok: false, error: 'DOUDIAN_OWNER_CHANGED' })
+    expect(f.host.request.mock.calls.filter(([method]) => method === 'capabilities')).toHaveLength(2)
+  })
 })
