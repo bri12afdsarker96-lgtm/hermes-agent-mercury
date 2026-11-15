@@ -3,7 +3,7 @@ import crypto from 'node:crypto'
 import { allowForegroundLocalDoudian, assertDoudianCapability, DoudianController, doudianScope, doudianWorkbookExtensions } from './doudian-host'
 import type { DoudianRequest } from './doudian-types'
 import { ShopBrowserProfiles, validShopBounds } from './shop-browser-profiles'
-import { clearShopBrowserStorage, createShopBrowserView, createShopExecutionPage, shopBrowserTargets } from './shop-browser-electron'
+import { clearShopBrowserStorage, createShopBrowserView, createShopExecutionPage, shopBrowserExecutionTargets } from './shop-browser-electron'
 import { createShopExecutionTransport } from './shop-browser-execution'
 import type { ShopBrowserRequest } from './shop-browser-types'
 import { CustomerServicePreview } from './customer-service-preview'
@@ -13694,8 +13694,8 @@ function shopBrowserController(event: IpcMainInvokeEvent, sessionId: string) {
         return { origin: new URL(active.baseUrl).origin, tenantId: identity.tenant_id!, principalId: identity.principal_id! }
       },
       createView: (storage, target, bounds) => createShopBrowserView(parent, storage, target, bounds),
-      createExecution: (storage, target) => createShopExecutionTransport(shopBrowserTargets[target],
-        url => createShopExecutionPage(storage, url), current),
+      createExecution: (storage, target) => createShopExecutionTransport(shopBrowserExecutionTargets[target],
+        url => createShopExecutionPage(storage, url, parent), current),
       clearStorage: clearShopBrowserStorage
     })
     entry = { sessionId: activeSession.sessionId, controller, current }
