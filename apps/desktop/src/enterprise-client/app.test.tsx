@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ThemeProvider, useTheme } from '@/themes/context'
 
 import { EnterpriseClientApp } from './app'
-import { enterpriseNativeAppearance } from './native-appearance'
 import { WebPresentationContext } from './web-presentation'
 
 type EnterpriseBridgeResponse =
@@ -93,7 +92,7 @@ describe('EnterpriseClientApp authority lifecycle', () => {
     expect(document.querySelector('.hesc-workbench-shortcuts')?.hasAttribute('hidden')).toBe(web)
     expect(screen.getByTestId('enterprise-client-workbench').hasAttribute('hidden')).toBe(false)
   })
-  it('uses white glyphs for the native Windows window controls', async () => {
+  it('follows the selected light palette for native Windows window controls', async () => {
     const bridge = installAuthorityBridge({})
     bridge.autoConnect.mockResolvedValue({ ok: false, code: 'no_native_session', message: '' } as never)
 
@@ -103,15 +102,15 @@ describe('EnterpriseClientApp authority lifecycle', () => {
       const theme = useTheme()
       return <button onClick={() => theme.setMode('light')}>浅色聊天主题</button>
     }
-    render(<ThemeProvider nativeAppearance={enterpriseNativeAppearance}><EnterpriseClientApp /><ChangeSkinMode /></ThemeProvider>)
+    render(<ThemeProvider><EnterpriseClientApp /><ChangeSkinMode /></ThemeProvider>)
 
     await screen.findByText('等待登录企业账号')
     fireEvent.click(screen.getByRole('button', { name: '浅色聊天主题' }))
     expect(bridge.setTitleBarTheme).toHaveBeenLastCalledWith({
-      background: '#0c1725',
-      foreground: '#ffffff'
+      background: expect.any(String),
+      foreground: '#242424'
     })
-    expect(toggleNativeTheme).toHaveBeenLastCalledWith('dark')
+    expect(toggleNativeTheme).toHaveBeenLastCalledWith('light')
   })
 
   it('keeps rejected credentials on the login form without claiming the service is offline', async () => {

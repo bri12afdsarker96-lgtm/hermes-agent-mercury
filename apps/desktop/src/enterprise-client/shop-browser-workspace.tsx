@@ -18,6 +18,20 @@ import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useI18n } from '@/i18n/context'
 import { shopBrowserWorkspaceCopy } from '@/i18n/shop-browser-workspace'
+import {
+  ArrowUpRight,
+  Bookmark,
+  BookmarkFilled,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  FolderOpen,
+  Globe,
+  LayoutDashboard,
+  Plus,
+  RefreshCw,
+  X
+} from '@/lib/icons'
 
 import type { ShopBrowserRequest } from '../../electron/shop-browser-types'
 import type {
@@ -54,17 +68,22 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
   const [collapsed, setCollapsed] = useState(false)
   const [sideWidth, setSideWidth] = useState(320)
   const [dragging, setDragging] = useState(false)
+  const [externalDialogOpen, setExternalDialogOpen] = useState(false)
   const workspace = useRef<HTMLDivElement>(null)
   const drag = useRef<{ x: number; width: number } | null>(null)
   const lifecycle = useMemo(() => ({ runtime, profileId, alive: true, busy: false }), [runtime, profileId])
   const active = snapshot?.tabs.find(tab => tab.id === snapshot.activeTabId)
-  const overlayOpen = contextOpen || !!folderOpen || !!nameEditor || !!deleting || evidenceOpen || dragging
+
+  const overlayOpen =
+    contextOpen || !!folderOpen || !!nameEditor || !!deleting || evidenceOpen || dragging || externalDialogOpen
 
   const send = useCallback(
     async (request: Omit<ShopBrowserRequest, 'sessionId' | 'profileId'>) => {
       const reply = await lifecycle.runtime.shopBrowser!({ ...request, profileId: lifecycle.profileId })
 
-      if (!lifecycle.alive) {return undefined}
+      if (!lifecycle.alive) {
+        return undefined
+      }
 
       if (!reply.ok) {
         if (/OWNER_CHANGED|ACCESS_UNAVAILABLE|FORBIDDEN|PROFILE_NOT_FOUND/.test(reply.error ?? '')) {
@@ -76,11 +95,17 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
         throw new Error(reply.error)
       }
 
-      if (reply.browser) {setSnapshot(reply.browser)}
+      if (reply.browser) {
+        setSnapshot(reply.browser)
+      }
 
-      if (reply.bookmarks) {setBookmarks(reply.bookmarks)}
+      if (reply.bookmarks) {
+        setBookmarks(reply.bookmarks)
+      }
 
-      if (reply.openProfileId === null) {onClosed()}
+      if (reply.openProfileId === null) {
+        onClosed()
+      }
 
       return reply
     },
@@ -89,7 +114,10 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
 
   const run = useCallback(
     async (operation: () => Promise<unknown>) => {
-      if (lifecycle.busy) {return}
+      if (lifecycle.busy) {
+        return
+      }
+
       lifecycle.busy = true
       setBusy(true)
       setError('')
@@ -97,11 +125,15 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
       try {
         await operation()
       } catch (reason) {
-        if (lifecycle.alive) {setError(reason instanceof Error ? reason.message : 'SHOP_BROWSER_FAILED')}
+        if (lifecycle.alive) {
+          setError(reason instanceof Error ? reason.message : 'SHOP_BROWSER_FAILED')
+        }
       } finally {
         lifecycle.busy = false
 
-        if (lifecycle.alive) {setBusy(false)}
+        if (lifecycle.alive) {
+          setBusy(false)
+        }
       }
     },
     [lifecycle]
@@ -116,6 +148,22 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
   }
 
   useEffect(() => {
+    const update = () =>
+      setExternalDialogOpen(!!document.querySelector('[role="dialog"][data-state="open"], [aria-modal="true"]'))
+
+    const observer = new MutationObserver(update)
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-state', 'aria-modal']
+    })
+    update()
+
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
     lifecycle.alive = true
     void run(async () => {
       await browser({ action: 'state' })
@@ -123,7 +171,9 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
     })
 
     const timer = setInterval(() => {
-      if (!lifecycle.busy) {void run(() => browser({ action: 'state' }))}
+      if (!lifecycle.busy) {
+        void run(() => browser({ action: 'state' }))
+      }
     }, 2500)
 
     return () => {
@@ -138,9 +188,47 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
 
   useEffect(() => {
     void browser({ action: 'suspend', value: overlayOpen }).catch(reason => {
-      if (lifecycle.alive) {setError(reason instanceof Error ? reason.message : 'SHOP_BROWSER_FAILED')}
+      if (lifecycle.alive) {
+        setError(reason instanceof Error ? reason.message : 'SHOP_BROWSER_FAILED')
+      }
     })
   }, [overlayOpen, browser, lifecycle])
+
+  const finishDrag = useCallback(() => {
+    drag.current = null
+    setDragging(false)
+  }, [])
+
+  useEffect(() => {
+    if (!dragging) {
+      return
+    }
+
+    const move = (event: PointerEvent) => {
+      if (!drag.current || collapsed) {
+        return
+      }
+
+      const width = drag.current.width + drag.current.x - event.clientX
+      const max = Math.max((workspace.current?.clientWidth ?? 0) * 0.6, 320)
+
+      if (width >= 260 && width <= max) {
+        setSideWidth(width)
+      }
+    }
+
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', finishDrag)
+    window.addEventListener('pointercancel', finishDrag)
+    window.addEventListener('blur', finishDrag)
+
+    return () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', finishDrag)
+      window.removeEventListener('pointercancel', finishDrag)
+      window.removeEventListener('blur', finishDrag)
+    }
+  }, [dragging, collapsed, finishDrag])
 
   const bookmarked =
     !!active &&
@@ -160,12 +248,18 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
   }
 
   const removeItem = (item: NativeBookmarkItem) => {
-    if (item.IsFolder && item.Children.length) {setDeleting(item)}
-    else {void run(() => mutate({ action: 'delete', id: item.Id }))}
+    if (item.IsFolder && item.Children.length) {
+      setDeleting(item)
+    } else {
+      void run(() => mutate({ action: 'delete', id: item.Id }))
+    }
   }
 
   const saveName = () => {
-    if (!nameEditor) {return}
+    if (!nameEditor) {
+      return
+    }
+
     const editor = nameEditor
     setNameEditor(null)
 
@@ -196,7 +290,7 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
               onClick={() => void run(() => browser({ action: 'close', tabId: tab.id }))}
               type="button"
             >
-              ×
+              <X aria-hidden="true" />
             </button>
           </div>
         ))}
@@ -207,7 +301,7 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
           onClick={() => void run(() => browser({ action: 'new' }))}
           type="button"
         >
-          ＋
+          <Plus aria-hidden="true" />
         </button>
       </div>
       <form
@@ -223,7 +317,7 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
           onClick={() => void run(() => browser({ action: 'back' }))}
           type="button"
         >
-          ←
+          <ChevronLeft aria-hidden="true" />
         </button>
         <button
           aria-label={copy.forward}
@@ -231,7 +325,7 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
           onClick={() => void run(() => browser({ action: 'forward' }))}
           type="button"
         >
-          →
+          <ChevronRight aria-hidden="true" />
         </button>
         <button
           aria-label={copy.reload}
@@ -239,7 +333,7 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
           onClick={() => void run(() => browser({ action: 'reload' }))}
           type="button"
         >
-          ↻
+          <RefreshCw aria-hidden="true" />
         </button>
         <button
           aria-label={copy.home}
@@ -247,10 +341,10 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
           onClick={() => void run(() => browser({ action: 'home' }))}
           type="button"
         >
-          ⌂
+          <LayoutDashboard aria-hidden="true" />
         </button>
         <label className="shop-browser-address">
-          <span aria-hidden="true">◎</span>
+          <Globe aria-hidden="true" />
           <input aria-label={copy.address} onChange={event => setAddress(event.target.value)} value={address} />
         </label>
         <button
@@ -262,10 +356,10 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
           }
           type="button"
         >
-          {bookmarked ? '★' : '☆'}
+          {bookmarked ? <BookmarkFilled aria-hidden="true" /> : <Bookmark aria-hidden="true" />}
         </button>
         <button aria-label={copy.go} className="shop-browser-go" disabled={busy || !active} type="submit">
-          ➤
+          <ArrowUpRight aria-hidden="true" />
         </button>
       </form>
       <div aria-label={copy.bookmarks} className="shop-browser-bookmarks">
@@ -276,7 +370,8 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
           onClick={() => setNameEditor({ value: copy.defaultFolder })}
           type="button"
         >
-          ▱＋
+          <FolderOpen aria-hidden="true" />
+          <Plus aria-hidden="true" />
         </button>
         {!bookmarks?.items.length ? <span className="shop-bookmark-hint">{copy.bookmarkHint}</span> : null}
         {bookmarks?.items.map(item => (
@@ -287,9 +382,10 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
                   <Popover onOpenChange={open => setFolderOpen(open ? item.Id : null)} open={folderOpen === item.Id}>
                     <PopoverTrigger asChild>
                       <button className="shop-bookmark-item shop-bookmark-folder" disabled={busy} type="button">
-                        <span aria-hidden="true">▱</span>
+                        <FolderOpen aria-hidden="true" />
                         {displayTitle(item, 12)}
-                        {item.Children.length ? <small> ({item.Children.length}) ⌄</small> : null}
+                        {item.Children.length ? <small> ({item.Children.length})</small> : null}
+                        <ChevronDown aria-hidden="true" />
                       </button>
                     </PopoverTrigger>
                     <PopoverContent align="start" className="shop-bookmark-popup" sideOffset={0}>
@@ -312,7 +408,7 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
                 </span>
               ) : (
                 <button className="shop-bookmark-item" disabled={busy} onClick={() => openBookmark(item)} type="button">
-                  <span aria-hidden="true">☆</span>
+                  <Bookmark aria-hidden="true" />
                   {displayTitle(item, 15)}
                 </button>
               )}
@@ -387,25 +483,10 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
               aria-orientation="vertical"
               aria-valuenow={sideWidth}
               className="shop-browser-resizer"
-              onPointerCancel={() => {
-                drag.current = null
-                setDragging(false)
-              }}
               onPointerDown={event => {
-                event.currentTarget.setPointerCapture(event.pointerId)
+                event.preventDefault()
                 drag.current = { x: event.clientX, width: sideWidth }
                 setDragging(true)
-              }}
-              onPointerMove={event => {
-                if (!drag.current || collapsed) {return}
-                const width = drag.current.width + drag.current.x - event.clientX
-                const max = Math.max((workspace.current?.clientWidth ?? 0) * 0.6, 320)
-
-                if (width >= 260 && width <= max) {setSideWidth(width)}
-              }}
-              onPointerUp={() => {
-                drag.current = null
-                setDragging(false)
               }}
               role="separator"
             />
@@ -416,14 +497,14 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
                   <small>{copy.pendingUnavailable}</small>
                 </div>
                 <button aria-label={copy.pendingRefresh} disabled type="button">
-                  ↻
+                  <RefreshCw aria-hidden="true" />
                 </button>
                 <button
                   aria-label={collapsed ? copy.expand : copy.collapse}
                   onClick={() => setCollapsed(value => !value)}
                   type="button"
                 >
-                  {collapsed ? '‹' : '›'}
+                  {collapsed ? <ChevronLeft aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
                 </button>
               </header>
               <p className="shop-browser-pending-empty">{copy.pendingEvidence}</p>
@@ -443,7 +524,9 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
       </div>
       <Dialog
         onOpenChange={open => {
-          if (!open) {setNameEditor(null)}
+          if (!open) {
+            setNameEditor(null)
+          }
         }}
         open={!!nameEditor}
       >
@@ -485,7 +568,9 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
       </Dialog>
       <Dialog
         onOpenChange={open => {
-          if (!open) {setDeleting(null)}
+          if (!open) {
+            setDeleting(null)
+          }
         }}
         open={!!deleting}
       >
@@ -505,7 +590,9 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
                 const item = deleting
                 setDeleting(null)
 
-                if (item) {void run(() => mutate({ action: 'delete', id: item.Id, confirmed: true }))}
+                if (item) {
+                  void run(() => mutate({ action: 'delete', id: item.Id, confirmed: true }))
+                }
               }}
             >
               {copy.confirmDelete}

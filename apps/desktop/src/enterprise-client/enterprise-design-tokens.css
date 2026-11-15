@@ -2,18 +2,18 @@
  * Hermes Enterprise Desktop Design System — production token subset.
  *
  * Source: D:\GitHub\Hermes Enterprise Desktop Design System\tokens\*.css
- * Layout and type scales follow the handoff. The enterprise space palette
- * implements the user's science-fiction direction without a second theme
- * framework. Values ship locally; components use the semantic aliases below.
+ * Layout and type scales follow the enterprise handoff. The current Codex-style
+ * appearance derives semantic aliases from the shared, profile-scoped theme.
+ * Light, dark and skin selection use the existing ThemeProvider.
  */
 :where(.hesc-root, .hesc-login, .hesc-update-dialog) {
-  color-scheme: dark;
-  --blue-50: #0b202c;
-  --blue-100: #10303c;
-  --blue-200: #245869;
-  --blue-500: #64dce9;
-  --blue-600: #95ebf3;
-  --blue-700: #b9f4f8;
+  color-scheme: inherit;
+  --blue-50: color-mix(in srgb, var(--theme-primary-seed) 4%, var(--theme-card-seed));
+  --blue-100: color-mix(in srgb, var(--theme-primary-seed) 7%, var(--theme-card-seed));
+  --blue-200: color-mix(in srgb, var(--theme-primary-seed) 20%, var(--theme-card-seed));
+  --blue-500: var(--theme-primary-seed);
+  --blue-600: var(--theme-primary-seed);
+  --blue-700: var(--theme-primary-seed);
   --teal-50: #0d2828;
   --teal-500: #5cceb8;
   --teal-600: #82dec8;
@@ -28,21 +28,21 @@
   --red-50: #321e28;
   --red-100: #63313c;
   --red-600: #ffabb4;
-  --neutral-0: #101c2b;
-  --neutral-25: #0a1320;
-  --neutral-50: #142233;
-  --neutral-75: #0c1725;
-  --neutral-100: #1a2c3e;
-  --neutral-200: #263d50;
-  --neutral-300: #3c586e;
-  --neutral-400: #698499;
-  --neutral-500: #91a8ba;
-  --neutral-600: #b4c5d4;
-  --neutral-900: #e9f2f8;
-  --space-ink: #071522;
-  --space-glow: color-mix(in srgb, var(--blue-500) 12%, transparent);
-  --space-grid: color-mix(in srgb, var(--blue-200) 28%, transparent);
-  --space-scrim: rgb(3 9 17 / 76%);
+  --neutral-0: var(--theme-card-seed);
+  --neutral-25: var(--theme-background-seed);
+  --neutral-50: color-mix(in srgb, var(--theme-foreground) 3%, var(--theme-card-seed));
+  --neutral-75: var(--theme-sidebar-seed);
+  --neutral-100: color-mix(in srgb, var(--theme-foreground) 6%, var(--theme-card-seed));
+  --neutral-200: var(--theme-border-seed);
+  --neutral-300: color-mix(in srgb, var(--theme-foreground) 22%, var(--theme-card-seed));
+  --neutral-400: var(--theme-muted-foreground-seed);
+  --neutral-500: var(--theme-muted-foreground-seed);
+  --neutral-600: color-mix(in srgb, var(--theme-foreground) 76%, var(--theme-card-seed));
+  --neutral-900: var(--theme-foreground);
+  --space-ink: var(--theme-primary-foreground-seed);
+  --space-glow: transparent;
+  --space-grid: transparent;
+  --space-scrim: color-mix(in srgb, var(--theme-foreground) 25%, transparent);
 
   --theme-primary: var(--blue-500);
   --theme-primary-hover: var(--blue-600);
@@ -92,13 +92,13 @@
   --module-followup: var(--teal-500);
   --module-knowledge: var(--purple-500);
 
-  --titlebar-height: 44px;
+  --titlebar-height: 42px;
   --header-height: 56px;
-  --statusbar-height: 40px;
+  --statusbar-height: 28px;
   --sidebar-width: 228px;
   --sidebar-width-sm: 216px;
   --content-max-width: 1600px;
-  --page-inset-x: 28px;
+  --page-inset-x: 32px;
   --grid-gutter: 16px;
   --card-padding: 20px;
   --card-padding-compact: 16px;
@@ -107,18 +107,18 @@
   --radius-lg: 10px;
   --radius-full: 999px;
   --shadow-popover: 0 14px 32px rgb(0 0 0 / 28%);
-  --text-page-title: 28px;
+  --text-page-title: 24px;
   --text-page-title-lh: 38px;
   --text-section: 17px;
   --text-section-lh: 26px;
   --text-kpi: 34px;
   --text-kpi-lh: 40px;
   --text-body-lg: 16px;
-  --text-body: 15px;
+  --text-body: 14px;
   --text-body-lh: 24px;
-  --text-label: 14px;
+  --text-label: 13px;
   --text-label-lh: 22px;
-  --text-micro: 13px;
+  --text-micro: 12px;
   --text-micro-lh: 20px;
   /* Shared controls scale only inside the enterprise product root. */
   --text-xs: var(--text-label);
