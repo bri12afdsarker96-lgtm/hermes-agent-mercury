@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { copyFile, lstat, mkdir, open, readFile, rm, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { copyFile, lstat, mkdir, open, realpath, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { assertAssetPolicy, installerPayloadLayout } from './pack-doudian-nsis.mjs'
@@ -16,10 +17,13 @@ try {
   }
   const stageStat = await lstat(inputs.stage)
   if (!stageStat.isDirectory() || stageStat.isSymbolicLink()) throw new Error('Invalid staged module')
+  const outputResolved = path.join(await realpath(path.dirname(inputs.output)), path.basename(inputs.output))
   for (const input of [inputs.installer, inputs['seven-zip'], inputs.candidate, inputs.stage]) {
-    const relative = path.relative(input, inputs.output)
-    if (!relative || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative))) {
-      throw new Error('Output must be outside inputs')
+    for (const [source, destination] of [[input, inputs.output], [await realpath(input), outputResolved]]) {
+      const relative = path.relative(source, destination)
+      if (!relative || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative))) {
+        throw new Error('Output must be outside inputs, including symbolic links and junctions')
+      }
     }
   }
   const contract = await readAssetContract(inputs.candidate)
@@ -48,7 +52,9 @@ try {
   await verifyPackagedModule(inputs.stage, embedded)
   const model = path.join(embedded, 'inference', 'PP-OCRv5_mobile_det_infer', 'inference.pdiparams')
   const backup = path.join(inputs.output, 'model-negative-backup')
-  const extra = path.join(embedded, 'synthetic-unexpected-test.txt')
+  const extraName = `synthetic-unexpected-${randomUUID()}.txt`
+  const extra = path.join(embedded, extraName)
+  let extraCreated = false
   await copyFile(model, backup)
   try {
     const file = await open(model, 'r+')
@@ -63,11 +69,13 @@ try {
     await rm(model)
     await assert.rejects(verifyPackagedModule(inputs.stage, embedded), /missing: inference\/PP-OCRv5_mobile_det_infer\/inference.pdiparams/)
     await copyFile(backup, model)
-    await writeFile(extra, 'synthetic negative test', { flag: 'wx' })
-    await assert.rejects(verifyPackagedModule(inputs.stage, embedded), /unexpected: synthetic-unexpected-test.txt/)
+    const extraFile = await open(extra, 'wx')
+    extraCreated = true
+    try { await extraFile.writeFile('synthetic negative test') } finally { await extraFile.close() }
+    await assert.rejects(verifyPackagedModule(inputs.stage, embedded), error => error.message.includes(`unexpected: ${extraName}`))
   } finally {
     await copyFile(backup, model)
-    await rm(extra, { force: true })
+    if (extraCreated) await rm(extra, { force: true })
     await rm(backup, { force: true })
   }
   await verifyPackagedModule(inputs.stage, embedded)
