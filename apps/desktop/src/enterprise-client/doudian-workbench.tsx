@@ -54,6 +54,7 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
       DOUDIAN_FORBIDDEN: copy.forbidden,
       DOUDIAN_OWNER_CHANGED: copy.ownerChanged,
       DOUDIAN_HOST_LOST: copy.hostLost,
+      DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE: entry.localSecurityUnavailable,
       DOUDIAN_RESULT_UNKNOWN: copy.resultUnknown,
       LICENSE_REQUIRED: copy.licenseRequired,
       TASK_BUSY: copy.busy,

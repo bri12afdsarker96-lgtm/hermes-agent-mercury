@@ -74,6 +74,27 @@ async function chooseAndFill(amount = '3.25', startRow = '1', maxRows = '0', mod
 }
 
 describe('payment page offline', () => {
+  it('reports an unavailable local security environment and blocks payment', async () => {
+    const { send } = setup({ ok: false, error: 'DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE' })
+    await screen.findByText('本地安全环境尚未就绪，暂时无法运行。')
+    expect((screen.getByRole('button', { name: '检查并准备' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(send.mock.calls.some(([request]) => ['preparePayment', 'startPayment'].includes(request.action))).toBe(false)
+  })
+  it('closes the payment gate if isolation becomes unavailable during preparation', async () => {
+    const send = vi.fn(async (request: Omit<DoudianRequest, 'sessionId'>): Promise<DoudianReply> => {
+      if (request.action === 'capabilities') return capability(true, 'enterprise-session-v1')
+      if (request.action === 'chooseWorkbook') return { ok: true, workbook: { id: 'b'.repeat(32), name: '副本.xlsx' } }
+      if (request.action === 'preparePayment') return { ok: false, error: 'DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE' }
+      return { ok: true }
+    })
+    render(<I18nProvider configClient={null} initialLocale="zh"><PaymentPage runtime={{ doudian: send } as unknown as EnterpriseClientRuntime} /></I18nProvider>)
+    await chooseAndFill()
+    fireEvent.click(screen.getByRole('button', { name: '检查并准备' }))
+    await screen.findByRole('alert')
+    expect(screen.getByRole('status').textContent).toBe('本地安全环境尚未就绪，暂时无法运行。')
+    expect((screen.getByRole('button', { name: '确认开始打款' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(send.mock.calls.some(([request]) => request.action === 'startPayment')).toBe(false)
+  })
   it('offers payment without an activation-code form or activation request', async () => {
     const { send } = setup()
     await chooseAndFill()

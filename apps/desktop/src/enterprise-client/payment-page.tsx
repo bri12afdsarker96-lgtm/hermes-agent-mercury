@@ -35,7 +35,8 @@ const labels = {
     '因余额原因，打款已暂停。',
     '打款已暂停，需人工核验。',
     '任务已停止。',
-    '任务已完成。'
+    '任务已完成。',
+    '本地安全环境尚未就绪，暂时无法运行。'
   ],
   en: [
     'Small payments',
@@ -63,7 +64,8 @@ const labels = {
     'Payment paused due to a balance issue.',
     'Payment paused; manual verification is required.',
     'Task stopped.',
-    'Task completed.'
+    'Task completed.',
+    'The local security environment is not ready; this task cannot run yet.'
   ]
 } as const
 
@@ -91,6 +93,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
   const [maxRows, setMaxRows] = useState('0')
   const [task, setTask] = useState<DoudianTask>()
   const [capability, setCapability] = useState<Capability>('checking')
+  const [securityBlocked, setSecurityBlocked] = useState(false)
   const [sessionOwner, setSessionOwner] = useState(runtime)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -114,6 +117,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
     setError('')
     setBusy(false)
     setCapability('checking')
+    setSecurityBlocked(false)
 
     if (!runtime?.doudian) {
       setCapability('unavailable')
@@ -128,6 +132,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
       .then(result => {
         if (alive) {
           setCapability(paymentCapability(result))
+          setSecurityBlocked(!result.ok && result.error === 'DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE')
         }
       })
       .catch(() => {
@@ -218,9 +223,10 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
 
         const verified = paymentCapability(verification)
         setCapability(verified)
+        setSecurityBlocked(!verification.ok && verification.error === 'DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE')
 
         if (verified !== 'ready') {
-          setError(t[12])
+          setError(!verification.ok && verification.error === 'DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE' ? t[26] : t[12])
 
           return
         }
@@ -263,7 +269,11 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
       }
 
       if (!result.ok) {
-        setError(result.error || t[14])
+        if (result.error === 'DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE') {
+          setSecurityBlocked(true)
+          setCapability('unavailable')
+        }
+        setError(result.error === 'DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE' ? t[26] : result.error || t[14])
       } else if (action === 'chooseWorkbook' && result.workbook) {
         setWorkbook(result.workbook)
       } else if (
@@ -300,7 +310,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
         <h1>{t[0]}</h1>
       </header>
       <p role="status">
-        {gate === 'ready' ? t[20] : gate === 'unverified' ? t[12] : gate === 'checking' ? t[15] : t[16]}
+        {gate === 'ready' ? t[20] : gate === 'unverified' ? t[12] : gate === 'checking' ? t[15] : securityBlocked && current ? t[26] : t[16]}
       </p>
       <div className="flex flex-wrap items-center gap-3">
         <Button

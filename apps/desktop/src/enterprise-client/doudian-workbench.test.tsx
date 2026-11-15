@@ -56,6 +56,13 @@ function setup(reviewOptions?: number) {
 }
 
 describe('Doudian workbench (offline fixtures)', () => {
+  it('reports a blocked local security environment instead of a raw error code', async () => {
+    const send = vi.fn(async (_request: Omit<DoudianRequest, 'sessionId'>) => ({ ok: false, error: 'DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE' }))
+    render(<ReviewCapturePage runtime={{ doudian: send } as unknown as EnterpriseClientRuntime} />)
+    await screen.findByText('本地安全环境尚未就绪，暂时无法运行。')
+    expect(screen.queryByText(/DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE/)).toBeNull()
+    expect(send.mock.calls.some(([request]) => ['prepare', 'start'].includes(request.action))).toBe(false)
+  })
   it('shows the integrated screenshot page without an activation-code form or request', async () => {
     const send = vi.fn(async (request: Omit<DoudianRequest, 'sessionId'>): Promise<DoudianReply> => {
       if (request.action === 'capabilities') return { ok: true, capabilities: { protocol: 1, version: '1.0.54', authorized: true, chrome: true, spreadsheet: true, authorizationMode: 'enterprise-session-v1' } }
