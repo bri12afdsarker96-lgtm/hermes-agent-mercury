@@ -9,6 +9,20 @@ import type { DoudianReply, DoudianRequest, DoudianShop, DoudianTask } from '../
 
 import type { DoudianPageProps } from './doudian-entry-state'
 
+interface PaymentFormDraft {
+  workbook: DoudianReply['workbook']
+  mode: 'standard' | 'new-order'
+  transport: NonNullable<DoudianRequest['transport']>
+  amount: string
+  startRow: string
+  maxRows: string
+  browserProfileId: string
+}
+
+// A runtime belongs to one authenticated enterprise session. Drafts survive page
+// navigation and are released with that session, without persisting credentials.
+const paymentFormDrafts = new WeakMap<NonNullable<DoudianPageProps['runtime']>, PaymentFormDraft>()
+
 const labels = {
   zh: [
     '小额打款',
@@ -189,10 +203,15 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
   // eslint-disable-next-line no-restricted-syntax
   useEffect(() => {
     let alive = true
+    const draft = runtime ? paymentFormDrafts.get(runtime) : undefined
     revision.current++
     flight.current = false
     setSessionOwner(runtime)
-    setWorkbook(undefined)
+    setWorkbook(draft?.workbook)
+    setMode(draft?.mode ?? 'standard')
+    setAmount(draft?.amount ?? '')
+    setStartRow(draft?.startRow ?? '1')
+    setMaxRows(draft?.maxRows ?? '0')
     setTask(undefined)
     setError('')
     setPendingAction(undefined)
@@ -203,7 +222,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
     setShops([])
     setBrowserProfileId('')
     setProfilesLoading(false)
-    setTransport('cdp')
+    setTransport(draft?.transport ?? 'cdp')
     setSecurityBlocked(false)
 
     if (!runtime?.doudian) {
@@ -248,6 +267,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
     }
 
     let alive = true
+    const draftProfileId = paymentFormDrafts.get(runtime)?.browserProfileId
     setProfilesLoading(true)
     void runtime.doudian({ action: 'shops' })
       .then(result => {
@@ -256,7 +276,12 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
         }
 
         if (result.ok) {
-          setShops((result.shops ?? []).filter(shop => !!shop.browserProfileId))
+          const profiles = (result.shops ?? []).filter(shop => !!shop.browserProfileId)
+          setShops(profiles)
+
+          if (profiles.some(shop => shop.browserProfileId === draftProfileId)) {
+            setBrowserProfileId(draftProfileId!)
+          }
         } else {
           setError(result.error || 'DOUDIAN_FAILED')
         }
@@ -276,6 +301,14 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
       alive = false
     }
   }, [runtime, current, embeddedBrowser])
+
+  useEffect(() => {
+    if (!runtime || !current || profilesLoading || (gate !== 'ready' && gate !== 'unverified')) {
+      return
+    }
+
+    paymentFormDrafts.set(runtime, { workbook, mode, transport, amount, startRow, maxRows, browserProfileId })
+  }, [runtime, current, gate, profilesLoading, workbook, mode, transport, amount, startRow, maxRows, browserProfileId])
 
   useEffect(() => {
     if (!runtime?.doudian || !current || profilesLoading || (gate !== 'ready' && gate !== 'unverified')) {

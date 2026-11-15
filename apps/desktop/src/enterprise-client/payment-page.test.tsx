@@ -591,6 +591,28 @@ describe('payment page offline', () => {
     expect(send.mock.calls.some(([request]) => ['chooseWorkbook', 'preparePayment', 'startPayment'].includes(request.action))).toBe(false)
   })
 
+  it('restores the same session payment form after navigating away during a task', async () => {
+    const fixture = setup(capability(true, 'enterprise-session-v1', 1), undefined, 'zh', [profileShop])
+    await chooseAndFill('7.50', '2', '1')
+    fireEvent.change(screen.getByLabelText('操作方式'), { target: { value: 'cdp' } })
+    await screen.findByRole('option', { name: '已登录店铺 (1234567890123456789)' })
+    fireEvent.change(screen.getByLabelText(shopBrowserCopy.zh.profile), { target: { value: profileShop.browserProfileId } })
+    fireEvent.click(screen.getByRole('button', { name: '检查并准备' }))
+    await screen.findByText('模拟准备结果')
+    fireEvent.click(screen.getByRole('button', { name: '确认开始打款' }))
+    await screen.findByText('正在打款')
+    fixture.view.unmount()
+    render(<I18nProvider configClient={null} initialLocale="zh"><PaymentPage runtime={fixture.runtime} /></I18nProvider>)
+    await screen.findByText('正在打款')
+    expect(screen.getByText('副本.xlsx')).toBeTruthy()
+    expect((screen.getByLabelText('金额') as HTMLInputElement).value).toBe('7.50')
+    expect((screen.getByLabelText('起始行') as HTMLInputElement).value).toBe('2')
+    expect((screen.getByLabelText('最多行（0 表示不限）') as HTMLInputElement).value).toBe('1')
+    expect((screen.getByLabelText(shopBrowserCopy.zh.profile) as HTMLSelectElement).value).toBe(profileShop.browserProfileId)
+    expectParametersLocked()
+    expect(fixture.send.mock.calls.filter(([request]) => request.action === 'startPayment')).toHaveLength(1)
+  })
+
   it.each([
     ['changed task', { ...prepared, state: 'paused', taskId: 'd'.repeat(32) }],
     ['changed state', { ...prepared, state: 'running' }],
