@@ -1,5 +1,5 @@
-import type { BrowserWindow, Session, WebContents } from 'electron'
-import { session, WebContentsView } from 'electron'
+import type { Session, WebContents } from 'electron'
+import { BrowserWindow, session, WebContentsView } from 'electron'
 
 import type { ShopExecutionPage } from './shop-browser-execution'
 import type { ShopBrowserView } from './shop-browser-profiles'
@@ -13,6 +13,11 @@ export { isShopBrowserUrl } from './shop-browser-types'
 export const shopBrowserTargets = {
   merchant: 'https://fxg.jinritemai.com/ffa/morder/order/list',
   feige: 'https://im.jinritemai.com/pc_seller_v2/main/workspace'
+}
+export const shopBrowserExecutionTargets = {
+  ...shopBrowserTargets,
+  // The existing TD identity probe verifies the homepage before opening review tabs.
+  merchant: 'https://fxg.jinritemai.com/ffa/mshop/homepage/index'
 }
 const configuredSessions = new WeakSet<Session>()
 
@@ -97,35 +102,62 @@ async function identifyShopContents(contents: WebContents) {
   }
 }
 
-/** Background task pages share the exact persisted session, with no new OS window. */
-export async function createShopExecutionPage(storagePath: string, url: string): Promise<ShopExecutionPage> {
+/** Offscreen task pages share the persisted session and never display a task window. */
+export async function createShopExecutionPage(
+  storagePath: string,
+  url: string,
+  parent?: BrowserWindow
+): Promise<ShopExecutionPage> {
   if (!isShopBrowserUrl(url)) throw new Error('SHOP_BROWSER_URL_REJECTED')
   const browserSession = configureShopSession(storagePath)
-  const view = new WebContentsView({ webPreferences: {
-    session: browserSession, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true,
-    backgroundThrottling: false
-  } })
-  const contents = view.webContents
-  view.setBounds({ x: 0, y: 0, width: 1920, height: 1080 })
+  const taskWindow = new BrowserWindow({
+    parent,
+    show: false,
+    skipTaskbar: true,
+    width: 1920,
+    height: 1080,
+    useContentSize: true,
+    webPreferences: {
+      session: browserSession,
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      backgroundThrottling: false,
+      disableDialogs: true,
+      offscreen: true
+    }
+  })
+  const contents = taskWindow.webContents
   contents.setWindowOpenHandler(() => ({ action: 'deny' }))
   const navigation = (event: { preventDefault(): void }, next: string) => {
     if (!isShopBrowserUrl(next)) event.preventDefault()
   }
   contents.on('will-navigate', navigation)
   contents.on('will-redirect', navigation)
-  const close = async () => {
-    if (!contents.isDestroyed()) await new Promise<void>(resolve => {
-      contents.once('destroyed', resolve)
-      contents.close({ waitForBeforeUnload: false })
-    })
-    browserSession.flushStorageData()
-    await browserSession.cookies.flushStore()
+  let closing: Promise<void> | undefined
+  const close = () => {
+    closing ??= (async () => {
+      parent?.removeListener('closed', onParentClosed)
+      if (!taskWindow.isDestroyed())
+        await new Promise<void>(resolve => {
+          taskWindow.once('closed', resolve)
+          taskWindow.destroy()
+        })
+      browserSession.flushStorageData()
+      await browserSession.cookies.flushStore()
+    })()
+    return closing
   }
+  const onParentClosed = () => {
+    void close().catch(() => {})
+  }
+  parent?.once('closed', onParentClosed)
   try {
     void contents.loadURL(url).catch(() => {})
     await waitForShopNavigation(contents)
     return {
-      url: () => contents.isDestroyed() ? '' : contents.getURL(),
+      url: () => (contents.isDestroyed() ? '' : contents.getURL()),
       identify: () => identifyShopContents(contents),
       async command(method, params) {
         if (contents.isDestroyed()) throw new Error('SHOP_PROFILE_PAGE_NOT_READY')
@@ -134,7 +166,10 @@ export async function createShopExecutionPage(storagePath: string, url: string):
       },
       close
     }
-  } catch (error) { await close(); throw error }
+  } catch (error) {
+    await close()
+    throw error
+  }
 }
 
 /** Third-party pages have no preload, Node access or Hermes IPC bridge. */
