@@ -5,7 +5,7 @@ import type { ShopBrowserProfile, ShopBrowserRequest } from '../../electron/shop
 import type { EnterpriseClientRuntime } from './runtime'
 import { ShopBrowserProfilesPanel } from './shop-browser-profiles'
 
-vi.mock('@/i18n/context', () => ({ useI18n: () => ({ locale: 'zh' }) }))
+vi.mock('@/i18n/context', () => ({ useI18n: () => ({ locale: 'zh', t: { common: { close: '关闭' } } }) }))
 afterEach(() => vi.unstubAllGlobals())
 
 function fixture() {

@@ -5,6 +5,8 @@ import { isShopBrowserUrl, type ShopBrowserBounds } from './shop-browser-types'
 import type { ShopExecutionPage } from './shop-browser-execution'
 
 export { isShopBrowserUrl } from './shop-browser-types'
+import type { ShopBrowserPageOptions } from './shop-browser-workspace-types'
+import { isBrowserNavigationUrl } from './shop-browser-workspace-types'
 
 export const shopBrowserTargets = {
   merchant: 'https://fxg.jinritemai.com/ffa/morder/order/list',
@@ -138,7 +140,8 @@ export async function createShopBrowserView(
   parent: BrowserWindow,
   storagePath: string,
   target: 'merchant' | 'feige',
-  bounds: ShopBrowserBounds
+  bounds: ShopBrowserBounds,
+  options?: ShopBrowserPageOptions
 ): Promise<ShopBrowserView> {
   const browserSession = configureShopSession(storagePath)
   const view = new WebContentsView({
@@ -151,13 +154,17 @@ export async function createShopBrowserView(
     }
   })
   const contents = view.webContents
+  const allowsUrl = options ? isBrowserNavigationUrl : isShopBrowserUrl
   const navigate = (event: { preventDefault(): void }, url: string) => {
-    if (!isShopBrowserUrl(url)) event.preventDefault()
+    if (!allowsUrl(url)) event.preventDefault()
   }
   contents.on('will-navigate', navigate)
   contents.on('will-redirect', navigate)
   contents.setWindowOpenHandler(({ url }) => {
-    if (isShopBrowserUrl(url)) void contents.loadURL(url).catch(() => {})
+    if (allowsUrl(url)) {
+      if (options) options.onNewWindow(url)
+      else void contents.loadURL(url).catch(() => {})
+    }
     return { action: 'deny' }
   })
   parent.contentView.addChildView(view)
@@ -175,7 +182,7 @@ export async function createShopBrowserView(
   setBounds(bounds)
   // Login navigation is user-initiated. Failure stays in the embedded surface
   // and can be retried without dropping the persisted profile.
-  void contents.loadURL(shopBrowserTargets[target]).catch(() => {})
+  void contents.loadURL(options?.initialUrl ?? shopBrowserTargets[target]).catch(() => {})
   let closing: Promise<void> | undefined
   const close = () => {
     if (closing) return closing
@@ -199,6 +206,23 @@ export async function createShopBrowserView(
   return {
     setBounds,
     identify: () => identifyShopContents(contents),
+    browser: {
+      state: () => ({
+        title: contents.isDestroyed() ? '' : contents.getTitle(),
+        url: contents.isDestroyed() ? '' : contents.getURL(),
+        loading: !contents.isDestroyed() && contents.isLoading(),
+        canGoBack: !contents.isDestroyed() && contents.navigationHistory.canGoBack(),
+        canGoForward: !contents.isDestroyed() && contents.navigationHistory.canGoForward()
+      }),
+      navigate(url) {
+        if (!allowsUrl(url)) throw new Error('SHOP_BROWSER_URL_REJECTED')
+        void contents.loadURL(url).catch(() => {})
+      },
+      back: () => { if (contents.navigationHistory.canGoBack()) contents.navigationHistory.goBack() },
+      forward: () => { if (contents.navigationHistory.canGoForward()) contents.navigationHistory.goForward() },
+      reload: () => contents.reload(),
+      setVisible: visible => view.setVisible(visible)
+    },
     close
   }
 }
