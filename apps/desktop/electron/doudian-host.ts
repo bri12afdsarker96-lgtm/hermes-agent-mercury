@@ -14,6 +14,9 @@ const bad = (code: string): never => {
 }
 
 const isolationCapability = 'hermes-task-isolation-v1'
+const foregroundGuardedHostSha256 = '62aca5f5e23fca7b6120959b9c41a23051cadf341415f5cc1150d422be7b52da'
+export const allowForegroundLocalDoudian = (packaged: boolean, local: boolean, optIn: string | undefined): boolean =>
+  !packaged && local && optIn === '1'
 export const doudianWorkbookExtensions = ['xlsx', 'xls', 'xlsm']
 const validId = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{32}$/.test(value)
 const validAmount = (value: unknown) => {
@@ -68,7 +71,7 @@ export function assertDoudianCapability(identity: unknown, action: DoudianReques
   const payment = capabilities?.doudian_payment
   const enabled = (value: typeof review) => value?.enabled === true && value.status === 'LIVE'
   const allowed = ['openReview', 'shops', 'manageShops', 'prepare', 'start', 'shopManagementList', 'shopManagementAdd', 'shopManagementRename', 'shopManagementPin', 'shopManagementMove', 'shopManagementPrepareDelete', 'shopManagementDelete', 'shopLoginStart', 'shopCheckStart', 'shopOperationStatus', 'shopLoginConfirm', 'shopLoginFinishFeige', 'shopOperationCancel'].includes(action) ? enabled(review)
-    : ['openPayment', 'preparePayment', 'startPayment'].includes(action) ? enabled(payment)
+    : ['openPayment', 'preparePayment', 'startPayment', 'pausePayment', 'resumePayment'].includes(action) ? enabled(payment)
       : ['capabilities', 'chooseWorkbook', 'status'].includes(action) ? enabled(review) || enabled(payment)
         : false
   if (!allowed) bad('DOUDIAN_FORBIDDEN')
@@ -150,7 +153,7 @@ export class DoudianHost {
   private buffer = ''
   private decoder = new StringDecoder('utf8')
   private closed = false
-  constructor(executable: string, spawnHost: typeof spawn = spawn) {
+  constructor(private readonly executable: string, spawnHost: typeof spawn = spawn, private readonly spawnForeground: typeof spawn = spawn) {
     this.child = spawnHost(executable, ['--hermes-review-host'], {
       shell: false,
       // The host creates the original WinForms windows in this process.
@@ -227,11 +230,16 @@ export class DoudianHost {
     this.child.stdin.end()
     this.child.kill()
   }
-  request(method: string, params: Record<string, string> = {}): Promise<unknown> {
+  async request(method: string, params: Record<string, string> = {}, dispatch?: { before(): void; after?(): void; foreground?: boolean }): Promise<unknown> {
     if (this.closed) {
-      return Promise.reject(new Error('DOUDIAN_HOST_LOST'))
+      throw new Error('DOUDIAN_HOST_LOST')
     }
 
+    if ((method === 'startPayment' || method === 'resumePayment') && dispatch?.foreground !== false) {
+      await this.grantPaymentForeground()
+      if (this.closed) throw new Error('DOUDIAN_HOST_LOST')
+    }
+    dispatch?.before()
     const requestId = id()
 
     return new Promise((resolve, reject) => {
@@ -245,6 +253,26 @@ export class DoudianHost {
 
       this.pending.set(requestId, { resolve, reject, timer })
       this.child.stdin.write(JSON.stringify({ id: requestId, method, params }) + '\n')
+      dispatch?.after?.()
+    })
+  }
+  private grantPaymentForeground(): Promise<void> {
+    const pid = this.child.pid
+    if (!pid || this.closed) return Promise.reject(new Error('DOUDIAN_HOST_LOST'))
+    return new Promise((resolve, reject) => {
+      const helper = this.spawnForeground(this.executable, ['--hermes-grant-foreground', String(pid)], {
+        shell: false, windowsHide: true, cwd: path.dirname(this.executable), stdio: 'ignore'
+      })
+      const timer = setTimeout(() => {
+        helper.kill()
+        reject(new Error('DOUDIAN_FOREGROUND_UNAVAILABLE'))
+      }, 5000)
+      helper.once('error', () => { clearTimeout(timer); reject(new Error('DOUDIAN_FOREGROUND_UNAVAILABLE')) })
+      helper.once('exit', code => {
+        clearTimeout(timer)
+        if (code === 0 && !this.closed && this.child.pid === pid) resolve()
+        else reject(new Error('DOUDIAN_FOREGROUND_UNAVAILABLE'))
+      })
     })
   }
   private fail(code: string) {
@@ -268,11 +296,15 @@ export interface DoudianDependencies {
   platform: string
   root: string
   localVerification?: boolean
+  localForeground?: boolean
+  verifyForegroundHost?(executable: string): Promise<boolean>
   authorize(action: DoudianRequest['action']): Promise<string>
   isCurrent(): boolean
   chooseWorkbook(): Promise<string | null>
   createHost?(executable: string): Pick<DoudianHost, 'request' | 'close'>
   verify?(root: string): Promise<string>
+  /** @deprecated Ignored; payment controls use the host protocol. */
+  acquirePaymentShortcut?(stop: () => void): () => void
 }
 
 export class DoudianController {
@@ -284,6 +316,7 @@ export class DoudianController {
   private taskId?: string
   private taskKind?: DoudianTask['kind']
   private taskState?: DoudianTask['state']
+  private paymentTransport?: DoudianRequest['transport']
   private shopOperation?: { taskId: string; shopId: string; kind: 'shop-login' | 'shop-check' }
   constructor(private deps: DoudianDependencies) {}
   close() {
@@ -301,8 +334,8 @@ export class DoudianController {
   }
   async operate(request: DoudianRequest): Promise<DoudianReply> {
     try {
-      // The legacy host and its browser descendants have no verified local sandbox.
-      if (this.deps.localVerification) return bad('DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE')
+      // Foreground developer testing is explicit; packaged local builds remain blocked.
+      if (this.deps.localVerification && !this.deps.localForeground) return bad('DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE')
       this.current()
 
       if (this.deps.platform !== 'win32') {
@@ -334,13 +367,15 @@ export class DoudianController {
         preparePayment: ['workbookId', 'amount', 'startRow', 'maxRows', 'mode'],
         start: ['taskId'],
         startPayment: ['taskId'],
+        pausePayment: ['taskId'],
+        resumePayment: ['taskId'],
         status: [],
         stop: ['taskId']
       }
 
       const allowed = Object.hasOwn(fields, request?.action ?? '') ? fields[request.action] : undefined
       const reviewOptions = ['startRow', 'maxRows', 'concurrency'] as const
-      const optional = request.action === 'prepare' ? reviewOptions : []
+      const optional = request.action === 'prepare' ? reviewOptions : request.action === 'preparePayment' ? ['transport'] as const : []
 
       if (
         !allowed ||
@@ -355,6 +390,8 @@ export class DoudianController {
       ) {
         return bad('DOUDIAN_INVALID_REQUEST')
       }
+      if (request.action === 'preparePayment' && request.transport !== undefined &&
+          request.transport !== 'desktop' && request.transport !== 'cdp') return bad('INVALID_TRANSPORT')
 
       // Cancellation remains available to the same fenced session during an enterprise network outage.
       if (request.action !== 'stop' && request.action !== 'shopOperationCancel') {
@@ -378,6 +415,10 @@ export class DoudianController {
       if (this.exclusive) {
         return bad('TASK_BUSY')
       }
+      if (['preparing', 'awaiting_confirmation', 'running', 'pausing', 'paused', 'stopping', 'unknown'].includes(this.taskState ?? '') &&
+          ['chooseWorkbook', 'prepare', 'preparePayment', 'openPayment', 'openReview', 'openFeige', 'manageShops', 'shopLoginStart', 'shopCheckStart', 'shopManagementDelete'].includes(request.action)) {
+        return bad('TASK_BUSY')
+      }
 
       this.exclusive = true
 
@@ -385,6 +426,14 @@ export class DoudianController {
         if (!this.host) {
           const executable = await (this.deps.verify ?? verifiedDoudianExecutable)(this.deps.root)
           this.current()
+
+          if (this.deps.localVerification && this.deps.localForeground) {
+            const allowed = this.deps.verifyForegroundHost
+              ? await this.deps.verifyForegroundHost(executable)
+              : hash(await fs.readFile(executable)) === foregroundGuardedHostSha256
+            if (!allowed) return bad('DOUDIAN_TEST_HOST_UNSAFE')
+            this.current()
+          }
 
           this.host = this.deps.createHost?.(executable) ?? new DoudianHost(executable)
 
@@ -410,7 +459,7 @@ export class DoudianController {
         this.current()
 
         let checkedCapabilities: DoudianReply['capabilities']
-        if (request.action.startsWith('shopManagement') || ['shopLoginStart', 'shopCheckStart', 'shopLoginConfirm', 'shopLoginFinishFeige', 'manageShops', 'prepare', 'start', 'preparePayment', 'startPayment', 'openReview', 'openPayment'].includes(request.action)) {
+        if (request.action.startsWith('shopManagement') || ['shopLoginStart', 'shopCheckStart', 'shopLoginConfirm', 'shopLoginFinishFeige', 'manageShops', 'prepare', 'start', 'preparePayment', 'startPayment', 'pausePayment', 'resumePayment', 'openReview', 'openPayment'].includes(request.action)) {
           checkedCapabilities = (await this.host.request('capabilities')) as DoudianReply['capabilities']
           this.current()
           if (checkedCapabilities?.authorized !== true || checkedCapabilities.authorizationMode !== 'enterprise-session-v1') {
@@ -418,6 +467,10 @@ export class DoudianController {
           }
           if (request.action.startsWith('shopManagement') && checkedCapabilities.shopManagement !== 1) return bad('SHOP_MANAGEMENT_UNSUPPORTED')
           if (['shopLoginStart', 'shopCheckStart', 'shopLoginConfirm', 'shopLoginFinishFeige'].includes(request.action) && checkedCapabilities.shopOperations !== 1) return bad('SHOP_OPERATION_UNSUPPORTED')
+          if (['pausePayment', 'resumePayment'].includes(request.action) && checkedCapabilities.paymentControls !== 1) return bad('PAYMENT_CONTROLS_UNSUPPORTED')
+          const cdpPayment = request.action === 'preparePayment' ? request.transport === 'cdp' :
+            ['startPayment', 'resumePayment'].includes(request.action) && this.paymentTransport === 'cdp'
+          if (cdpPayment && checkedCapabilities.paymentCdp !== 1) return bad('PAYMENT_CDP_UNSUPPORTED')
         }
 
         if (request.action === 'openPayment') {
@@ -467,7 +520,8 @@ export class DoudianController {
         let args: Record<string, string> = {}
 
         if (request.action.startsWith('shopManagement') || ['shopLoginStart', 'shopCheckStart', 'shopOperationStatus', 'shopLoginConfirm', 'shopLoginFinishFeige', 'shopOperationCancel'].includes(request.action)) {
-          if (['shopOperationStatus', 'shopLoginConfirm', 'shopLoginFinishFeige', 'shopOperationCancel'].includes(request.action) && request.taskId !== this.shopOperation?.taskId) return bad('TASK_NOT_FOUND')
+          if (['shopOperationStatus', 'shopLoginConfirm', 'shopLoginFinishFeige', 'shopOperationCancel'].includes(request.action) &&
+              (!this.shopOperation || request.taskId !== this.shopOperation.taskId || request.taskId !== this.taskId || this.taskKind !== this.shopOperation.kind)) return bad('TASK_NOT_FOUND')
           for (const key of allowed) args[key] = request[key as keyof DoudianRequest] as string
         } else if (request.action === 'prepare') {
           const file = this.files.get(request.workbookId!)
@@ -508,6 +562,9 @@ export class DoudianController {
           if (!validAmount(amount)) {
             return bad('INVALID_AMOUNT')
           }
+          if (request.transport === 'cdp' && !/^\+?0*5(?:\.0*)?\+?$/.test(amount!.trim().replaceAll(',', ''))) {
+            return bad('INVALID_AMOUNT')
+          }
 
           if (!validRow(startRow, 1) || !validRow(maxRows, 0)) {
             return bad('INVALID_RANGE')
@@ -516,21 +573,30 @@ export class DoudianController {
           if (request.mode !== 'standard' && request.mode !== 'new-order') {
             return bad('INVALID_MODE')
           }
+          if (request.transport === 'cdp' && request.mode !== 'standard') return bad('INVALID_MODE')
 
           args = { amount: amount!, maxRows, mode: request.mode, startRow, workbook: file }
-        } else if (request.action === 'start' || request.action === 'startPayment' || request.action === 'stop') {
+          if (request.transport !== undefined) args.transport = request.transport
+        } else if (['start', 'startPayment', 'pausePayment', 'resumePayment', 'stop'].includes(request.action)) {
           if (request.taskId !== this.taskId) {
             return bad('TASK_NOT_FOUND')
           }
-          if (request.action !== 'stop' &&
+          if (['start', 'startPayment'].includes(request.action) &&
               (this.taskState !== 'awaiting_confirmation' || this.taskKind !== (request.action === 'start' ? 'review' : 'payment'))) {
             return bad('NOT_PREPARED')
+          }
+          if (request.action === 'pausePayment' || request.action === 'resumePayment') {
+            if (this.taskKind !== 'payment') return bad('NOT_PAYMENT_TASK')
+            if (request.action === 'pausePayment' && this.taskState !== 'running') return bad('NOT_RUNNING')
+            if (request.action === 'resumePayment' && this.taskState !== 'paused' && this.taskState !== 'pausing') return bad('NOT_PAUSED')
           }
 
           args = { taskId: request.taskId! }
         }
 
-        const result = await this.host.request(request.action, args)
+        const result = request.action === 'startPayment' || request.action === 'resumePayment'
+          ? await this.host.request(request.action, args, { before: () => this.current(), foreground: this.paymentTransport !== 'cdp' })
+          : await this.host.request(request.action, args)
         this.current()
 
         if (request.action === 'capabilities') {
@@ -613,7 +679,7 @@ export class DoudianController {
             'completed',
             'failed'
           ].includes(task.state) || (['payment', 'payment-window'].includes(task.kind ?? '') &&
-            ['paused_balance', 'paused_review'].includes(task.state))) ||
+            ['pausing', 'paused', 'paused_balance', 'paused_review'].includes(task.state))) ||
           !Number.isSafeInteger(task.saved) ||
           task.saved < 0 ||
           !Array.isArray(task.messages)
@@ -624,15 +690,16 @@ export class DoudianController {
         }
 
         const expectedKind = request.action === 'prepare' || request.action === 'start' ? 'review' :
-          request.action === 'preparePayment' || request.action === 'startPayment' ? 'payment' :
+          ['preparePayment', 'startPayment', 'pausePayment', 'resumePayment'].includes(request.action) ? 'payment' :
           request.action === 'openPayment' ? 'payment-window' : request.action === 'openReview' ? 'review-window' :
-          request.action === 'openFeige' ? 'feige-window' : request.action === 'shopManagementDelete' ? 'shop-delete' : undefined
+          request.action === 'openFeige' ? 'feige-window' : request.action === 'shopManagementDelete' ? 'shop-delete' :
+          request.action === 'stop' ? this.taskKind : undefined
         const kindValid = ['review', 'payment', 'payment-window', 'review-window', 'feige-window', 'shop-delete', 'shop-login', 'shop-check'].includes(task.kind ?? '')
         const wrongStatusOwner = request.action === 'status' && this.taskId &&
           (task.taskId !== this.taskId || task.kind !== this.taskKind)
         if (!kindValid || (task.state !== 'idle' && !validId(task.taskId)) ||
             (expectedKind && task.kind !== expectedKind) || wrongStatusOwner ||
-            (['start', 'startPayment', 'stop'].includes(request.action) && task.taskId !== request.taskId)) {
+            (['start', 'startPayment', 'pausePayment', 'resumePayment', 'stop'].includes(request.action) && task.taskId !== request.taskId)) {
           this.close()
           return bad('DOUDIAN_PROTOCOL_ERROR')
         }
@@ -640,6 +707,8 @@ export class DoudianController {
         this.taskId = task.taskId ?? undefined
         this.taskKind = task.kind
         this.taskState = task.state
+        if (request.action === 'preparePayment') this.paymentTransport = request.transport ?? 'desktop'
+        else if (task.kind !== 'payment') this.paymentTransport = undefined
 
         return { ok: true, task }
       } finally {

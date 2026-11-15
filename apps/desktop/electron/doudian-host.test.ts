@@ -30,6 +30,11 @@ it('enforces server capabilities for each IPC operation', () => {
   expect(() => assertDoudianCapability(reviewOnly, 'openReview')).not.toThrow()
   expect(() => assertDoudianCapability(reviewOnly, 'startPayment')).toThrow('DOUDIAN_FORBIDDEN')
   expect(() => assertDoudianCapability(paymentOnly, 'openPayment')).not.toThrow()
+  for (const action of ['pausePayment', 'resumePayment'] as const) {
+    expect(() => assertDoudianCapability(paymentOnly, action)).not.toThrow()
+    expect(() => assertDoudianCapability(reviewOnly, action)).toThrow('DOUDIAN_FORBIDDEN')
+    expect(() => assertDoudianCapability({}, action)).toThrow('DOUDIAN_FORBIDDEN')
+  }
   expect(() => assertDoudianCapability(paymentOnly, 'prepare')).toThrow('DOUDIAN_FORBIDDEN')
   expect(() => assertDoudianCapability({}, 'capabilities')).toThrow('DOUDIAN_FORBIDDEN')
   expect(() => assertDoudianCapability({ product_capabilities: { doudian_payment: { enabled: true, status: 'DISABLED' } } }, 'openPayment')).toThrow('DOUDIAN_FORBIDDEN')
@@ -164,6 +169,9 @@ describe.runIf(process.platform === 'win32')('Windows controller flow (synthetic
     const shopId = 'b'.repeat(32)
     expect((await f.call('prepare', { workbookId, shopId })).ok).toBe(true)
     expect(f.host.request).toHaveBeenCalledWith('prepare', { shopId, workbook: file })
+    expect((await f.call('stop', { taskId })).ok).toBe(true)
+    f.host.request.mockResolvedValueOnce({ taskId, kind: 'review', state: 'stopped', saved: 0, summary: '', error: '', messages: [] })
+    expect((await f.call('status')).ok).toBe(true)
     expect((await f.call('preparePayment', { workbookId, amount: '1', startRow: '1', maxRows: '0', mode: 'standard' })).ok).toBe(true)
     expect(f.host.request).toHaveBeenCalledWith('preparePayment', { workbook: file, amount: '1', startRow: '1', maxRows: '0', mode: 'standard' })
     const other = fixture()

@@ -326,7 +326,7 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
       {task && task.state !== 'idle' ? (
         <section aria-label={copy.task} className="space-y-3 border-t border-(--ui-stroke-tertiary) pt-4">
           <div className="flex flex-wrap items-center gap-4" role="status">
-            <span>{copy.states[unknown || task.state === 'paused_balance' || task.state === 'paused_review' ? 'unknown' : task.state]}</span>
+            <span>{copy.states[unknown || task.state === 'pausing' || task.state === 'paused' || task.state === 'paused_balance' || task.state === 'paused_review' ? 'unknown' : task.state]}</span>
             <span>
               {copy.saved}: {task.saved}
             </span>

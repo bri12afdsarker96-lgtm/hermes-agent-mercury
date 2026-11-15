@@ -1,6 +1,6 @@
 import { execFile, execFileSync, spawn } from 'node:child_process'
 import crypto from 'node:crypto'
-import { assertDoudianCapability, DoudianController, doudianScope, doudianWorkbookExtensions } from './doudian-host'
+import { allowForegroundLocalDoudian, assertDoudianCapability, DoudianController, doudianScope, doudianWorkbookExtensions } from './doudian-host'
 import type { DoudianRequest } from './doudian-types'
 import fs from 'node:fs'
 import http from 'node:http'
@@ -13634,6 +13634,8 @@ ipcMain.handle('hermes:api', async (_event, request) => {
 const enterpriseSessions = new EnterpriseSessionStore()
 
 const doudianControllers = new Map<number, { sessionId: string; controller: DoudianController; current(): boolean }>()
+const localForegroundDoudian = allowForegroundLocalDoudian(app.isPackaged, enterpriseOriginSelection.local, process.env.HERMES_DOUDIAN_FOREGROUND_TEST)
+if (localForegroundDoudian) console.warn('[doudian] foreground local test enabled; TD and its browser run without a verified sandbox')
 const doudianFenceTimer = setInterval(() => {
   for (const [senderId, entry] of doudianControllers) {
     if (!entry.current()) { entry.controller.close(); doudianControllers.delete(senderId) }
@@ -13658,6 +13660,7 @@ ipcMain.handle('hermes:enterprise:doudian', async (event, payload: DoudianReques
     const controller = new DoudianController({
       platform: process.platform,
       localVerification: enterpriseOriginSelection.local,
+      localForeground: localForegroundDoudian,
       root: app.isPackaged ? path.join(process.resourcesPath, 'doudian') : path.join(app.getAppPath(), 'build', 'doudian'),
       isCurrent: current,
       async authorize(action) {

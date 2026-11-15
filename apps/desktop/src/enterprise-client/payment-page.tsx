@@ -36,7 +36,18 @@ const labels = {
     '打款已暂停，需人工核验。',
     '任务已停止。',
     '任务已完成。',
-    '本地安全环境尚未就绪，暂时无法运行。'
+    '本地安全环境尚未就绪，暂时无法运行。',
+    '无法注册 Esc 紧急停止快捷键，打款未启动。请检查快捷键占用后重试。',
+    '已按 Esc，打款未启动。',
+    '暂停',
+    '继续',
+    '在当前操作完成后暂停，先保存工作簿再进入已暂停状态。继续恢复同一任务的同一步。已提交的打款状态保留待核验。停止会真正取消当前任务。关闭后重新选择同一工作簿并检查准备，可按 D 列已保存结果续接。',
+    '执行模块尚不支持暂停和继续，请更新执行模块。',
+    '操作方式',
+    'CDP 网页控件',
+    '原桌面兼容',
+    'CDP 每单固定 5 元补差价。仅在款项记录精确匹配“暂无记录，每个订单最多打款5次”时处理，其他记录跳过；不读取聊天内容。结果回填 D 列。',
+    '执行模块尚不支持 CDP 打款，请更新执行模块或手动选择原桌面兼容。'
   ],
   en: [
     'Small payments',
@@ -65,11 +76,56 @@ const labels = {
     'Payment paused; manual verification is required.',
     'Task stopped.',
     'Task completed.',
-    'The local security environment is not ready; this task cannot run yet.'
+    'The local security environment is not ready; this task cannot run yet.',
+    'Could not register the Esc emergency stop shortcut. Payment was not started; check for a shortcut conflict and retry.',
+    'Esc was pressed; payment was not started.',
+    'Pause',
+    'Resume',
+    'Pause after the current operation completes. The workbook is saved before the task enters the paused state. Resume continues the same task at the same step. Submitted payments remain pending verification. Stop cancels the current task. After closing, choose the same workbook and prepare again to continue from the saved results in column D.',
+    'The execution module does not support pause and resume yet. Update the module.',
+    'Transport',
+    'CDP web controls',
+    'Original desktop compatibility',
+    'CDP uses a fixed CNY 5 price adjustment per order. Only payment records exactly matching “暂无记录，每个订单最多打款5次” are eligible. Other records are skipped. Chat content is not read. Results are saved in column D.',
+    'The execution module does not support CDP payments. Update it or manually select original desktop compatibility.'
   ]
 } as const
 
+const taskStateLabels = {
+  zh: {
+    idle: '空闲',
+    preparing: '正在准备',
+    awaiting_confirmation: '等待确认开始',
+    running: '正在打款',
+    pausing: '正在保存并暂停',
+    paused: '打款已暂停。',
+    stopping: '正在停止',
+    stopped: labels.zh[24],
+    completed: labels.zh[25],
+    paused_balance: labels.zh[22],
+    paused_review: labels.zh[23],
+    failed: '任务失败。',
+    unknown: '任务状态未知，请人工核验。'
+  },
+  en: {
+    idle: 'Idle',
+    preparing: 'Preparing',
+    awaiting_confirmation: 'Awaiting confirmation',
+    running: 'Making payments',
+    pausing: 'Saving and pausing',
+    paused: 'Payment paused.',
+    stopping: 'Stopping',
+    stopped: labels.en[24],
+    completed: labels.en[25],
+    paused_balance: labels.en[22],
+    paused_review: labels.en[23],
+    failed: 'Task failed.',
+    unknown: 'Task state unknown. Manual verification is required.'
+  }
+} satisfies Record<'zh' | 'en', Record<DoudianTask['state'], string>>
+
 type Capability = 'checking' | 'ready' | 'unverified' | 'unavailable'
+type PaymentAction = 'chooseWorkbook' | 'preparePayment' | 'startPayment' | 'pausePayment' | 'resumePayment' | 'stop'
 
 function paymentCapability(result: DoudianReply): Capability {
   if (!result.ok || result.capabilities?.protocol !== 1 || result.capabilities.authorized !== true) {
@@ -85,18 +141,23 @@ export function PaymentPage({ runtime }: DoudianPageProps) {
 
 function PaymentWorkspace({ runtime }: DoudianPageProps) {
   const { locale } = useI18n()
-  const t = locale === 'zh' || locale === 'zh-hant' ? labels.zh : labels.en
+  const language = locale === 'zh' || locale === 'zh-hant' ? 'zh' : 'en'
+  const t = labels[language]
+  const states = taskStateLabels[language]
   const [workbook, setWorkbook] = useState<{ id: string; name: string }>()
   const [mode, setMode] = useState<'standard' | 'new-order'>('standard')
+  const [transport, setTransport] = useState<NonNullable<DoudianRequest['transport']>>('cdp')
   const [amount, setAmount] = useState('')
   const [startRow, setStartRow] = useState('1')
   const [maxRows, setMaxRows] = useState('0')
   const [task, setTask] = useState<DoudianTask>()
   const [capability, setCapability] = useState<Capability>('checking')
+  const [paymentControls, setPaymentControls] = useState(false)
+  const [paymentCdp, setPaymentCdp] = useState(false)
   const [securityBlocked, setSecurityBlocked] = useState(false)
   const [sessionOwner, setSessionOwner] = useState(runtime)
   const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [pendingAction, setPendingAction] = useState<PaymentAction>()
   const flight = useRef(false)
   const revision = useRef(0)
   const runtimeRef = useRef(runtime)
@@ -104,6 +165,17 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
   const current = sessionOwner === runtime
   const displayedTask = current ? task : undefined
   const gate = current ? capability : 'checking'
+  const busy = pendingAction !== undefined
+  const paymentAmount = transport === 'cdp' ? '5' : amount
+  const paymentMode = transport === 'cdp' ? 'standard' : mode
+
+  const active = !!displayedTask &&
+    ['preparing', 'awaiting_confirmation', 'running', 'pausing', 'paused', 'stopping', 'unknown'].includes(displayedTask.state)
+
+  const canPause = gate === 'ready' && paymentControls && displayedTask?.state === 'running' && !!displayedTask.taskId
+  const canResume = gate === 'ready' && paymentControls && displayedTask?.state === 'paused' && !!displayedTask.taskId
+  const canStop = active && displayedTask.state !== 'stopping' && !!displayedTask.taskId
+  const pausing = pendingAction === 'pausePayment' || displayedTask?.state === 'pausing'
 
   // Fence pending operations and clear the previous session's state.
   // eslint-disable-next-line no-restricted-syntax
@@ -115,8 +187,11 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
     setWorkbook(undefined)
     setTask(undefined)
     setError('')
-    setBusy(false)
+    setPendingAction(undefined)
     setCapability('checking')
+    setPaymentControls(false)
+    setPaymentCdp(false)
+    setTransport('cdp')
     setSecurityBlocked(false)
 
     if (!runtime?.doudian) {
@@ -132,6 +207,8 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
       .then(result => {
         if (alive) {
           setCapability(paymentCapability(result))
+          setPaymentControls(result.ok && result.capabilities?.paymentControls === 1)
+          setPaymentCdp(result.ok && result.capabilities?.paymentCdp === 1)
           setSecurityBlocked(!result.ok && result.error === 'DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE')
         }
       })
@@ -191,30 +268,32 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
     }
   }, [runtime, current, gate, t])
 
-  async function operate(action: 'chooseWorkbook' | 'preparePayment' | 'startPayment' | 'stop') {
+  async function operate(action: PaymentAction) {
     if (
       !runtime?.doudian ||
       !current ||
       flight.current ||
-      (action === 'chooseWorkbook' && gate !== 'ready' && gate !== 'unverified') ||
-      ((action === 'preparePayment' || action === 'startPayment') && gate !== 'ready') ||
-      (action === 'preparePayment' && (!workbook || !amount.trim() || !startRow.trim() || !maxRows.trim() || active)) ||
+      (action === 'chooseWorkbook' && (active || (gate !== 'ready' && gate !== 'unverified'))) ||
+      ((action === 'preparePayment' || action === 'startPayment' || action === 'resumePayment') && gate !== 'ready') ||
+      (action === 'preparePayment' && (!workbook || !paymentAmount.trim() || !startRow.trim() || !maxRows.trim() || active || (transport === 'cdp' && !paymentCdp))) ||
       (action === 'startPayment' &&
         (displayedTask?.kind !== 'payment' ||
           displayedTask.state !== 'awaiting_confirmation' ||
           !displayedTask.taskId)) ||
-      (action === 'stop' && !displayedTask?.taskId)
+      (action === 'pausePayment' && !canPause) ||
+      (action === 'resumePayment' && !canResume) ||
+      (action === 'stop' && !canStop)
     ) {
       return
     }
 
     flight.current = true
     const observed = ++revision.current
-    setBusy(true)
+    setPendingAction(action)
     setError('')
 
     try {
-      if (action === 'preparePayment' || action === 'startPayment') {
+      if (action === 'preparePayment' || action === 'startPayment' || action === 'resumePayment') {
         const verification = await runtime.doudian({ action: 'capabilities' })
 
         if (observed !== revision.current || runtimeRef.current !== runtime) {
@@ -223,6 +302,8 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
 
         const verified = paymentCapability(verification)
         setCapability(verified)
+        setPaymentControls(verification.ok && verification.capabilities?.paymentControls === 1)
+        setPaymentCdp(verification.ok && verification.capabilities?.paymentCdp === 1)
         setSecurityBlocked(!verification.ok && verification.error === 'DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE')
 
         if (verified !== 'ready') {
@@ -230,9 +311,21 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
 
           return
         }
+
+        if (action === 'resumePayment' && verification.capabilities?.paymentControls !== 1) {
+          setError(t[32])
+
+          return
+        }
+        if (action === 'preparePayment' && transport === 'cdp' && verification.capabilities?.paymentCdp !== 1) {
+          setError(t[37])
+
+          return
+        }
       }
 
-      if (action === 'startPayment') {
+      if (action === 'startPayment' || action === 'resumePayment') {
+        const expectedState = action === 'startPayment' ? 'awaiting_confirmation' : 'paused'
         const status = await runtime.doudian({ action: 'status' })
 
         if (observed !== revision.current || runtimeRef.current !== runtime) {
@@ -242,10 +335,13 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
         if (
           !status.ok ||
           status.task?.kind !== 'payment' ||
-          status.task.state !== 'awaiting_confirmation' ||
+          status.task.state !== expectedState ||
           status.task.taskId !== displayedTask?.taskId
         ) {
-          setTask(status.ok && status.task?.kind === 'payment' ? status.task : undefined)
+          if (status.ok) {
+            setTask(status.task?.kind === 'payment' ? status.task : undefined)
+          }
+
           setError(status.error || t[21])
 
           return
@@ -255,11 +351,11 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
       let request: Omit<DoudianRequest, 'sessionId'>
 
       if (action === 'preparePayment') {
-        request = { action, workbookId: workbook!.id, amount, startRow, maxRows, mode }
-      } else if (action === 'startPayment' || action === 'stop') {
-        request = { action, taskId: displayedTask!.taskId! }
-      } else {
+        request = { action, workbookId: workbook!.id, amount: paymentAmount, startRow, maxRows, mode: paymentMode, transport }
+      } else if (action === 'chooseWorkbook') {
         request = { action }
+      } else {
+        request = { action, taskId: displayedTask!.taskId! }
       }
 
       const result = await runtime.doudian(request)
@@ -273,13 +369,12 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
           setSecurityBlocked(true)
           setCapability('unavailable')
         }
-        setError(result.error === 'DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE' ? t[26] : result.error || t[14])
+
+        setError(result.error === 'DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE' ? t[26] :
+          result.error === 'DOUDIAN_ESCAPE_UNAVAILABLE' ? t[27] : result.error === 'DOUDIAN_START_CANCELLED' ? t[28] : result.error || t[14])
       } else if (action === 'chooseWorkbook' && result.workbook) {
         setWorkbook(result.workbook)
-      } else if (
-        (action === 'preparePayment' || action === 'startPayment' || action === 'stop') &&
-        result.task?.kind === 'payment'
-      ) {
+      } else if (action !== 'chooseWorkbook' && result.task?.kind === 'payment') {
         setTask(result.task)
       } else if (action !== 'chooseWorkbook') {
         setError(t[14])
@@ -295,14 +390,10 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
     } finally {
       if (observed === revision.current) {
         flight.current = false
-        setBusy(false)
+        setPendingAction(undefined)
       }
     }
   }
-
-  const active =
-    displayedTask &&
-    ['preparing', 'awaiting_confirmation', 'running', 'stopping', 'unknown'].includes(displayedTask.state)
 
   return (
     <section className="hesc-page space-y-4" data-testid="payment-page">
@@ -323,13 +414,24 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
         <span className="break-all">{workbook?.name ?? t[2]}</span>
       </div>
       <p className="text-sm text-muted-foreground">{t[19]}</p>
+      <p className="text-sm text-muted-foreground">{t[31]}</p>
+      {gate === 'ready' && !paymentControls && <p className="text-sm text-muted-foreground">{t[32]}</p>}
+      {transport === 'cdp' && <p className="text-sm text-muted-foreground">{t[36]}</p>}
+      {transport === 'cdp' && gate === 'ready' && !paymentCdp && <p role="alert">{t[37]}</p>}
       <div className="flex flex-wrap items-end gap-4">
+        <label className="flex flex-col gap-2">
+          {t[33]}
+          <select disabled={busy || !!active} onChange={event => setTransport(event.target.value as typeof transport)} value={transport}>
+            <option value="cdp">{t[34]}</option>
+            <option value="desktop">{t[35]}</option>
+          </select>
+        </label>
         <label className="flex flex-col gap-2">
           {t[3]}
           <select
-            disabled={busy || !!active}
+            disabled={busy || !!active || transport === 'cdp'}
             onChange={event => setMode(event.target.value as typeof mode)}
-            value={mode}
+            value={paymentMode}
           >
             <option value="standard">{t[4]}</option>
             <option value="new-order">{t[5]}</option>
@@ -338,10 +440,10 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
         <label className="flex flex-col gap-2">
           {t[6]}
           <Input
-            disabled={busy || !!active}
+            disabled={busy || !!active || transport === 'cdp'}
             inputMode="decimal"
             onChange={event => setAmount(event.target.value)}
-            value={amount}
+            value={paymentAmount}
           />
         </label>
         <label className="flex flex-col gap-2">
@@ -366,7 +468,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
       <div className="flex flex-wrap gap-2">
         <Button
           disabled={
-            busy || gate !== 'ready' || !!active || !workbook || !amount.trim() || !startRow.trim() || !maxRows.trim()
+            busy || gate !== 'ready' || !!active || !workbook || !paymentAmount.trim() || !startRow.trim() || !maxRows.trim() || (transport === 'cdp' && !paymentCdp)
           }
           onClick={() => void operate('preparePayment')}
         >
@@ -384,9 +486,23 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
         >
           {t[10]}
         </Button>
+        <Button
+          disabled={busy || !canPause}
+          onClick={() => void operate('pausePayment')}
+          variant="outline"
+        >
+          {pausing ? states.pausing : t[29]}
+        </Button>
+        <Button
+          disabled={busy || !canResume}
+          onClick={() => void operate('resumePayment')}
+          variant="outline"
+        >
+          {t[30]}
+        </Button>
         {active && displayedTask?.taskId && (
           <Button
-            disabled={busy || displayedTask.state === 'stopping'}
+            disabled={busy || !canStop}
             onClick={() => void operate('stop')}
             variant="outline"
           >
@@ -396,7 +512,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
       </div>
       {displayedTask && (
         <div aria-label={t[13]} aria-live="polite" className="space-y-1">
-          <p>{displayedTask.state === 'paused_balance' ? t[22] : displayedTask.state === 'paused_review' ? t[23] : displayedTask.state === 'stopped' ? t[24] : displayedTask.state === 'completed' ? t[25] : displayedTask.state}</p>
+          <p>{pausing ? states.pausing : states[displayedTask.state]}</p>
           <p>{displayedTask.summary}</p>
           <p>
             {t[18]}: {displayedTask.saved}

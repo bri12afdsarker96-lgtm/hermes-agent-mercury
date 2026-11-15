@@ -1,7 +1,7 @@
 export type DoudianAction =
   | 'capabilities' | 'shops' | 'manageShops' | 'chooseWorkbook'
   | 'prepare' | 'start' | 'stop' | 'status'
-  | 'preparePayment' | 'startPayment'
+  | 'preparePayment' | 'startPayment' | 'pausePayment' | 'resumePayment'
   | 'openPayment' | 'openReview' | 'openFeige'
   | 'shopManagementList' | 'shopManagementAdd' | 'shopManagementRename' | 'shopManagementPin'
   | 'shopManagementMove' | 'shopManagementPrepareDelete' | 'shopManagementDelete'
@@ -23,6 +23,7 @@ export interface DoudianRequest {
   confirmation?: string
   decision?: string
   mode?: 'standard' | 'new-order'
+  transport?: 'desktop' | 'cdp'
 }
 
 export interface DoudianShop {
@@ -67,6 +68,8 @@ export interface DoudianTask {
     | 'preparing'
     | 'awaiting_confirmation'
     | 'running'
+    | 'pausing'
+    | 'paused'
     | 'stopping'
     | 'stopped'
     | 'completed'
@@ -90,6 +93,8 @@ export interface DoudianReply {
     authorized: boolean
     authorizationMode?: string
     paymentUi?: number
+    paymentControls?: number
+    paymentCdp?: number
     reviewUi?: number
     feigeUi?: number
     taskIsolation?: string

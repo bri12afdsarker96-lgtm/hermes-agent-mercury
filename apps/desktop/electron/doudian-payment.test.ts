@@ -28,8 +28,8 @@ function fixture(paymentUi = 1) {
 }
 
 describe('original payment session and tenant authority', () => {
-  it.each(['paused_balance', 'paused_review', 'stopped', 'completed'])(
-    'passes terminal payment-window status %s and does not start it', async state => {
+  it.each(['pausing', 'paused', 'paused_balance', 'paused_review', 'stopped', 'completed'])(
+    'passes payment-window status %s and does not start it', async state => {
       const { controller, host } = fixture()
       await controller.operate({ sessionId: 'test', action: 'openPayment' })
       const original = host.request.getMockImplementation()!
@@ -41,7 +41,7 @@ describe('original payment session and tenant authority', () => {
       expect(host.request.mock.calls.some(([method]) => method === 'startPayment')).toBe(false)
     }
   )
-  it.each(['paused_balance', 'paused_review'])(
+  it.each(['pausing', 'paused', 'paused_balance', 'paused_review'])(
     'accepts %s only for payment kinds', async state => {
       for (const kind of ['payment', 'review']) {
         const { controller, host } = fixture()
