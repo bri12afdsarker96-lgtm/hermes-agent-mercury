@@ -2,8 +2,10 @@ import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 
-import type { ShopBrowserBounds, ShopBrowserProfile, ShopBrowserReply, ShopBrowserRequest } from './shop-browser-types'
 import type { BoundShopExecution, ShopExecutionTransport } from './shop-browser-execution'
+import type { ShopBrowserBounds, ShopBrowserProfile, ShopBrowserReply, ShopBrowserRequest } from './shop-browser-types'
+import type { ShopBrowserPageControls, ShopBrowserWorkspace } from './shop-browser-workspace-types'
+import { ShopBrowserBookmarks } from './shop-browser-bookmarks'
 import { recoverableShopBrowserErrors } from './shop-browser-types'
 
 export interface ShopBrowserAuthority {
@@ -19,6 +21,8 @@ export interface ShopBrowserView {
   identify(): Promise<{ shopId: string; shopName: string } | null>
   setBounds(bounds: ShopBrowserBounds): void
   close(): Promise<void>
+  browser?: ShopBrowserPageControls
+  workspace?: ShopBrowserWorkspace
 }
 export interface ShopBrowserDependencies {
   root: string
@@ -71,8 +75,15 @@ export class ShopBrowserProfiles {
   private invalidated = false
   private opened?: { id: string; view: ShopBrowserView }
   private executions = new Set<BoundShopExecution>()
+  private bookmarks: ShopBrowserBookmarks
 
-  constructor(private deps: ShopBrowserDependencies) {}
+  constructor(private deps: ShopBrowserDependencies) {
+    this.bookmarks = new ShopBrowserBookmarks({
+      root: deps.root,
+      authorize: () => this.authority(),
+      isCurrent: () => !this.invalidated && deps.isCurrent()
+    })
+  }
 
   private assertCurrent() {
     if (this.invalidated || !this.deps.isCurrent()) fail('SHOP_PROFILE_OWNER_CHANGED')
@@ -239,7 +250,9 @@ export class ShopBrowserProfiles {
       close: [],
       relogin: ['profileId'],
       delete: ['profileId'],
-      bounds: ['profileId', 'bounds']
+      bounds: ['profileId', 'bounds'],
+      browser: ['profileId', 'browser'],
+      bookmarks: ['profileId', 'bookmark', 'expectedRevision']
     }
     const allowed = fields[request?.action]
     if (
@@ -262,7 +275,7 @@ export class ShopBrowserProfiles {
     const scope = await this.authority()
     const profiles = await this.read(scope)
     if (request.action === 'list')
-      return { ok: true, profiles: profiles.map(publicProfile), openProfileId: this.opened?.id ?? null }
+      return { ok: true, profiles: profiles.map(publicProfile), openProfileId: this.opened?.id ?? null, browser: this.opened?.view.workspace?.snapshot() }
     if (request.action === 'create') {
       const profile: StoredProfile = {
         id: randomUUID(),
@@ -283,6 +296,31 @@ export class ShopBrowserProfiles {
     }
     const profile = profiles.find(item => item.id === request.profileId)
     if (!profile) fail('SHOP_PROFILE_NOT_FOUND')
+    if (request.action === 'bookmarks') {
+      const bookmarks = await this.bookmarks.operate(request.bookmark!, request.expectedRevision)
+
+      return { ok: true, bookmarks, openProfileId: this.opened?.id ?? null }
+    }
+
+    if (request.action === 'browser') {
+      if (this.opened?.id !== profile.id) {
+        fail('SHOP_PROFILE_NOT_OPEN')
+      }
+
+      if (!this.opened.view.workspace) {
+        fail('SHOP_BROWSER_UNAVAILABLE')
+      }
+
+      const browser = await this.opened.view.workspace.operate(request.browser!)
+
+      await this.authority()
+      if (!browser.tabs.length) {
+        await this.closeView()
+      }
+
+      return { ok: true, browser, openProfileId: this.opened?.id ?? null }
+    }
+
     if (request.action === 'open') {
       await this.closeView()
       const view = await this.deps.createView(this.storage(scope, profile), request.target!, request.bounds!)
@@ -338,6 +376,6 @@ export class ShopBrowserProfiles {
       // Session directories may remain OS-locked until Chromium exits. Their
       // cookies are cleared first and the metadata never points to them again.
     }
-    return { ok: true, profile: publicProfile(profile), openProfileId: this.opened?.id ?? null }
+    return { ok: true, profile: publicProfile(profile), openProfileId: this.opened?.id ?? null, browser: this.opened?.view.workspace?.snapshot() }
   }
 }

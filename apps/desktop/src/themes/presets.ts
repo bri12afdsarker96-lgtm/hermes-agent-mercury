@@ -276,7 +276,52 @@ export const slateTheme: DesktopTheme = {
   }
 }
 
+export const codexTheme: DesktopTheme = {
+  ...monoTheme,
+  name: 'codex',
+  label: 'Codex',
+  description: 'Neutral surfaces with a quiet, focused workspace',
+  colors: {
+    ...monoTheme.colors,
+    background: '#ffffff',
+    foreground: '#242424',
+    card: '#ffffff',
+    cardForeground: '#242424',
+    muted: '#f3f3f3',
+    mutedForeground: '#737373',
+    popover: '#ffffff',
+    popoverForeground: '#242424',
+    primary: '#262626',
+    primaryForeground: '#ffffff',
+    secondary: '#eeeeee',
+    secondaryForeground: '#343434',
+    accent: '#eeeeee',
+    accentForeground: '#242424',
+    border: '#e7e7e7',
+    input: '#dddddd',
+    ring: '#8a8a8a',
+    midground: '#737373',
+    destructive: '#bd3434',
+    sidebarBackground: '#f7f7f7',
+    sidebarBorder: '#ededed',
+    userBubble: '#f3f3f3',
+    userBubbleBorder: '#e7e7e7'
+  },
+  darkColors: {
+    ...monoTheme.colors,
+    background: '#212121',
+    card: '#252525',
+    popover: '#2b2b2b',
+    sidebarBackground: '#181818',
+    border: '#373737',
+    sidebarBorder: '#303030',
+    primary: '#f0f0f0',
+    primaryForeground: '#202020'
+  }
+}
+
 export const BUILTIN_THEMES: Record<string, DesktopTheme> = {
+  codex: codexTheme,
   nous: nousTheme,
   midnight: midnightTheme,
   ember: emberTheme,
@@ -288,4 +333,4 @@ export const BUILTIN_THEMES: Record<string, DesktopTheme> = {
 export const BUILTIN_THEME_LIST = Object.values(BUILTIN_THEMES)
 
 /** Skin used when nothing is persisted or the persisted name is retired. */
-export const DEFAULT_SKIN_NAME = 'nous'
+export const DEFAULT_SKIN_NAME = 'codex'

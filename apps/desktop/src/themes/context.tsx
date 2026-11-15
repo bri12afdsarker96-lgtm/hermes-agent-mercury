@@ -203,6 +203,10 @@ function applyTheme(theme: DesktopTheme, mode: 'light' | 'dark', nativeAppearanc
   // Brand seeds feed every glass + shadcn token via `color-mix()` in styles.css.
   const seeds: Record<string, string> = {
     '--theme-foreground': c.foreground,
+    '--theme-primary-seed': c.primary,
+    '--theme-primary-foreground-seed': c.primaryForeground,
+    '--theme-muted-foreground-seed': c.mutedForeground,
+    '--theme-border-seed': c.border,
     '--theme-primary': c.primary,
     '--theme-secondary': c.secondary,
     '--theme-accent-soft': c.accent,

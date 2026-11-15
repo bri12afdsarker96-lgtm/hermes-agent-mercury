@@ -11,6 +11,7 @@ import type { ShopBrowserProfile, ShopBrowserRequest } from '../../electron/shop
 import { recoverableShopBrowserErrors } from '../../electron/shop-browser-types'
 
 import type { EnterpriseClientRuntime } from './runtime'
+import { ShopBrowserWorkspacePanel } from './shop-browser-workspace'
 
 export function ShopBrowserProfilesPanel({
   runtime,
@@ -211,6 +212,11 @@ export function ShopBrowserProfilesPanel({
     [invoke, selected, bounds]
   )
 
+  const browserClosed = useCallback(() => {
+    setOpened(null)
+    void run(refresh)
+  }, [run, refresh])
+
   const confirm = (action: 'relogin' | 'delete') =>
     void run(async () => {
       const reply = await runtime.shopBrowser!({ action: 'close' })
@@ -249,7 +255,7 @@ export function ShopBrowserProfilesPanel({
 
   if (nativeLayout) {
     return (
-      <section aria-label={layout.shops} className="cs-native-page cs-shops">
+      <section aria-label={layout.shops} className="cs-native-page cs-shops" data-browser-open={!!opened}>
         <h2>{layout.shops}</h2>
         <div className="cs-toolbar">
           <Button disabled={busy} onClick={() => invoke({ action: 'create' })}>
@@ -397,7 +403,40 @@ export function ShopBrowserProfilesPanel({
             ) : null}
           </div>
         ) : null}
-        <div aria-label={copy.browser} className="cs-native-browser" ref={slot} style={{ height: opened ? 500 : 0 }} />
+        {opened ? (
+          <div className="cs-browser-section">
+            <header>
+              <h2>{selectedProfile?.shopName || selectedProfile?.displayName}</h2>
+              <div>
+                <Button
+                  disabled={busy}
+                  onClick={() => invoke({ action: 'identify', profileId: opened })}
+                  variant="secondary"
+                >
+                  {copy.identify}
+                </Button>
+                <Button disabled={busy} onClick={() => invoke({ action: 'close' })} variant="secondary">
+                  {copy.close}
+                </Button>
+              </div>
+            </header>
+            {error ? (
+              <p className="cs-error" role="alert">
+                {copy.failed} ({error})
+              </p>
+            ) : null}
+            <ShopBrowserWorkspacePanel
+              key={opened}
+              onClosed={browserClosed}
+              profileId={opened}
+              runtime={runtime}
+              shopVerified={selectedProfile?.loginState === 'verified'}
+              viewportRef={slot}
+            />
+          </div>
+        ) : (
+          <div className="cs-native-browser" ref={slot} style={{ height: 0 }} />
+        )}
       </section>
     )
   }
@@ -483,7 +522,18 @@ export function ShopBrowserProfilesPanel({
           ) : null}
         </>
       ) : null}
-      <div aria-label={copy.browser} className="w-full" ref={slot} style={{ height: opened ? 600 : 0 }} />
+      {opened ? (
+        <ShopBrowserWorkspacePanel
+          key={opened}
+          onClosed={browserClosed}
+          profileId={opened}
+          runtime={runtime}
+          shopVerified={selectedProfile?.loginState === 'verified'}
+          viewportRef={slot}
+        />
+      ) : (
+        <div className="w-full" ref={slot} style={{ height: 0 }} />
+      )}
     </section>
   )
 }

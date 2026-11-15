@@ -1,5 +1,6 @@
 import './enterprise-design-tokens.css'
 import './enterprise-client.css'
+import './enterprise-codex.css'
 
 import { type ComponentType, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '@nanostores/react'

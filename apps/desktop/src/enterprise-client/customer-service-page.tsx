@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { useI18n } from '@/i18n/context'
 import { customerServiceCopy } from '@/i18n/customer-service'
 import { customerServiceLayoutCopy } from '@/i18n/customer-service-layout'
+import { LayoutDashboard, MessageSquareText, NotebookTabs, Users } from '@/lib/icons'
 
 import type { ShopBrowserProfile } from '../../electron/shop-browser-types'
 
@@ -54,14 +55,16 @@ export function CustomerServicePage({
         <nav aria-label={layout.title}>
           {(
             [
-              ['shops', '⌂', layout.shops],
-              ['rules', '☷', copy.rules],
-              ['workbench', '▦', layout.workbench],
-              ['authorization', '♧', layout.authorization]
+              ['shops', LayoutDashboard, layout.shops],
+              ['rules', NotebookTabs, copy.rules],
+              ['workbench', MessageSquareText, layout.workbench],
+              ['authorization', Users, layout.authorization]
             ] as const
-          ).map(([id, icon, title]) => (
+          ).map(([id, Icon, title]) => (
             <button data-active={page === id} key={id} onClick={() => navigate(id)} type="button">
-              <span aria-hidden="true">{icon}</span>
+              <span aria-hidden="true">
+                <Icon />
+              </span>
               {title}
             </button>
           ))}

@@ -3,8 +3,9 @@ import crypto from 'node:crypto'
 import { allowForegroundLocalDoudian, assertDoudianCapability, DoudianController, doudianScope, doudianWorkbookExtensions } from './doudian-host'
 import type { DoudianRequest } from './doudian-types'
 import { ShopBrowserProfiles, validShopBounds } from './shop-browser-profiles'
-import { clearShopBrowserStorage, createShopBrowserView, createShopExecutionPage, shopBrowserExecutionTargets } from './shop-browser-electron'
+import { clearShopBrowserStorage, createShopExecutionPage, shopBrowserExecutionTargets } from './shop-browser-electron'
 import { createShopExecutionTransport } from './shop-browser-execution'
+import { createShopBrowserWorkspace } from './shop-browser-workspace'
 import type { ShopBrowserRequest } from './shop-browser-types'
 import { CustomerServicePreview } from './customer-service-preview'
 import type { CustomerServiceRequest } from './customer-service-types'
@@ -13693,7 +13694,7 @@ function shopBrowserController(event: IpcMainInvokeEvent, sessionId: string) {
         if (!current()) throw new Error('SHOP_PROFILE_OWNER_CHANGED')
         return { origin: new URL(active.baseUrl).origin, tenantId: identity.tenant_id!, principalId: identity.principal_id! }
       },
-      createView: (storage, target, bounds) => createShopBrowserView(parent, storage, target, bounds),
+      createView: (storage, target, bounds) => createShopBrowserWorkspace(parent, storage, target, bounds, current),
       createExecution: (storage, target) => createShopExecutionTransport(shopBrowserExecutionTargets[target],
         url => createShopExecutionPage(storage, url, parent), current),
       clearStorage: clearShopBrowserStorage

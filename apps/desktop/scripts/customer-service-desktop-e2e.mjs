@@ -172,7 +172,7 @@ async function launch() {
           })
         }
         return new Response(
-          '<!doctype html><html lang="zh"><meta charset="utf-8"><title>独立店铺页面夹具</title><style>body{background:#f5f8fb;font:18px sans-serif;padding:38px;color:#183b47}h1{color:#008f89}p{line-height:1.8}</style><h1>独立模拟店铺</h1><p>这是本机 HTTPS 页面夹具，用于桌面登录容器与只读店铺识别验收。</p><p>店铺编号 10001</p><p>当前页面由本机提供。</p></html>',
+          `<!doctype html><html lang="zh"><meta charset="utf-8"><title>${url.pathname.includes('native-second') ? '第二标签页夹具' : '独立店铺页面夹具'}</title><style>body{background:#f5f8fb;font:18px sans-serif;padding:38px;color:#183b47}h1{color:#008f89}p{line-height:1.8}</style><h1>独立模拟店铺</h1><p>这是本机 HTTPS 页面夹具，用于桌面登录容器与只读店铺识别验收。</p><p>店铺编号 10001</p><p>当前页面由本机提供。</p><a href="https://fxg.jinritemai.com/native-second?from=popup" target="_blank">在新标签页打开</a></html>`,
           { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
         )
       })
@@ -300,6 +300,202 @@ async function screenshot(name) {
   await record(`screenshot-${name}`, dimensions)
 }
 
+async function waitForNativeViewsHidden() {
+  const hidden = await application.evaluate(async ({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows().find(window => !window.isDestroyed())
+    const start = Date.now()
+    while (Date.now() - start < 5000) {
+      if (window.contentView.children.every(view => !view.getVisible())) return true
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+    return false
+  })
+  assert.equal(hidden, true)
+}
+
+async function verifyBrowserWorkspace() {
+  const workspace = page.getByTestId('shop-browser-workspace')
+  const tabs = workspace.getByRole('tab')
+  await tabs.first().filter({ hasText: '独立店铺页面夹具' }).waitFor()
+  assert.equal(await tabs.count(), 1)
+  await workspace.getByRole('button', { name: '收藏当前页面', exact: true }).click()
+  await workspace.getByRole('button', { name: '取消收藏当前页面', exact: true }).waitFor()
+  await workspace.getByRole('button', { name: '新建文件夹', exact: true }).click()
+  let dialog = page.getByRole('dialog')
+  assert.equal(await dialog.getByLabel('文件夹名称', { exact: true }).inputValue(), '新文件夹')
+  await dialog.getByLabel('文件夹名称', { exact: true }).fill('  原生收藏验收  ')
+  await screenshot('11-bookmark-name-dialog.png')
+  await dialog.getByRole('button', { name: '确定', exact: true }).click()
+  await dialog.waitFor({ state: 'hidden' })
+  const folder = workspace.locator('.shop-bookmark-folder').filter({ hasText: '原生收藏验收' })
+  await folder.waitFor()
+  await folder.click({ button: 'right' })
+  await page.getByRole('menuitem', { name: '重命名', exact: true }).click()
+  dialog = page.getByRole('dialog')
+  await dialog.getByLabel('文件夹名称', { exact: true }).fill('工作收藏')
+  await dialog.getByLabel('文件夹名称', { exact: true }).press('Enter')
+  await dialog.waitFor({ state: 'hidden' })
+  const bookmark = workspace.locator('.shop-bookmark-item').filter({ hasText: '独立店铺页面夹具' })
+  await bookmark.click({ button: 'right' })
+  await page.getByRole('menuitem', { name: '移动到文件夹', exact: true }).hover()
+  await page.getByRole('menuitem', { name: '工作收藏', exact: true }).waitFor()
+  await screenshot('12-bookmark-context-menu.png')
+  await page.getByRole('menuitem', { name: '工作收藏', exact: true }).click()
+  await workspace
+    .locator('.shop-bookmark-folder')
+    .filter({ hasText: '工作收藏' })
+    .getByText('(1)', { exact: false })
+    .waitFor()
+  await record('native-bookmark-create-rename-move-through-context-menu')
+
+  const nativePage = browser
+    .contexts()
+    .flatMap(context => context.pages())
+    .find(candidate => candidate.url().startsWith('https://fxg.jinritemai.com/'))
+  assert.ok(nativePage)
+  await nativePage.getByRole('link', { name: '在新标签页打开', exact: true }).click()
+  await tabs.filter({ hasText: '第二标签页夹具' }).waitFor()
+  assert.equal(await tabs.count(), 2)
+  assert.equal(await tabs.filter({ hasText: '第二标签页夹具' }).getAttribute('aria-selected'), 'true')
+  const sameSession = await application.evaluate(({ webContents }) => {
+    const pages = webContents
+      .getAllWebContents()
+      .filter(contents => contents.getURL().startsWith('https://fxg.jinritemai.com/'))
+    return { count: pages.length, paths: [...new Set(pages.map(contents => contents.session.getStoragePath()))] }
+  })
+  assert.equal(sameSession.count, 2)
+  assert.equal(sameSession.paths.length, 1)
+  await record('native-popup-creates-active-tab-in-same-profile-session', sameSession)
+  await workspace.getByRole('button', { name: '关闭标签页 第二标签页夹具', exact: true }).click()
+  assert.equal(await tabs.count(), 1)
+  assert.equal(await tabs.first().getAttribute('aria-selected'), 'true')
+  await workspace.getByRole('button', { name: '新建标签页', exact: true }).click()
+  await tabs.filter({ hasText: '新标签页' }).waitFor()
+  const address = workspace.getByLabel('网址', { exact: true })
+  await address.fill('fxg.jinritemai.com/native-second')
+  await address.press('Enter')
+  await tabs.filter({ hasText: '第二标签页夹具' }).waitFor()
+  assert.equal(await address.inputValue(), 'https://fxg.jinritemai.com/native-second')
+  await workspace.getByRole('button', { name: '主页', exact: true }).click()
+  await tabs.filter({ hasText: '独立店铺页面夹具' }).last().waitFor()
+  await workspace.getByRole('button', { name: '后退', exact: true }).click()
+  await tabs.filter({ hasText: '第二标签页夹具' }).waitFor()
+  await workspace.getByRole('button', { name: '前进', exact: true }).click()
+  await tabs.filter({ hasText: '独立店铺页面夹具' }).last().waitFor()
+  await workspace.locator('.shop-bookmark-folder').filter({ hasText: '工作收藏' }).click()
+  await page.locator('.shop-bookmark-child').filter({ hasText: '独立店铺页面夹具' }).waitFor()
+  await screenshot('13-bookmark-folder-popup.png')
+  await page.locator('.shop-bookmark-child').filter({ hasText: '独立店铺页面夹具' }).click()
+  await workspace.getByRole('button', { name: '取消收藏当前页面', exact: true }).waitFor()
+  await record('native-address-navigation-history-and-folder-child-navigation')
+
+  const folderWithChild = workspace.locator('.shop-bookmark-folder').filter({ hasText: '工作收藏' })
+  await folderWithChild.click({ button: 'right' })
+  await page.getByRole('menuitem', { name: '删除文件夹', exact: true }).click()
+  dialog = page.getByRole('dialog', { name: '确认删除', exact: true })
+  await dialog.getByText('文件夹「工作收藏」包含 1 个收藏，确定删除吗？', { exact: true }).waitFor()
+  await screenshot('14-bookmark-delete-confirm.png')
+  await dialog.getByRole('button', { name: '取消', exact: true }).click()
+  await folderWithChild.waitFor()
+  const side = workspace.locator('.shop-browser-sidebar')
+  assert.equal(await side.evaluate(element => Math.round(element.getBoundingClientRect().width)), 320)
+  const handle = workspace.getByRole('separator', { name: '调整订单侧栏宽度', exact: true })
+  const bounds = await handle.boundingBox()
+  assert.ok(bounds)
+  await application.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows().find(window => !window.isDestroyed())
+    window.show()
+    window.focus()
+    window.webContents.focus()
+  })
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 60)
+  await page.mouse.down()
+  await page.waitForFunction(
+    () => document.querySelector('.shop-browser-content')?.getAttribute('data-dragging') === 'true'
+  )
+  await waitForNativeViewsHidden()
+  await page.mouse.move(bounds.x - 40, bounds.y + 60, { steps: 5 })
+  await page.mouse.up()
+  await page.waitForFunction(() => document.querySelector('.shop-browser-sidebar')?.getBoundingClientRect().width > 350)
+  assert.ok(await side.evaluate(element => element.getBoundingClientRect().width > 350))
+  await workspace.getByRole('button', { name: '收起侧栏', exact: true }).click()
+  assert.equal(await side.evaluate(element => Math.round(element.getBoundingClientRect().width)), 44)
+  await workspace.getByRole('button', { name: '展开侧栏', exact: true }).click()
+  await record('native-nonempty-folder-delete-cancel-and-sidebar-drag-collapse')
+  await screenshot('15-native-browser-tabs-layout.png')
+
+  await workspace.getByRole('button', { name: '新建文件夹', exact: true }).click()
+  await page.getByRole('dialog').getByLabel('文件夹名称', { exact: true }).fill('删除验收')
+  await page.getByRole('dialog').getByRole('button', { name: '确定', exact: true }).click()
+  await address.fill('https://fxg.jinritemai.com/native-second')
+  await address.press('Enter')
+  await tabs.filter({ hasText: '第二标签页夹具' }).waitFor()
+  await workspace.getByRole('button', { name: '收藏当前页面', exact: true }).click()
+  await workspace.locator('.shop-bookmark-item').filter({ hasText: '第二标签页夹具' }).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: '移动到文件夹', exact: true }).hover()
+  await page.getByRole('menuitem', { name: '删除验收', exact: true }).click()
+  await workspace.locator('.shop-bookmark-folder').filter({ hasText: '删除验收' }).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: '删除文件夹', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: '确认删除', exact: true }).click()
+  await workspace.locator('.shop-bookmark-folder').filter({ hasText: '删除验收' }).waitFor({ state: 'hidden' })
+  await workspace.getByRole('button', { name: '收藏当前页面', exact: true }).waitFor()
+  await record('native-nonempty-folder-delete-confirm-removes-children')
+  const activeBeforeClose = await tabs.filter({ hasText: '第二标签页夹具' }).getAttribute('aria-selected')
+  await workspace.getByRole('button', { name: '关闭标签页 独立店铺页面夹具', exact: true }).click()
+  await tabs.filter({ hasText: '独立店铺页面夹具' }).waitFor({ state: 'hidden' })
+  assert.equal(activeBeforeClose, 'true')
+  assert.equal(await tabs.first().getAttribute('aria-selected'), 'true')
+  await workspace.getByRole('button', { name: '关闭标签页 第二标签页夹具', exact: true }).click()
+  await workspace.waitFor({ state: 'hidden' })
+  await record('native-close-inactive-preserves-active-and-last-tab-closes-browser')
+  await page.getByRole('button', { name: '打开店铺后台', exact: true }).click()
+  await waitNativePage()
+  await workspace.locator('.shop-bookmark-folder').filter({ hasText: '工作收藏' }).waitFor()
+  assert.equal(await workspace.getByRole('tab').count(), 1)
+  await record('browser-close-reopen-restores-bookmarks-and-starts-one-tab')
+}
+
+async function verifyAppearance() {
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: '浅色', exact: true }).waitFor()
+  await waitForNativeViewsHidden()
+  assert.equal(await dialog.getByRole('button', { name: '浅色', exact: true }).getAttribute('aria-pressed'), 'true')
+  assert.equal(await page.locator('html').getAttribute('data-hermes-theme'), 'codex')
+  await screenshot('17-codex-light-settings.png')
+  await dialog.getByRole('button', { name: '深色', exact: true }).click()
+  await page.waitForFunction(() => document.documentElement.dataset.hermesMode === 'dark')
+  await screenshot('18-codex-dark-settings.png')
+  await dialog.getByRole('button', { name: 'Ember', exact: true }).click()
+  await page.waitForFunction(() => document.documentElement.dataset.hermesTheme === 'ember')
+  await dialog.getByRole('button', { name: '跟随系统', exact: true }).click()
+  assert.equal(await dialog.getByRole('button', { name: '跟随系统', exact: true }).getAttribute('aria-pressed'), 'true')
+  await dialog.locator('input[type=file]').setInputFiles(path.join(resultRoot, 'native-shop-page.png'))
+  await page.waitForFunction(() => document.documentElement.dataset.enterpriseWallpaper === 'true')
+  const opacity = dialog.locator('input[type=range]')
+  await opacity.focus()
+  await opacity.press('Home')
+  for (let step = 0; step < 23; step++) await opacity.press('ArrowRight')
+  assert.equal(await opacity.inputValue(), '88')
+  await dialog.getByRole('button', { name: 'Codex', exact: true }).click()
+  await dialog.getByRole('button', { name: '深色', exact: true }).click()
+  await dialog.getByRole('button', { name: '完成', exact: true }).click()
+  await record('appearance-mode-skins-wallpaper-opacity-and-local-save')
+}
+
+async function assertAppearanceRestored(step) {
+  await page.waitForFunction(
+    () =>
+      document.documentElement.dataset.hermesMode === 'dark' &&
+      document.documentElement.dataset.hermesTheme === 'codex' &&
+      document.documentElement.dataset.enterpriseWallpaper === 'true'
+  )
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  assert.equal(await page.getByRole('dialog').locator('input[type=range]').inputValue(), '88')
+  await page.getByRole('dialog').getByRole('button', { name: '完成', exact: true }).click()
+  await record(step)
+}
+
 try {
   await launch()
   await screenshot('01-desktop-profiles.png')
@@ -310,10 +506,7 @@ try {
   await page.getByRole('button', { name: '打开店铺后台', exact: true }).click()
   await waitNativePage()
   await page.getByRole('button', { name: '识别当前店铺', exact: true }).click()
-  await page
-    .getByText(/店铺身份已核验/)
-    .first()
-    .waitFor()
+  await page.locator('.cs-browser-section > header h2').filter({ hasText: '独立模拟店铺' }).waitFor()
   await record('native-readonly-shop-identity', { shopId: '10001', source: 'local-https-fixture' })
   const nativeState = await application.evaluate(
     async ({ webContents }, output) => {
@@ -339,6 +532,8 @@ try {
     path.join(resultRoot, 'native-shop-page.png')
   )
   await record('synthetic-native-session-written', nativeState)
+  await verifyAppearance()
+  await verifyBrowserWorkspace()
   await page.getByRole('button', { name: '关闭登录页', exact: true }).click()
   await page.getByRole('button', { name: '规则与人工待办', exact: true }).click()
   await page.getByRole('button', { name: '新增规则', exact: true }).waitFor()
@@ -414,6 +609,7 @@ try {
 
   await page.reload()
   await loginAndOpenTools()
+  await assertAppearanceRestored('renderer-refresh-restores-skin-mode-and-background')
   await page
     .locator('tr[data-profile-id=' + JSON.stringify(profileId) + ']')
     .getByRole('button', { name: '选择', exact: true })
@@ -429,6 +625,15 @@ try {
   await application.close()
   application = undefined
   await launch()
+  await assertAppearanceRestored('full-process-restart-restores-skin-mode-and-background')
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: '恢复默认外观', exact: true }).click()
+  await page.waitForFunction(
+    () =>
+      document.documentElement.dataset.hermesMode === 'light' &&
+      document.documentElement.dataset.enterpriseWallpaper === 'false'
+  )
+  await page.getByRole('dialog').getByRole('button', { name: '完成', exact: true }).click()
   await page
     .locator('tr[data-profile-id=' + JSON.stringify(profileId) + ']')
     .getByRole('button', { name: '选择', exact: true })
@@ -451,6 +656,31 @@ try {
   assert.equal(restored.cookiePresent, true)
   assert.equal(restored.localStorageRestored, true)
   await record('full-process-restart-restores-cookie-and-local-storage', restored)
+  await page
+    .getByTestId('shop-browser-workspace')
+    .locator('.shop-bookmark-folder')
+    .filter({ hasText: '工作收藏' })
+    .waitFor()
+  assert.equal(await page.getByTestId('shop-browser-workspace').getByRole('tab').count(), 1)
+  await record('full-process-restart-restores-native-bookmark-folder-and-child')
+  revoked = true
+  await page.getByTestId('shop-browser-workspace').waitFor({ state: 'hidden', timeout: 12000 })
+  const remainingNativePages = await application.evaluate(
+    ({ webContents }) =>
+      webContents
+        .getAllWebContents()
+        .filter(contents => /^https:\/\/(fxg|im)\.jinritemai\.com\//.test(contents.getURL())).length
+  )
+  assert.equal(remainingNativePages, 0)
+  await record('revocation-disposes-native-tabs-and-clears-bookmark-view')
+  revoked = false
+  await page.getByRole('button', { name: '刷新档案', exact: true }).click()
+  await page
+    .locator('tr[data-profile-id=' + JSON.stringify(profileId) + ']')
+    .getByRole('button', { name: '选择', exact: true })
+    .click()
+  await page.getByRole('button', { name: '打开店铺后台', exact: true }).click()
+  await waitNativePage()
   await page.getByRole('button', { name: '关闭登录页', exact: true }).click()
   await page.getByRole('button', { name: '规则与人工待办', exact: true }).click()
   await page.getByRole('button', { name: '编辑', exact: true }).first().waitFor()
@@ -485,8 +715,23 @@ try {
     pageErrors
   })
   await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click()
-  await page.getByRole('navigation', { name: '店铺与客服', exact: true }).getByRole('button', { name: '坐席工作台', exact: true }).focus()
+  await page
+    .getByRole('navigation', { name: '店铺与客服', exact: true })
+    .getByRole('button', { name: '坐席工作台', exact: true })
+    .focus()
   await screenshot('10-latest-desktop-workspace.png')
+  await page
+    .getByRole('navigation', { name: '店铺与客服', exact: true })
+    .getByRole('button', { name: '店铺管理', exact: true })
+    .click()
+  await page.getByRole('button', { name: '打开店铺后台', exact: true }).click()
+  await waitNativePage()
+  await page
+    .getByTestId('shop-browser-workspace')
+    .locator('.shop-bookmark-folder')
+    .filter({ hasText: '工作收藏' })
+    .waitFor()
+  await screenshot('16-latest-native-browser-desktop.png')
   if (process.argv.includes('--keep-open')) {
     await application.evaluate(({ BrowserWindow }) => {
       const window = BrowserWindow.getAllWindows().find(window => !window.isDestroyed())

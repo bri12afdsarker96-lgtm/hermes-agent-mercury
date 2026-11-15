@@ -19,10 +19,13 @@ export interface ShopBrowserBounds {
 
 export interface ShopBrowserRequest {
   sessionId: string
-  action: 'list' | 'create' | 'open' | 'identify' | 'close' | 'relogin' | 'delete' | 'bounds'
+  action: 'list' | 'create' | 'open' | 'identify' | 'close' | 'relogin' | 'delete' | 'bounds' | 'browser' | 'bookmarks'
   profileId?: string
   target?: 'merchant' | 'feige'
   bounds?: ShopBrowserBounds
+  browser?: ShopBrowserCommand
+  bookmark?: ShopBookmarkCommand
+  expectedRevision?: number
 }
 
 export interface ShopBrowserReply {
@@ -31,6 +34,8 @@ export interface ShopBrowserReply {
   profiles?: ShopBrowserProfile[]
   profile?: ShopBrowserProfile
   openProfileId?: string | null
+  browser?: ShopBrowserSnapshot
+  bookmarks?: ShopBookmarkSnapshot
 }
 export function isShopBrowserUrl(raw: string): boolean {
   try {
@@ -45,5 +50,19 @@ export const recoverableShopBrowserErrors = [
   'SHOP_PROFILE_NOT_OPEN',
   'SHOP_PROFILE_IN_USE',
   'SHOP_PROFILE_PAGE_NOT_READY',
-  'SHOP_PROFILE_IDENTITY_UNAVAILABLE'
+  'SHOP_PROFILE_IDENTITY_UNAVAILABLE',
+  'SHOP_BROWSER_INVALID_COMMAND',
+  'SHOP_BROWSER_TAB_NOT_FOUND',
+  'SHOP_BROWSER_URL_REJECTED',
+  'SHOP_BOOKMARK_INVALID',
+  'SHOP_BOOKMARK_CONFLICT',
+  'SHOP_BOOKMARK_NOT_FOUND',
+  'SHOP_BOOKMARK_CONFIRM_REQUIRED',
+  'SHOP_BOOKMARK_STORE_INVALID'
 ] as const
+import type {
+  ShopBookmarkCommand,
+  ShopBookmarkSnapshot,
+  ShopBrowserCommand,
+  ShopBrowserSnapshot
+} from './shop-browser-workspace-types'

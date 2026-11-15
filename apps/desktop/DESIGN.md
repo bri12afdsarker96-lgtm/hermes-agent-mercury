@@ -74,18 +74,20 @@ primitive. Its controller supplies the wording and tone from authoritative
 state; the component must never make a permission, capability or connectivity
 decision locally.
 
-The Enterprise root uses its bundled deep-space palette from
-`src/enterprise-client/enterprise-design-tokens.css`: cold cyan for actions,
-graphite surfaces, readable Chinese text, and distinct status colors. Its
-`--space-ink`, `--space-glow`, `--space-grid`, and `--space-scrim` tokens own
-decorative orbital marks and backdrop treatment. Existing `--ui-*` tokens and
-shared Button color aliases inherit this palette. Decoration stays static;
-the customer queue remains flat and dense, and reduced motion disables
-enterprise transitions without hiding state changes.
+The Enterprise root derives its semantic palette from the shared ThemeProvider
+through `src/enterprise-client/enterprise-design-tokens.css`. The default Codex
+skin uses neutral light surfaces. Existing saved skin and mode preferences retain
+their precedence. `enterprise-codex.css` owns the flat shell, one main sidebar,
+customer-service page tabs and theme-aware status colors. The sidebar Settings
+entry opens Appearance with light, dark and system modes, skin previews and a
+local background image with adjustable surface opacity. These preferences are
+scoped to the active gateway profile. Native Windows controls follow the selected
+theme. Open DOM dialogs temporarily suspend embedded shop WebContentsViews and
+restore the same views when dismissed.
 
 Enterprise reading scale is owned by `enterprise-design-tokens.css`: body
-15px/24px, answer text 16px/1.75, labels 14px/22px, secondary metadata
-13px/20px, section titles 17px/26px and page titles 28px/38px. Legacy small
+14px/24px, answer text 16px/1.75, labels 13px/22px, secondary metadata
+12px/20px, section titles 17px/26px and page titles 24px/38px. Legacy small
 pixel labels must use these tokens; shared `text-xs` / `text-sm` controls
 inherit the enterprise scale without changing the generic desktop root.
 `AssistantReplyCard` is the shared primary/follow-up/alternative answer surface:

@@ -1,8 +1,21 @@
 import { type ComponentProps, type CSSProperties, type ReactNode, useEffect, useRef } from 'react'
 
 import { useWindowControlsOverlayWidth } from '@/app/shell/hooks/use-window-controls-overlay-width'
-import { Brain, FileText, LayoutDashboard, Lock, MessageSquareText, Network, NotebookTabs, Settings, Users, Wrench } from '@/lib/icons'
+import {
+  Brain,
+  CreditCard,
+  FileText,
+  LayoutDashboard,
+  Lock,
+  MessageSquareText,
+  Network,
+  NotebookTabs,
+  Settings,
+  Users,
+  Wrench
+} from '@/lib/icons'
 
+import { EnterpriseAppearanceSettings } from './appearance-settings'
 import hermesMark from './assets/hermes-mark.svg'
 import { EnterprisePackageUpdateButton } from './package-update-ui'
 
@@ -41,7 +54,10 @@ const WORKSPACE_ICONS = {
   overdue: FileText,
   ai_config: Settings,
   tools: Wrench,
-  workbench: LayoutDashboard
+  workbench: LayoutDashboard,
+  'review-capture': FileText,
+  payment: CreditCard,
+  'customer-service': MessageSquareText
 }
 
 export interface EnterpriseStatusBadgeProps {
@@ -58,14 +74,20 @@ export interface EnterpriseModalDialogProps {
 /** A presentation-only, keyboard-safe modal shell for existing enterprise actions. */
 export function EnterpriseModalDialog({ children, label, onClose }: EnterpriseModalDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
-  const restoreFocusTo = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
-    restoreFocusTo.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const restoreFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const dialog = dialogRef.current
-    const focusable = () => dialog ? Array.from(dialog.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    )).filter(element => element.getAttribute('aria-hidden') !== 'true') : []
+
+    const focusable = () =>
+      dialog
+        ? Array.from(
+            dialog.querySelectorAll<HTMLElement>(
+              'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+            )
+          ).filter(element => element.getAttribute('aria-hidden') !== 'true')
+        : []
+
     focusable()[0]?.focus()
 
     const keepFocusInDialog = (event: KeyboardEvent) => {
@@ -106,12 +128,17 @@ export function EnterpriseModalDialog({ children, label, onClose }: EnterpriseMo
 
     return () => {
       window.removeEventListener('keydown', keepFocusInDialog)
-      restoreFocusTo.current?.focus()
-      restoreFocusTo.current = null
+      restoreFocusTo?.focus()
     }
   }, [onClose])
 
-  return <div className="hesc-dialog-backdrop"><div aria-label={label} aria-modal="true" className="hesc-dialog" ref={dialogRef} role="dialog" tabIndex={-1}>{children}</div></div>
+  return (
+    <div className="hesc-dialog-backdrop">
+      <div aria-label={label} aria-modal="true" className="hesc-dialog" ref={dialogRef} role="dialog" tabIndex={-1}>
+        {children}
+      </div>
+    </div>
+  )
 }
 
 /**
@@ -213,11 +240,7 @@ export function EnterpriseClientShell({
             )
           })}
         </nav>
-        <div aria-hidden="true" className="hesc-sidebar-orbit">
-          <span />
-          <span />
-          <i />
-        </div>
+        <EnterpriseAppearanceSettings />
       </aside>
 
       <header className="hesc-topbar">
