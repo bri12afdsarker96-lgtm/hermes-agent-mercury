@@ -2,7 +2,7 @@
   "name": "hermes",
   "productName": "Hermes-企业助手",
   "private": true,
-  "version": "0.20.12",
+  "version": "0.20.13",
   "description": "Hermes-企业助手 — enterprise desktop.",
   "author": "Nous Research",
   "repository": {
@@ -231,14 +231,6 @@
       {
         "from": "src/fonts/LICENSE-HarmonyOS-Sans.txt",
         "to": "licenses/LICENSE-HarmonyOS-Sans.txt"
-      },
-      {
-        "from": "assets/openvpn-connect-manifest.json",
-        "to": "openvpn-connect/manifest.json"
-      },
-      {
-        "from": "build/openvpn-connect/openvpn-connect-3.9.0.5008_signed.msi",
-        "to": "openvpn-connect/openvpn-connect-3.9.0.5008_signed.msi"
       }
     ],
     "asar": true,

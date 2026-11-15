@@ -45,20 +45,22 @@ test('desktop packaging and renderer ship the enterprise brand artwork', () => {
   assert.match(brandMark, /aria-label="Hermes"/)
   assert.equal(packageJson.build.icon, 'assets/brand/hermes-mark-hires.png')
   assert.equal(packageJson.build.win.icon, 'assets/brand/hermes-mark-hires.ico')
-  assert.deepEqual(packageJson.build.extraResources.slice(1), [
+  assert.deepEqual(packageJson.build.extraResources, [
+    { from: 'build/doudian', to: 'doudian', filter: ['**/*'] },
+    { from: 'build/install-stamp.json', to: 'install-stamp.json' },
     { from: 'assets/brand/hermes-mark-hires.ico', to: 'brand-icon.ico' },
-    { from: 'src/fonts/LICENSE-HarmonyOS-Sans.txt', to: 'licenses/LICENSE-HarmonyOS-Sans.txt' },
-    { from: 'assets/openvpn-connect-manifest.json', to: 'openvpn-connect/manifest.json' },
-    {
-      from: 'build/openvpn-connect/openvpn-connect-3.9.0.5008_signed.msi',
-      to: 'openvpn-connect/openvpn-connect-3.9.0.5008_signed.msi'
-    }
+    { from: 'src/fonts/LICENSE-HarmonyOS-Sans.txt', to: 'licenses/LICENSE-HarmonyOS-Sans.txt' }
   ])
-  const openVpnManifest = JSON.parse(
-    fs.readFileSync(path.join(desktopRoot, 'assets', 'openvpn-connect-manifest.json'), 'utf8')
-  )
-  assert.equal(openVpnManifest.product, 'OpenVPN Connect')
-  assert.match(openVpnManifest.sha256, /^[a-f0-9]{64}$/)
+})
+
+test('installer has no VPN prerequisite and client and lockfile versions agree', () => {
+  const installer = fs.readFileSync(path.join(desktopRoot, 'electron', 'enterprise-installer.nsh'), 'utf8')
+  assert.doesNotMatch(installer, /OpenVPN|msiexec|MessageBox/i)
+  const deployment = JSON.parse(fs.readFileSync(path.join(desktopRoot, 'assets', 'enterprise-deployment.json'), 'utf8'))
+  assert.equal(deployment.pre_release_access.enabled, false)
+  const lock = JSON.parse(fs.readFileSync(path.join(repositoryRoot, 'package-lock.json'), 'utf8'))
+  assert.equal(packageJson.version, '0.20.13')
+  assert.equal(lock.packages['apps/desktop'].version, packageJson.version)
 })
 
 test('the shared desktop shell uses HarmonyOS Sans SC as its sole bundled UI font', () => {

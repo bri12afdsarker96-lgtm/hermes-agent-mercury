@@ -161,7 +161,7 @@ test('beforePack on win32 preserves the previous build instead of wiping it', as
     // No packager info in the context → default 'HermesEnterpriseAssistant.exe' product name.
     // node-pty staging is skipped because arch is not a number here.
     await beforePack({ appOutDir, electronPlatformName: 'win32', packager: { projectDir: tempRoot } })
-    expect(stageOpenVpnConnect).toHaveBeenCalledTimes(1)
+    expect(stageOpenVpnConnect).not.toHaveBeenCalled()
     expect(fetch).not.toHaveBeenCalled()
     expect(childProcess.execFile).not.toHaveBeenCalled()
 
