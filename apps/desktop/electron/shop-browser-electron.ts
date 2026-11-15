@@ -1,12 +1,14 @@
-import { BrowserWindow, session, WebContentsView, type Session, type WebContents } from 'electron'
+import type { BrowserWindow, Session, WebContents } from 'electron'
+import { session, WebContentsView } from 'electron'
 
-import type { ShopBrowserView } from './shop-browser-profiles'
-import { isShopBrowserUrl, type ShopBrowserBounds } from './shop-browser-types'
 import type { ShopExecutionPage } from './shop-browser-execution'
+import type { ShopBrowserView } from './shop-browser-profiles'
+import type { ShopBrowserBounds } from './shop-browser-types'
+import type { ShopBrowserPageOptions } from './shop-browser-workspace-types'
+import { isShopBrowserUrl } from './shop-browser-types'
+import { isBrowserNavigationUrl } from './shop-browser-workspace-types'
 
 export { isShopBrowserUrl } from './shop-browser-types'
-import type { ShopBrowserPageOptions } from './shop-browser-workspace-types'
-import { isBrowserNavigationUrl } from './shop-browser-workspace-types'
 
 export const shopBrowserTargets = {
   merchant: 'https://fxg.jinritemai.com/ffa/morder/order/list',
@@ -162,8 +164,11 @@ export async function createShopBrowserView(
   contents.on('will-redirect', navigate)
   contents.setWindowOpenHandler(({ url }) => {
     if (allowsUrl(url)) {
-      if (options) options.onNewWindow(url)
-      else void contents.loadURL(url).catch(() => {})
+      if (options) {
+        options.onNewWindow(url)
+      } else {
+        void contents.loadURL(url).catch(() => {})
+      }
     }
     return { action: 'deny' }
   })
@@ -215,11 +220,22 @@ export async function createShopBrowserView(
         canGoForward: !contents.isDestroyed() && contents.navigationHistory.canGoForward()
       }),
       navigate(url) {
-        if (!allowsUrl(url)) throw new Error('SHOP_BROWSER_URL_REJECTED')
+        if (!allowsUrl(url)) {
+          throw new Error('SHOP_BROWSER_URL_REJECTED')
+        }
+
         void contents.loadURL(url).catch(() => {})
       },
-      back: () => { if (contents.navigationHistory.canGoBack()) contents.navigationHistory.goBack() },
-      forward: () => { if (contents.navigationHistory.canGoForward()) contents.navigationHistory.goForward() },
+      back: () => {
+        if (contents.navigationHistory.canGoBack()) {
+          contents.navigationHistory.goBack()
+        }
+      },
+      forward: () => {
+        if (contents.navigationHistory.canGoForward()) {
+          contents.navigationHistory.goForward()
+        }
+      },
       reload: () => contents.reload(),
       setVisible: visible => view.setVisible(visible)
     },

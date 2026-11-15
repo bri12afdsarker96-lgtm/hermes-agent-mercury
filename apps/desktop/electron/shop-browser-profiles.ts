@@ -2,11 +2,11 @@ import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 
-import type { ShopBrowserBounds, ShopBrowserProfile, ShopBrowserReply, ShopBrowserRequest } from './shop-browser-types'
 import type { BoundShopExecution, ShopExecutionTransport } from './shop-browser-execution'
-import { recoverableShopBrowserErrors } from './shop-browser-types'
-import { ShopBrowserBookmarks } from './shop-browser-bookmarks'
+import type { ShopBrowserBounds, ShopBrowserProfile, ShopBrowserReply, ShopBrowserRequest } from './shop-browser-types'
 import type { ShopBrowserPageControls, ShopBrowserWorkspace } from './shop-browser-workspace-types'
+import { ShopBrowserBookmarks } from './shop-browser-bookmarks'
+import { recoverableShopBrowserErrors } from './shop-browser-types'
 
 export interface ShopBrowserAuthority {
   origin: string
@@ -298,16 +298,29 @@ export class ShopBrowserProfiles {
     if (!profile) fail('SHOP_PROFILE_NOT_FOUND')
     if (request.action === 'bookmarks') {
       const bookmarks = await this.bookmarks.operate(request.bookmark!, request.expectedRevision)
+
       return { ok: true, bookmarks, openProfileId: this.opened?.id ?? null }
     }
+
     if (request.action === 'browser') {
-      if (this.opened?.id !== profile.id) fail('SHOP_PROFILE_NOT_OPEN')
-      if (!this.opened.view.workspace) fail('SHOP_BROWSER_UNAVAILABLE')
+      if (this.opened?.id !== profile.id) {
+        fail('SHOP_PROFILE_NOT_OPEN')
+      }
+
+      if (!this.opened.view.workspace) {
+        fail('SHOP_BROWSER_UNAVAILABLE')
+      }
+
       const browser = await this.opened.view.workspace.operate(request.browser!)
+
       await this.authority()
-      if (!browser.tabs.length) await this.closeView()
+      if (!browser.tabs.length) {
+        await this.closeView()
+      }
+
       return { ok: true, browser, openProfileId: this.opened?.id ?? null }
     }
+
     if (request.action === 'open') {
       await this.closeView()
       const view = await this.deps.createView(this.storage(scope, profile), request.target!, request.bounds!)
