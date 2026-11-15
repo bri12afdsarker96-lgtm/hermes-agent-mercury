@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import http from 'node:http'
@@ -27,6 +27,13 @@ for (const [entry, output, format] of [
   const expectedHash = createHash('sha256').update(expected).digest('hex')
   if (expectedHash !== hashes[output]) throw new Error(`Dev bundle mismatch: ${output}. Build --dev in a dedicated checkout before running this test.`)
 }
+function protocolSnapshot() {
+  const reg = path.join(process.env.SystemRoot, 'System32', 'reg.exe')
+  const result = spawnSync(reg, ['query', 'HKCU\\Software\\Classes\\hermes', '/s'], { encoding: 'utf8', windowsHide: true })
+  if (result.status !== 0) throw new Error('Unable to verify the existing hermes protocol association')
+  return result.stdout
+}
+const protocolBefore = protocolSnapshot()
 const runs = path.join(repo, 'results', 'real-main-loopback-gate')
 await mkdir(runs, { recursive: true })
 const output = await mkdtemp(path.join(runs, 'run-'))
@@ -85,4 +92,13 @@ try {
   await writeFile(path.join(output, 'requests.json'), JSON.stringify(requests, null, 2))
   if (app) await app.close().catch(() => {})
   await new Promise(resolve => server.close(resolve))
+  try {
+    const protocolAfter = protocolSnapshot()
+    const unchanged = protocolBefore === protocolAfter
+    await writeFile(path.join(output, 'protocol-check.json'), JSON.stringify({ unchanged, before: protocolBefore, after: protocolAfter }, null, 2))
+    if (!unchanged) { console.error('FAIL hermes protocol association changed'); process.exitCode = 1 }
+  } catch (error) {
+    console.error(`FAIL protocol verification: ${error.message}`)
+    process.exitCode = 1
+  }
 }
