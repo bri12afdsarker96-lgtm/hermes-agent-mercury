@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { useI18n } from '@/i18n/context'
 import { customerServiceCopy } from '@/i18n/customer-service'
 import { customerServiceLayoutCopy } from '@/i18n/customer-service-layout'
+import { nativeUiCopy } from '@/i18n/native-ui'
 import { shopBrowserCopy } from '@/i18n/shop-browser'
 import { shopCloudCopy } from '@/i18n/shop-cloud'
 
@@ -36,12 +37,15 @@ export function ShopBrowserProfilesPanel({
   const { locale } = useI18n()
   const copy = shopBrowserCopy[locale]
   const layout = customerServiceLayoutCopy[locale]
+  const native = nativeUiCopy[locale]
   const [profiles, setProfiles] = useState<ShopBrowserProfile[]>([])
+  const [loaded, setLoaded] = useState(false)
   const [localSelected, setSelected] = useState('')
   const selected = selectedProfileId ?? localSelected
   const selection = useRef(selected)
   selection.current = selected
   const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState('all')
   const [opened, setOpened] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -60,6 +64,7 @@ export function ShopBrowserProfilesPanel({
     }
 
     if (!reply.ok) {
+      setLoaded(false)
       setCloud(undefined)
       setOpened(null)
       setProfiles([])
@@ -71,6 +76,7 @@ export function ShopBrowserProfilesPanel({
 
     const available = reply.profiles ?? []
     setProfiles(available)
+    setLoaded(true)
 
     if (selection.current && !available.some(profile => profile.id === selection.current)) {
       setSelected('')
@@ -127,8 +133,10 @@ export function ShopBrowserProfilesPanel({
   useEffect(() => {
     lifecycle.alive = true
     setProfiles([])
+    setLoaded(false)
     setSelected('')
     setSearch('')
+    setFilter('all')
     setOpened(null)
     setConfirmation(null)
     setCloud(undefined)
@@ -273,6 +281,33 @@ export function ShopBrowserProfilesPanel({
     void run(refresh)
   }, [run, refresh])
 
+  const exportShops = () =>
+    void run(async () => {
+      const reply = await runtime.shopBrowser!({ action: 'list' })
+
+      if (!lifecycle.alive) {
+        return
+      }
+
+      if (!reply.ok) {
+        throw new Error(reply.error)
+      }
+
+      const quote = (value: string) => `"${value.replaceAll('"', '""')}"`
+
+      const rows = (reply.profiles ?? []).map(profile =>
+        [profile.shopName || profile.displayName, profile.payoutSettings?.remitAmount ?? ''].map(quote).join(',')
+      )
+
+      const csv = '\uFEFF' + [native.csvShopName + ',' + native.amount, ...rows].join('\r\n')
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `shops-${new Date().toISOString().slice(0, 10)}.csv`
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    })
+
   const confirm = (action: 'relogin' | 'delete') =>
     void run(async () => {
       const reply = await runtime.shopBrowser!({ action: 'close' })
@@ -313,14 +348,30 @@ export function ShopBrowserProfilesPanel({
     return (
       <section aria-label={layout.shops} className="cs-native-page cs-shops" data-browser-open={!!opened}>
         <h2>{layout.shops}</h2>
-        {cloud ? <p data-testid="shop-cloud-status" role="status">{shopCloudCopy[locale][cloud.state]}</p> : null}
+        {cloud ? (
+          <p data-testid="shop-cloud-status" role="status">
+            {shopCloudCopy[locale][cloud.state]}
+          </p>
+        ) : null}
         <div className="cs-toolbar">
           <Button disabled={busy} onClick={() => invoke({ action: 'create' })}>
             {copy.create}
           </Button>
-          <Button disabled={busy} onClick={() => void run(refresh)} variant="secondary">
+          <Button data-native-tone="info" disabled={busy} onClick={() => void run(refresh)} variant="secondary">
             {copy.refresh}
           </Button>
+          <Button
+            data-native-tone="success"
+            disabled={busy || !profiles.length}
+            onClick={exportShops}
+            variant="secondary"
+          >
+            {native.export}
+          </Button>
+          <select aria-label={native.shopFilter} onChange={event => setFilter(event.target.value)} value={filter}>
+            <option value="all">{layout.all}</option>
+            <option value="expired">{layout.loginLog}</option>
+          </select>
           <Input
             aria-label={layout.searchShops}
             onChange={event => setSearch(event.target.value)}
@@ -336,10 +387,11 @@ export function ShopBrowserProfilesPanel({
         ) : null}
         <div className="cs-summary">
           <span>
-            {layout.total} <b>{profiles.length}</b>
+            {layout.total} <b>{loaded ? profiles.length : '—'}</b>
           </span>
           <span>
-            {layout.verified} <b>{profiles.filter(profile => profile.loginState === 'verified').length}</b>
+            {layout.verified}{' '}
+            <b>{loaded ? profiles.filter(profile => profile.loginState === 'verified').length : '—'}</b>
           </span>
         </div>
         <div className="cs-table-wrap">
@@ -348,7 +400,7 @@ export function ShopBrowserProfilesPanel({
               <tr>
                 <th>#</th>
                 <th>{layout.shopName}</th>
-                <th>{layout.shopId}</th>
+                <th>{native.amount}</th>
                 <th>{layout.loginState}</th>
                 <th>{layout.checkedAt}</th>
                 <th>{layout.operations}</th>
@@ -356,10 +408,12 @@ export function ShopBrowserProfilesPanel({
             </thead>
             <tbody>
               {profiles
-                .filter(profile =>
-                  `${profile.displayName} ${profile.shopName ?? ''} ${profile.shopId ?? ''}`
-                    .toLowerCase()
-                    .includes(search.toLowerCase())
+                .filter(
+                  profile =>
+                    (filter === 'all' || profile.loginState === 'expired') &&
+                    `${profile.displayName} ${profile.shopName ?? ''} ${profile.shopId ?? ''}`
+                      .toLowerCase()
+                      .includes(search.toLowerCase())
                 )
                 .map((profile, index) => (
                   <tr
@@ -388,7 +442,7 @@ export function ShopBrowserProfilesPanel({
                         {profile.shopName || profile.displayName}
                       </button>
                     </td>
-                    <td>{profile.shopId ?? '—'}</td>
+                    <td className="cs-amber">{profile.payoutSettings?.remitAmount || '—'}</td>
                     <td>
                       <span className={`cs-badge ${profile.loginState === 'verified' ? 'is-verified' : ''}`}>
                         {copy[profile.loginState]}
@@ -396,22 +450,30 @@ export function ShopBrowserProfilesPanel({
                     </td>
                     <td>{profile.checkedAt ? new Date(profile.checkedAt).toLocaleString(locale) : '—'}</td>
                     <td>
-                      <Button
-                        disabled={busy || !!opened}
-                        onClick={() => {
-                          setSelected(profile.id)
-                          onSelectedProfile?.(profile.id)
-                        }}
-                        variant="secondary"
-                      >
-                        {layout.select}
-                      </Button>
+                      <div className="cs-actions cs-shop-row-actions">
+                        <ShopPayoutSettingsButton
+                          disabled={busy || !!opened}
+                          onSaved={refresh}
+                          profile={profile}
+                          runtime={runtime}
+                        />
+                        <Button
+                          disabled={busy || !!opened}
+                          onClick={() => {
+                            setSelected(profile.id)
+                            onSelectedProfile?.(profile.id)
+                          }}
+                          variant="secondary"
+                        >
+                          {layout.select}
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
             </tbody>
           </table>
-          {!profiles.length ? <p className="cs-empty">{copy.empty}</p> : null}
+          {loaded && !profiles.length ? <p className="cs-empty">{copy.empty}</p> : null}
         </div>
         {selectedProfile ? (
           <div className="cs-profile-actions">
@@ -421,7 +483,6 @@ export function ShopBrowserProfilesPanel({
             {selectedProfile.loginState === 'verified' ? <p role="status">{copy.sharedReady}</p> : null}
             <ShopServiceAssignment onTransferred={refresh} profileId={selectedProfile.id} runtime={runtime} />
             <div className="cs-actions">
-              <ShopPayoutSettingsButton disabled={busy} key={selectedProfile.id} onSaved={refresh} profile={selectedProfile} runtime={runtime} />
               <Button disabled={busy} onClick={() => open('merchant')} variant="secondary">
                 {copy.merchant}
               </Button>
@@ -506,7 +567,11 @@ export function ShopBrowserProfilesPanel({
   return (
     <section aria-label={copy.title} className="space-y-3">
       <h3>{copy.title}</h3>
-      {cloud ? <p data-testid="shop-cloud-status" role="status">{shopCloudCopy[locale][cloud.state]}</p> : null}
+      {cloud ? (
+        <p data-testid="shop-cloud-status" role="status">
+          {shopCloudCopy[locale][cloud.state]}
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button disabled={busy} onClick={() => invoke({ action: 'create' })} variant="secondary">
           {copy.create}
@@ -541,9 +606,9 @@ export function ShopBrowserProfilesPanel({
             ))}
           </select>
         </label>
-      ) : (
+      ) : loaded ? (
         <p>{copy.empty}</p>
-      )}
+      ) : null}
       {selectedProfile ? (
         <>
           <p role="status">
@@ -552,7 +617,13 @@ export function ShopBrowserProfilesPanel({
           {selectedProfile.loginState === 'verified' ? <p role="status">{copy.sharedReady}</p> : null}
           <ShopServiceAssignment onTransferred={refresh} profileId={selectedProfile.id} runtime={runtime} />
           <div className="flex flex-wrap items-center gap-2">
-            <ShopPayoutSettingsButton disabled={busy} key={selectedProfile.id} onSaved={refresh} profile={selectedProfile} runtime={runtime} />
+            <ShopPayoutSettingsButton
+              disabled={busy}
+              key={selectedProfile.id}
+              onSaved={refresh}
+              profile={selectedProfile}
+              runtime={runtime}
+            />
             <Button disabled={busy} onClick={() => open('merchant')} variant="secondary">
               {copy.merchant}
             </Button>

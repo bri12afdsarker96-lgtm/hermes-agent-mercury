@@ -127,10 +127,12 @@ export function CustomerServicePage({
   }
 
   return (
-    <section className="cs-native" data-testid="customer-service-page">
+    <section className="cs-native" data-native-layout="true" data-testid="customer-service-page">
       <aside className="cs-sidebar">
         <div className="cs-brand">
-          <span aria-hidden="true">☏</span>
+          <span aria-hidden="true">
+            <MessageSquareText />
+          </span>
           <strong>{layout.title}</strong>
         </div>
         <nav aria-label={layout.title}>
@@ -163,10 +165,14 @@ export function CustomerServicePage({
           <p className="cs-empty">{copy.noTransport}</p>
         ) : (
           <>
-            {page !== 'shops' && profilesLoading ? <p role="status">{shopBrowserCopy[locale].pending}</p> : null}
+            {page !== 'shops' && profilesLoading && !profiles.length ? (
+              <p role="status">{shopBrowserCopy[locale].pending}</p>
+            ) : null}
             {page !== 'shops' && profilesError ? (
               <div className="cs-error" role="alert">
-                <p>{shopBrowserCopy[locale].failed} ({profilesError})</p>
+                <p>
+                  {shopBrowserCopy[locale].failed} ({profilesError})
+                </p>
                 <Button onClick={() => setProfilesRevision(value => value + 1)} variant="secondary">
                   {shopBrowserCopy[locale].refresh}
                 </Button>
@@ -185,23 +191,25 @@ export function CustomerServicePage({
             ) : null}
             {page === 'rules' || page === 'workbench' ? (
               <>
-                <div className="cs-profile-picker">
-                  <label>
-                    {layout.currentShop}
-                    <select
-                      aria-label={layout.selectShop}
-                      onChange={event => setSelected(event.target.value)}
-                      value={selected}
-                    >
-                      <option value="">{layout.selectShop}</option>
-                      {profiles.map(profile => (
-                        <option key={profile.id} value={profile.id}>
-                          {profile.shopName || profile.displayName} {profile.shopId ?? ''}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
+                {page === 'rules' ? (
+                  <div className="cs-profile-picker">
+                    <label>
+                      {layout.currentShop}
+                      <select
+                        aria-label={layout.selectShop}
+                        onChange={event => setSelected(event.target.value)}
+                        value={selected}
+                      >
+                        <option value="">{layout.selectShop}</option>
+                        {profiles.map(profile => (
+                          <option key={profile.id} value={profile.id}>
+                            {profile.shopName || profile.displayName} {profile.shopId ?? ''}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                ) : null}
                 {selectedProfile ? (
                   <CustomerServicePreviewPanel
                     key={selectedProfile.id}

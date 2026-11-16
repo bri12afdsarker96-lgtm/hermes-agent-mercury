@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { Input } from '@/components/ui/input'
 import { useI18n } from '@/i18n/context'
 import { customerServiceLayoutCopy } from '@/i18n/customer-service-layout'
+import { nativeUiCopy } from '@/i18n/native-ui'
 import { shopPayoutCopy } from '@/i18n/shop-payout'
 
 import type { ShopBrowserProfile } from '../../electron/shop-browser-types'
@@ -27,6 +28,7 @@ export function ShopPayoutSettingsButton({ runtime, profile, disabled, onSaved }
   const { locale } = useI18n()
   const copy = shopPayoutCopy[locale]
   const layout = customerServiceLayoutCopy[locale]
+  const native = nativeUiCopy[locale]
   const lifecycle = useMemo(() => ({ runtime, profileId: profile.id, alive: true, busy: false }), [runtime, profile.id])
   const [draft, setDraft] = useState<ShopPayoutSettings>()
   const [days, setDays] = useState('15')
@@ -111,7 +113,7 @@ export function ShopPayoutSettingsButton({ runtime, profile, disabled, onSaved }
 
   return (
     <>
-      <Button disabled={disabled} onClick={begin} variant="secondary">
+      <Button data-native-tone="amber" disabled={disabled} onClick={begin} variant="secondary">
         {copy.title}
       </Button>
       <Dialog
@@ -122,28 +124,41 @@ export function ShopPayoutSettingsButton({ runtime, profile, disabled, onSaved }
         }}
         open={!!draft}
       >
-        <DialogContent bodyClassName="cs-dialog-body" className="cs-native-dialog cs-payout-dialog">
+        <DialogContent
+          bodyClassName="cs-dialog-body"
+          className="cs-native-dialog cs-payout-dialog"
+          showCloseButton={false}
+        >
           <DialogTitle>{copy.title}</DialogTitle>
-          <DialogDescription>{copy.evidence}</DialogDescription>
+          <DialogDescription className="sr-only">{copy.evidence}</DialogDescription>
           {draft ? (
             <div className="cs-message-form">
-              <p>
-                {layout.shopName} <strong>{profile.shopName || profile.displayName}</strong>
-              </p>
-              <p>
-                {layout.shopId} {profile.shopId ?? '—'}
-              </p>
-              <label>
-                {copy.amount}
+              <dl className="cs-payout-identity">
+                <div>
+                  <dt>{layout.shopName}</dt>
+                  <dd>{profile.shopName || profile.displayName}</dd>
+                </div>
+                <div>
+                  <dt>{layout.shopId}</dt>
+                  <dd>{profile.shopId ?? '—'}</dd>
+                </div>
+              </dl>
+              <label className="cs-payout-amount">
+                {native.amount}
+                <span aria-hidden="true"> *</span>
                 <Input
+                  aria-label={copy.amount}
                   disabled={busy}
                   inputMode="decimal"
                   onChange={event => setDraft({ ...draft, remitAmount: event.target.value })}
                   value={draft.remitAmount}
                 />
               </label>
-              <label>
-                {copy.channel}
+              <label className="cs-payout-field">
+                <span>
+                  {native.refundRoute}
+                  <span aria-hidden="true"> *</span>
+                </span>
                 <select
                   aria-label={copy.channel}
                   disabled={busy}
@@ -160,9 +175,10 @@ export function ShopPayoutSettingsButton({ runtime, profile, disabled, onSaved }
                 </select>
               </label>
               <h3>{copy.conditions}</h3>
-              <label>
-                {copy.days}
+              <label className="cs-payout-field">
+                <span>{copy.days}</span>
                 <Input
+                  aria-label={copy.days}
                   disabled={busy}
                   inputMode="numeric"
                   onChange={event => setDays(event.target.value)}
@@ -178,8 +194,8 @@ export function ShopPayoutSettingsButton({ runtime, profile, disabled, onSaved }
                 />
                 {copy.requireDays}
               </label>
-              <label>
-                {copy.goodReview}
+              <label className="cs-payout-field">
+                <span>{copy.goodReview}</span>
                 <select
                   aria-label={copy.goodReview}
                   disabled={busy}

@@ -650,3 +650,455 @@
     padding-inline: 16px;
   }
 }
+
+/* Geometry follows the recovered shop and client XAML. Palette follows the saved Hermes skin. */
+.hesc-root .cs-native[data-native-layout='true'] {
+  flex-direction: row;
+  min-height: 540px;
+  border: 1px solid var(--ui-stroke-secondary);
+  border-radius: 0;
+  background: var(--ui-bg-secondary);
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-sidebar {
+  position: relative;
+  width: 220px;
+  flex: 0 0 220px;
+  display: flex;
+  flex-direction: column;
+  border-inline-end: 1px solid var(--ui-stroke-secondary);
+  border-bottom: 0;
+  background: var(--ui-bg-surface);
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-brand {
+  min-height: 74px;
+  padding: 18px 14px;
+  font-size: 15px;
+  letter-spacing: normal;
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-brand > span {
+  display: grid;
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-sidebar nav {
+  display: grid;
+  gap: 2px;
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-sidebar nav button {
+  height: 42px;
+  margin: 0 8px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  gap: 12px;
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-sidebar nav button[data-active='true'] {
+  color: var(--theme-primary);
+  background: var(--theme-primary-soft);
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-sidebar-footer {
+  position: static;
+  margin: auto 12px 12px;
+  padding: 12px;
+  border: 1px solid var(--ui-stroke-secondary);
+  border-radius: 8px;
+  background: var(--theme-primary-soft);
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-sidebar-footer > i,
+.hesc-root .cs-native[data-native-layout='true'] .cs-sidebar-footer > span {
+  display: inline-block;
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-native-page {
+  padding: 24px 32px;
+  gap: 12px;
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-native-page h2 {
+  font-size: 22px;
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-toolbar {
+  padding: 8px 12px;
+  min-height: 50px;
+  border: 1px solid var(--ui-stroke-secondary);
+  border-radius: 8px;
+  background: var(--ui-bg-surface);
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-summary {
+  padding: 8px 12px;
+  min-height: 44px;
+  border: 1px solid var(--ui-stroke-secondary);
+  border-radius: 8px;
+  background: var(--ui-bg-surface);
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-summary > span {
+  padding: 3px 10px;
+  border: 1px solid var(--ui-stroke-secondary);
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-table th {
+  height: 39px;
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-table td {
+  height: 43px;
+}
+.cs-shops .cs-table {
+  min-width: 850px;
+}
+.cs-shops .cs-toolbar {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.cs-shops .cs-toolbar > button {
+  flex-shrink: 0;
+}
+.cs-shops .cs-toolbar > select {
+  width: 160px;
+  flex-shrink: 0;
+}
+.cs-shops .cs-toolbar > input {
+  width: 220px;
+  min-width: 220px;
+  margin-inline-start: 0;
+}
+.cs-shop-row-actions {
+  flex-wrap: nowrap;
+}
+.cs-shops .cs-table td:last-child {
+  overflow: visible;
+  max-width: none;
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-profile-actions {
+  padding: 12px;
+  border: 1px solid var(--ui-stroke-secondary);
+  background: var(--ui-bg-surface);
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-profile-picker {
+  padding: 12px 32px 0;
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-service-toolbar {
+  margin: 10px 12px 6px;
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-work-columns {
+  grid-template-columns: 360px 230px minmax(280px, 1fr) 320px;
+  gap: 8px;
+  margin: 0 12px 12px;
+  min-width: 1238px;
+  min-height: 430px;
+}
+.cs-shop-search {
+  gap: 8px;
+  min-height: 40px;
+  padding: 4px 10px;
+}
+.cs-shop-search > span {
+  width: 90px;
+  flex-shrink: 0;
+}
+.cs-shop-search input {
+  width: 100%;
+  height: 30px;
+}
+.cs-work-shop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 112px;
+  align-items: center;
+  min-height: 35px;
+  padding: 6px 8px;
+  gap: 6px;
+}
+.cs-work-shop > span:last-child {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.cs-work-shop .cs-status-dot {
+  width: 8px;
+  height: 8px;
+  background: currentColor;
+}
+.cs-work-shop .cs-count {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 700;
+}
+.cs-chat-history > .cs-empty:last-child {
+  margin-top: auto;
+  padding-bottom: 8px;
+}
+.cs-activity .cs-login-log {
+  flex: 1;
+  max-height: none;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.3;
+}
+.cs-work-history {
+  margin: 0 12px 12px;
+  flex-shrink: 0;
+}
+.cs-work-history > summary {
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.cs-work-history .cs-event-list {
+  max-height: 240px;
+}
+.cs-rule-numbers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.cs-rule-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 24px 20px;
+}
+.cs-rule-form label > input:not([type='checkbox']),
+.cs-rule-form label > select {
+  width: 100%;
+}
+.cs-rule-form .cs-rule-match {
+  display: flex;
+  flex-direction: column;
+}
+.cs-rule-form .cs-rule-match select {
+  margin: 4px 0 0;
+  height: 40px;
+}
+.cs-rule-form textarea {
+  min-height: 72px;
+  font-size: 12px;
+}
+.cs-rule-reply-hint {
+  display: block;
+  margin: 2px 0 4px;
+  font-size: 11px;
+  color: var(--ui-text-tertiary);
+}
+.cs-rule-additional {
+  display: grid;
+  gap: 6px;
+}
+.cs-rule-additional label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cs-native-dialog.cs-rule-dialog .cs-dialog-body,
+.cs-native-dialog.cs-payout-dialog .cs-dialog-body {
+  padding: 0;
+  gap: 0;
+}
+.cs-native-dialog.cs-rule-dialog h2,
+.cs-native-dialog.cs-payout-dialog h2 {
+  margin: 0;
+  padding: 12px 16px;
+  min-height: 42px;
+  background: var(--ui-bg-secondary);
+  font-size: 14px;
+  line-height: 18px;
+}
+.cs-native-dialog.cs-payout-dialog {
+  width: min(520px, 92vw) !important;
+  max-width: 520px !important;
+}
+.cs-native-dialog.cs-payout-dialog .cs-message-form {
+  padding: 20px 24px;
+  gap: 0;
+}
+.cs-payout-identity {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.cs-payout-identity dt {
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+  margin-bottom: 4px;
+}
+.cs-payout-identity dd {
+  font-size: 14px;
+  line-height: 20px;
+  margin: 0;
+}
+.cs-payout-amount {
+  display: block;
+  margin-bottom: 12px;
+}
+.cs-native-dialog.cs-payout-dialog .cs-payout-amount input {
+  height: 40px;
+  margin-top: 6px;
+}
+.cs-payout-field {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  align-items: center;
+  margin-bottom: 10px;
+}
+.cs-native-dialog.cs-payout-dialog .cs-payout-field select,
+.cs-native-dialog.cs-payout-dialog .cs-payout-field input {
+  margin-top: 0;
+  height: 40px;
+}
+.cs-native-dialog.cs-payout-dialog .cs-payout-field select {
+  height: 36px;
+}
+.cs-payout-amount + .cs-payout-field {
+  margin-bottom: 16px;
+}
+.cs-payout-dialog h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 20px;
+}
+.cs-payout-check {
+  margin: 4px 0 10px 10px;
+  min-height: 20px;
+}
+.cs-payout-dialog .cs-dialog-actions {
+  margin-top: 14px;
+  gap: 12px;
+}
+@media (max-width: 1000px) {
+  .hesc-root .cs-native[data-native-layout='true'] .cs-sidebar {
+    width: 180px;
+    flex-basis: 180px;
+  }
+  .hesc-root .cs-native[data-native-layout='true'] .cs-native-page {
+    padding-inline: 20px;
+  }
+}
+@media (max-width: 600px) {
+  .cs-payout-field {
+    grid-template-columns: 110px minmax(0, 1fr);
+  }
+  .cs-rule-numbers {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cs-native button[data-native-tone='amber'],
+.cs-native-dialog button[data-native-tone='amber'] {
+  color: var(--status-warning-fg);
+  background: var(--status-warning-bg);
+  border-color: var(--status-warning-border);
+}
+.cs-native button[data-native-tone='success'] {
+  color: var(--status-success-fg);
+  background: var(--status-success-bg);
+  border-color: var(--status-success-border);
+}
+.cs-native button[data-native-tone='danger'] {
+  color: var(--status-danger-fg);
+  background: var(--status-danger-bg);
+  border-color: var(--status-danger-border);
+}
+.cs-native button[data-native-tone='info'] {
+  color: var(--cs-info-fg, var(--blue-600));
+  background: var(--cs-info-bg, var(--blue-50));
+  border-color: var(--cs-info-border, var(--blue-100));
+}
+.hesc-root .cs-native[data-native-layout='true'] .shop-browser-address {
+  border-radius: 20px;
+}
+.shop-browser-toolbar > button > .codicon {
+  font-size: 18px;
+}
+
+/* Accent and dark surfaces are taken from the recovered native XAML resources. */
+.cs-native,
+.cs-native-dialog {
+  --cs-native-accent: #00c59e;
+  --theme-primary: var(--cs-native-accent);
+  --theme-primary-foreground-seed: #ffffff;
+  --theme-primary-soft: color-mix(in srgb, var(--cs-native-accent) 14%, transparent);
+  --theme-primary-soft-border: color-mix(in srgb, var(--cs-native-accent) 30%, transparent);
+  --cs-content-bg: var(--ui-bg-secondary);
+  --cs-sidebar-bg: var(--ui-bg-surface);
+  --cs-control-bg: var(--ui-bg-secondary);
+  --cs-dialog-header-bg: var(--ui-bg-secondary);
+}
+html[data-hermes-mode='dark'] .cs-native,
+html[data-hermes-mode='dark'] .cs-native-dialog {
+  --cs-content-bg: #1a1a1a;
+  --cs-sidebar-bg: #202020;
+  --cs-control-bg: #363636;
+  --cs-dialog-header-bg: #1e1e1e;
+  --ui-bg-surface: #2a2a2a;
+  --ui-bg-secondary: #282828;
+  --ui-bg-elevated: #2a2a2a;
+  --ui-stroke-primary: #4a4a4a;
+  --ui-stroke-secondary: #333333;
+  --ui-row-hover: #383838;
+  --ui-text-primary: #fafafa;
+  --ui-text-secondary: #9ca3af;
+  --ui-text-tertiary: #6b7280;
+  --status-success-fg: #34d399;
+  --status-success-bg: #34d3991a;
+  --status-success-border: #34d39955;
+  --status-warning-fg: #fbbf24;
+  --status-warning-bg: #fbbf241a;
+  --status-warning-border: #fbbf2455;
+  --status-danger-fg: #fb7185;
+  --status-danger-bg: #fb71851a;
+  --status-danger-border: #fb718555;
+  --cs-info-fg: #38bdf8;
+  --cs-info-bg: #38bdf81a;
+  --cs-info-border: #38bdf855;
+}
+html[data-hermes-mode='dark'] .cs-native .cs-sidebar nav button[data-active='true'] {
+  background: #1e3a30;
+}
+.cs-work-shop .cs-count {
+  background: #f59e0b;
+  color: #ffffff;
+}
+.hesc-root .cs-native[data-native-layout='true'] {
+  background: var(--cs-content-bg);
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-sidebar {
+  background: var(--cs-sidebar-bg);
+}
+.cs-brand svg {
+  width: 22px;
+  height: 22px;
+}
+.cs-native input,
+.cs-native select,
+.cs-native-dialog input:not([type='checkbox']),
+.cs-native-dialog select,
+.cs-native-dialog textarea {
+  background: var(--cs-control-bg);
+}
+.cs-native input[data-slot='input'],
+.cs-native-dialog input[data-slot='input'] {
+  background: var(--cs-control-bg) !important;
+}
+.cs-native-dialog.cs-rule-dialog h2,
+.cs-native-dialog.cs-payout-dialog h2 {
+  background: var(--cs-dialog-header-bg);
+}
+.cs-shops .cs-table th:nth-child(1) {
+  width: 55px;
+}
+.cs-shops .cs-table th:nth-child(2) {
+  width: 200px;
+}
+.cs-shops .cs-table th:nth-child(3) {
+  width: 90px;
+}
+.cs-shops .cs-table th:nth-child(4) {
+  width: 110px;
+}
+.cs-shops .cs-table th:nth-child(5) {
+  width: 140px;
+}
+.cs-shops .cs-table td:nth-child(3) {
+  text-align: center;
+}
+.cs-shop-search > select {
+  width: 90px;
+  flex-shrink: 0;
+  height: 30px;
+}

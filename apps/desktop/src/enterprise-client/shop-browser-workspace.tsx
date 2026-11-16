@@ -3,6 +3,7 @@ import './shop-browser-workspace.css'
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { Codicon } from '@/components/ui/codicon'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -19,17 +20,15 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useI18n } from '@/i18n/context'
 import { shopBrowserWorkspaceCopy } from '@/i18n/shop-browser-workspace'
 import {
-  ArrowUpRight,
   Bookmark,
-  BookmarkFilled,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   FolderOpen,
   Globe,
-  LayoutDashboard,
   Plus,
   RefreshCw,
+  Send,
   X
 } from '@/lib/icons'
 
@@ -341,7 +340,7 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
           onClick={() => void run(() => browser({ action: 'home' }))}
           type="button"
         >
-          <LayoutDashboard aria-hidden="true" />
+          <Codicon name="home" />
         </button>
         <label className="shop-browser-address">
           <Globe aria-hidden="true" />
@@ -356,10 +355,10 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
           }
           type="button"
         >
-          {bookmarked ? <BookmarkFilled aria-hidden="true" /> : <Bookmark aria-hidden="true" />}
+          <Codicon name={bookmarked ? 'star-full' : 'star-empty'} />
         </button>
         <button aria-label={copy.go} className="shop-browser-go" disabled={busy || !active} type="submit">
-          <ArrowUpRight aria-hidden="true" />
+          <Send aria-hidden="true" />
         </button>
       </form>
       <div aria-label={copy.bookmarks} className="shop-browser-bookmarks">
