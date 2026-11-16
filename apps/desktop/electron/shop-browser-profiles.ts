@@ -725,6 +725,11 @@ export class ShopBrowserProfiles {
           }
 
           await this.checkProfileAccess(profile!)
+
+          if (released) {
+            fail('SHOP_PROFILE_OWNER_CHANGED')
+          }
+
           const identity = await transport.identify()
 
           if (released) {
@@ -739,6 +744,11 @@ export class ShopBrowserProfiles {
           }
 
           await this.checkProfileAccess(profile!)
+
+          if (released) {
+            fail('SHOP_PROFILE_OWNER_CHANGED')
+          }
+
           const result = await transport.command(targetId, method, params)
 
           if (released) {
@@ -754,8 +764,17 @@ export class ShopBrowserProfiles {
 
           await this.authority()
           await this.checkProfileAccess(profile!, true)
+
+          if (released) {
+            fail('SHOP_PROFILE_OWNER_CHANGED')
+          }
+
           const identity = await transport.identify()
           await this.authority()
+
+          if (released) {
+            fail('SHOP_PROFILE_OWNER_CHANGED')
+          }
 
           if (!identity || identity.shopId !== profile.shopId || identity.shopName !== profile.shopName) {
             fail('SHOP_PROFILE_IDENTITY_CHANGED')

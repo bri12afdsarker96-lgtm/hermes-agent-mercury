@@ -51,7 +51,7 @@ async function fixture(options: { root?: string; authority?: ShopBrowserAuthorit
     close: ReturnType<typeof vi.fn>
   }[] = []
 
-  const executions: { close: ReturnType<typeof vi.fn>; command: ReturnType<typeof vi.fn> }[] = []
+  const executions: { identify: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn>; command: ReturnType<typeof vi.fn> }[] = []
   let maximumLiveViews = 0
 
   const clearStorage = vi.fn(async (storage: string) => {
@@ -136,7 +136,7 @@ async function fixture(options: { root?: string; authority?: ShopBrowserAuthorit
 
   const createExecution = vi.fn(async (storage: string) => {
     const execution = {
-      identify: async () => identities.get(storage) ?? identity,
+      identify: vi.fn(async () => identities.get(storage) ?? identity),
       command: vi.fn(async (_targetId: string, method: string) => ({ method })),
       close: vi.fn(async () => {})
     }
@@ -215,6 +215,28 @@ async function fixture(options: { root?: string; authority?: ShopBrowserAuthorit
 }
 
 describe('local shop browser runtime', () => {
+  it.each(['command', 'identify', 'validate'] as const)(
+    'rejects %s when its execution closes during an access check before native dispatch',
+    async action => {
+      const f = await fixture()
+      const profile = await f.register('10001')
+      const execution = await f.runtime.acquireExecution(profile.id, 'merchant')
+      const native = f.executions.at(-1)!
+      native.identify.mockClear()
+      native.command.mockClear()
+
+      const pending = action === 'command'
+        ? execution.command('root', 'Runtime.evaluate', {})
+        : execution[action]()
+
+      await execution.close()
+      await expect(pending).rejects.toThrow('SHOP_PROFILE_OWNER_CHANGED')
+      expect(native.command).not.toHaveBeenCalled()
+      expect(native.identify).not.toHaveBeenCalled()
+      expect(native.close).toHaveBeenCalledTimes(1)
+    }
+  )
+
   it('keeps both assigned employees usable and fences removed members, retained views and execution handles', async () => {
     let record: CloudShopRecord | undefined
     const hidden = new Map<string, Set<string>>()
