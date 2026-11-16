@@ -1,9 +1,10 @@
 import './customer-service.css'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
+import { Loader } from '@/components/ui/loader'
 import { useI18n } from '@/i18n/context'
 import { customerServiceCopy } from '@/i18n/customer-service'
 import { customerServiceLayoutCopy } from '@/i18n/customer-service-layout'
@@ -32,6 +33,16 @@ export function CustomerServicePage({
   const [selected, setSelected] = useState('')
   const [evidenceOpen, setEvidenceOpen] = useState(false)
   const [initialTarget, setInitialTarget] = useState<'feige'>()
+  const [owner, setOwner] = useState(runtime)
+
+  useEffect(() => {
+    setPage('shops')
+    setProfiles([])
+    setSelected('')
+    setInitialTarget(undefined)
+    setEvidenceOpen(false)
+    setOwner(runtime)
+  }, [runtime])
 
   const updateProfiles = useCallback((next: ShopBrowserProfile[]) => {
     setProfiles(next)
@@ -44,6 +55,10 @@ export function CustomerServicePage({
   }
 
   const selectedProfile = profiles.find(profile => profile.id === selected)
+
+  if (owner !== runtime) {
+    return <Loader />
+  }
 
   return (
     <section className="cs-native" data-testid="customer-service-page">

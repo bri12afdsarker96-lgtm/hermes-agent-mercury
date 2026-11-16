@@ -5,13 +5,14 @@ import { Input } from '@/components/ui/input'
 import { Loader } from '@/components/ui/loader'
 import { LogView } from '@/components/ui/log-view'
 import { useI18n } from '@/i18n/context'
+import { customerServiceLayoutCopy } from '@/i18n/customer-service-layout'
 import { FolderOpen, LogIn, Play, RefreshCw, Square } from '@/lib/icons'
 
 import type { DoudianReply, DoudianRequest, DoudianShop, DoudianTask } from '../../electron/doudian-types'
 
+import { CustomerServicePage } from './customer-service-page'
 import { useDoudianEntryCopy } from './doudian-entry-copy'
 import { authorizationErrors, DoudianEntryStatus } from './doudian-entry-state'
-import { DoudianShopManagement } from './doudian-shop-management'
 import type { EnterpriseClientRuntime } from './runtime'
 
 interface Props {
@@ -21,7 +22,7 @@ interface Props {
 const active = (task: DoudianTask | undefined) => !!task && ['preparing', 'running', 'stopping'].includes(task.state)
 
 export function DoudianWorkbench({ runtime, standalone = false }: Props) {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const entry = useDoudianEntryCopy()
   const copy = t.doudian
   const [capabilities, setCapabilities] = useState<DoudianReply['capabilities']>()
@@ -92,6 +93,11 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
 
       if (!reply.ok) {
         setError(reply.error ?? 'DOUDIAN_FAILED')
+
+        if (request.action === 'shops') {
+          setShops([])
+          setShopId('')
+        }
 
         if (['DOUDIAN_HOST_LOST', 'DOUDIAN_RESULT_UNKNOWN'].includes(reply.error ?? '')) {
           setUnknown(true)
@@ -224,6 +230,23 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
     return <DoudianEntryStatus reason={entry.invalid} state="host-missing" />
   }
 
+  if (managingShops) {
+    return (
+      <>
+        <Button
+          onClick={() => {
+            setManagingShops(false)
+            void action(refresh)
+          }}
+          variant="secondary"
+        >
+          {t.common.back}
+        </Button>
+        <CustomerServicePage runtime={runtime} />
+      </>
+    )
+  }
+
   return (
     <div className="space-y-4" data-testid="doudian-workbench">
       {standalone ? <>
@@ -249,12 +272,12 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
           {copy.refresh}
         </Button>
         <Button
-          disabled={locked || !capabilities?.authorized || capabilities.shopManagement !== 1}
-          onClick={() => setManagingShops(value => !value)}
+          disabled={locked || !runtime.shopBrowser}
+          onClick={() => setManagingShops(true)}
           variant="secondary"
         >
           <LogIn />
-          {copy.manageShops}
+          {customerServiceLayoutCopy[locale].title}
         </Button>
         {busy ? <Loader /> : null}
         {capabilities ? (
@@ -264,7 +287,6 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
         ) : null}
       </div>
       {checkingShop ? <p role="status">{entry.shopLoginChecking}</p> : null}
-      {managingShops ? <DoudianShopManagement onChanged={refresh} onClose={() => setManagingShops(false)} operationsSupported={capabilities?.shopOperations === 1} runtime={runtime} /> : null}
       {error ? (
         <p className="text-(--ui-text-primary)" role="alert">
           {errorText(error)}

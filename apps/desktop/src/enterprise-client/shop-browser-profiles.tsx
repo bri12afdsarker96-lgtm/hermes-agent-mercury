@@ -34,7 +34,8 @@ export function ShopBrowserProfilesPanel({
   const copy = shopBrowserCopy[locale]
   const layout = customerServiceLayoutCopy[locale]
   const [profiles, setProfiles] = useState<ShopBrowserProfile[]>([])
-  const [selected, setSelected] = useState(selectedProfileId ?? '')
+  const [localSelected, setSelected] = useState('')
+  const selected = selectedProfileId ?? localSelected
   const [search, setSearch] = useState('')
   const [opened, setOpened] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -54,13 +55,17 @@ export function ShopBrowserProfilesPanel({
 
     if (!reply.ok) {
       setOpened(null)
+      setProfiles([])
+      setSelected('')
+      onProfilesChange?.([])
+      onSelectedProfile?.('')
       throw new Error(reply.error)
     }
 
     setProfiles(reply.profiles ?? [])
     onProfilesChange?.(reply.profiles ?? [])
     setOpened(reply.openProfileId ?? null)
-  }, [lifecycle, onProfilesChange])
+  }, [lifecycle, onProfilesChange, onSelectedProfile])
 
   const run = useCallback(
     async (operation: () => Promise<void>) => {
@@ -82,6 +87,14 @@ export function ShopBrowserProfilesPanel({
           if (!(recoverableShopBrowserErrors as readonly string[]).includes(code)) {
             setOpened(null)
           }
+
+          if (/OWNER_CHANGED|ACCESS_UNAVAILABLE|FORBIDDEN/.test(code)) {
+            setProfiles([])
+            setSelected('')
+            setConfirmation(null)
+            onProfilesChange?.([])
+            onSelectedProfile?.('')
+          }
         }
       } finally {
         lifecycle.busy = false
@@ -91,12 +104,14 @@ export function ShopBrowserProfilesPanel({
         }
       }
     },
-    [lifecycle]
+    [lifecycle, onProfilesChange, onSelectedProfile]
   )
 
   useEffect(() => {
     lifecycle.alive = true
     setProfiles([])
+    setSelected('')
+    setSearch('')
     setOpened(null)
     setConfirmation(null)
     void run(refresh)
@@ -188,6 +203,10 @@ export function ShopBrowserProfilesPanel({
         const reply = await runtime.shopBrowser!(request)
 
         if (!reply.ok) {
+          if (request.action === 'open') {
+            await refresh()
+          }
+
           throw new Error(reply.error)
         }
 
@@ -203,8 +222,27 @@ export function ShopBrowserProfilesPanel({
 
         setConfirmation(null)
         await refresh()
+
+        if (reply.profile && (request.action === 'create' || request.action === 'relogin') && lifecycle.alive) {
+          const opened = await runtime.shopBrowser!({
+            action: 'open',
+            profileId: reply.profile.id,
+            target: 'merchant',
+            bounds: bounds()
+          })
+
+          if (!lifecycle.alive) {
+            return
+          }
+
+          await refresh()
+
+          if (!opened.ok) {
+            throw new Error(opened.error)
+          }
+        }
       }),
-    [run, runtime, lifecycle, onSelectedProfile, refresh]
+    [run, runtime, lifecycle, onSelectedProfile, refresh, bounds]
   )
 
   const open = useCallback(
@@ -361,6 +399,7 @@ export function ShopBrowserProfilesPanel({
             <span role="status">
               {copy[selectedProfile.loginState]} · {selectedProfile.shopName || selectedProfile.displayName}
             </span>
+            {selectedProfile.loginState === 'verified' ? <p role="status">{copy.sharedReady}</p> : null}
             <div className="cs-actions">
               <Button disabled={busy} onClick={() => open('merchant')} variant="secondary">
                 {copy.merchant}
@@ -420,6 +459,7 @@ export function ShopBrowserProfilesPanel({
                 </Button>
               </div>
             </header>
+            {selectedProfile?.loginState !== 'verified' ? <p>{copy.loginHint}</p> : null}
             {error ? (
               <p className="cs-error" role="alert">
                 {copy.failed} ({error})
@@ -465,6 +505,7 @@ export function ShopBrowserProfilesPanel({
             disabled={busy || !!opened}
             onChange={event => {
               setSelected(event.target.value)
+              onSelectedProfile?.(event.target.value)
               setConfirmation(null)
             }}
             value={selected}
@@ -485,6 +526,7 @@ export function ShopBrowserProfilesPanel({
           <p role="status">
             {copy[selectedProfile.loginState]} {selectedProfile.shopName ?? ''} {selectedProfile.checkedAt ?? ''}
           </p>
+          {selectedProfile.loginState === 'verified' ? <p role="status">{copy.sharedReady}</p> : null}
           <div className="flex flex-wrap items-center gap-2">
             <Button disabled={busy} onClick={() => open('merchant')} variant="secondary">
               {copy.merchant}
@@ -523,14 +565,17 @@ export function ShopBrowserProfilesPanel({
         </>
       ) : null}
       {opened ? (
-        <ShopBrowserWorkspacePanel
-          key={opened}
-          onClosed={browserClosed}
-          profileId={opened}
-          runtime={runtime}
-          shopVerified={selectedProfile?.loginState === 'verified'}
-          viewportRef={slot}
-        />
+        <>
+          {selectedProfile?.loginState !== 'verified' ? <p>{copy.loginHint}</p> : null}
+          <ShopBrowserWorkspacePanel
+            key={opened}
+            onClosed={browserClosed}
+            profileId={opened}
+            runtime={runtime}
+            shopVerified={selectedProfile?.loginState === 'verified'}
+            viewportRef={slot}
+          />
+        </>
       ) : (
         <div className="w-full" ref={slot} style={{ height: 0 }} />
       )}

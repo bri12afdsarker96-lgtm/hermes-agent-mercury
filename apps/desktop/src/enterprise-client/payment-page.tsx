@@ -3,10 +3,12 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useI18n } from '@/i18n/context'
+import { customerServiceLayoutCopy } from '@/i18n/customer-service-layout'
 import { shopBrowserCopy } from '@/i18n/shop-browser'
 
 import type { DoudianReply, DoudianRequest, DoudianShop, DoudianTask } from '../../electron/doudian-types'
 
+import { CustomerServicePage } from './customer-service-page'
 import type { DoudianPageProps } from './doudian-entry-state'
 
 interface PaymentFormDraft {
@@ -155,7 +157,7 @@ export function PaymentPage({ runtime }: DoudianPageProps) {
 }
 
 function PaymentWorkspace({ runtime }: DoudianPageProps) {
-  const { locale } = useI18n()
+  const { locale, t: translations } = useI18n()
   const language = locale === 'zh' || locale === 'zh-hant' ? 'zh' : 'en'
   const t = labels[language]
   const states = taskStateLabels[language]
@@ -175,6 +177,8 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
   const [shops, setShops] = useState<DoudianShop[]>([])
   const [browserProfileId, setBrowserProfileId] = useState(draft?.browserProfileId ?? '')
   const [profilesLoading, setProfilesLoading] = useState(false)
+  const [managingShops, setManagingShops] = useState(false)
+  const [profilesRevision, setProfilesRevision] = useState(0)
   const [securityBlocked, setSecurityBlocked] = useState(false)
   const [sessionOwner, setSessionOwner] = useState(runtime)
   const [error, setError] = useState('')
@@ -223,6 +227,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
     setShops([])
     setBrowserProfileId(draft?.browserProfileId ?? '')
     setProfilesLoading(false)
+    setManagingShops(false)
     setTransport(draft?.transport ?? 'cdp')
     setSecurityBlocked(false)
 
@@ -299,7 +304,7 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
     return () => {
       alive = false
     }
-  }, [runtime, current, embeddedBrowser])
+  }, [runtime, current, embeddedBrowser, profilesRevision])
 
   useEffect(() => {
     if (!runtime || !current) {
@@ -495,10 +500,34 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
     }
   }
 
+  if (managingShops && runtime && current) {
+    return (
+      <>
+        <Button
+          onClick={() => {
+            setManagingShops(false)
+            setProfilesRevision(value => value + 1)
+          }}
+          variant="secondary"
+        >
+          {translations.common.back}
+        </Button>
+        <CustomerServicePage runtime={runtime} />
+      </>
+    )
+  }
+
   return (
     <section className="hesc-page space-y-4" data-testid="payment-page">
       <header className="hesc-page-header">
         <h1>{t[0]}</h1>
+        <Button
+          disabled={!current || busy || !!active || !runtime?.shopBrowser}
+          onClick={() => setManagingShops(true)}
+          variant="secondary"
+        >
+          {customerServiceLayoutCopy[locale].title}
+        </Button>
       </header>
       <p role="status">
         {gate === 'ready' ? t[20] : gate === 'unverified' ? t[12] : gate === 'checking' ? t[15] : securityBlocked && current ? t[26] : t[16]}

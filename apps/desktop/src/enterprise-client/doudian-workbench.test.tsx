@@ -9,7 +9,7 @@ import { DoudianWorkbench } from './doudian-workbench'
 import { ReviewCapturePage } from './review-capture-page'
 import type { EnterpriseClientRuntime } from './runtime'
 
-vi.mock('@/i18n/context', () => ({ useI18n: () => ({ t: zh }) }))
+vi.mock('@/i18n/context', () => ({ useI18n: () => ({ locale: 'zh', t: zh }) }))
 
 const legacyShop: DoudianShop = { id: 'a'.repeat(32), name: '模拟店铺', platformId: '123', status: 'Valid' }
 
@@ -71,6 +71,20 @@ function setup(reviewOptions?: number, shops: DoudianShop[] = [legacyShop], revi
 }
 
 describe('Doudian workbench (offline fixtures)', () => {
+  it('clears the selected shop when the authoritative shared profile refresh fails', async () => {
+    const { send } = setup(1, [profileShop], true)
+    await screen.findByRole('option', { name: `${profileShop.name} (${profileShop.platformId})` })
+    fireEvent.change(screen.getByRole('combobox', { name: '店铺' }), { target: { value: profileShop.id } })
+    const original = send.getMockImplementation()!
+    send.mockImplementation(request => request.action === 'shops'
+      ? Promise.resolve({ ok: false, error: 'SHOP_PROFILE_ACCESS_UNAVAILABLE' })
+      : original(request))
+    fireEvent.click(screen.getByRole('button', { name: zh.doudian.refresh }))
+    await waitFor(() => expect(screen.queryByRole('option', { name: `${profileShop.name} (${profileShop.platformId})` })).toBeNull())
+    expect((screen.getByRole('combobox', { name: '店铺' }) as HTMLSelectElement).value).toBe('')
+    expect(send.mock.calls.some(([request]) => ['prepare', 'start'].includes(request.action))).toBe(false)
+  })
+
   it('shows the live-login check and blocks start after a failed check, allowing retry', async () => {
     const { send } = setup(1, [profileShop], true)
     await screen.findByRole('option', { name: `${profileShop.name} (${profileShop.platformId})` })

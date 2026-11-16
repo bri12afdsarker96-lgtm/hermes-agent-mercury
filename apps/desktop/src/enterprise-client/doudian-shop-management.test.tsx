@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
+
 import type { DoudianReply, DoudianRequest } from '../../electron/doudian-types'
+
 import { DoudianShopManagement } from './doudian-shop-management'
 import type { EnterpriseClientRuntime } from './runtime'
 
@@ -26,6 +28,9 @@ it('manages the embedded list and requires explicit confirmation before deleting
   fireEvent.click(screen.getByText('确认删除'))
   await waitFor(() => expect(send).toHaveBeenCalledWith({ action: 'shopManagementDelete', shopId: id, confirmation: 'b'.repeat(32) }))
   expect(send.mock.calls.some(([r]) => r.action === 'manageShops')).toBe(false)
+  expect((screen.getByRole('button', { name: '店铺与客服' }) as HTMLButtonElement).disabled).toBe(true)
+  expect(screen.queryByRole('button', { name: '新增店铺并登录' })).toBeNull()
+  expect(send.mock.calls.some(([r]) => r.action === 'shopManagementAdd')).toBe(false)
 })
 
 it('requires explicit shop identity confirmation before completing login', async () => {

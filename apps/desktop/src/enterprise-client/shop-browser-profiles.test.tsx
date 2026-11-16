@@ -1,7 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 
+import { shopBrowserCopy } from '@/i18n/shop-browser'
+
 import type { ShopBrowserProfile, ShopBrowserRequest } from '../../electron/shop-browser-types'
+
 import type { EnterpriseClientRuntime } from './runtime'
 import { ShopBrowserProfilesPanel } from './shop-browser-profiles'
 
@@ -58,15 +61,17 @@ it('creates, opens, identifies and closes through the typed runtime without busi
   const f = fixture()
   const view = render(<ShopBrowserProfilesPanel runtime={f.runtime} />)
   await screen.findByText('暂无内嵌登录档案')
-  fireEvent.click(screen.getByText('新增登录档案'))
+  fireEvent.click(screen.getByText(shopBrowserCopy.zh.create))
   await screen.findByText('店铺身份未核验')
-  fireEvent.click(screen.getByText('打开店铺后台'))
   await waitFor(() =>
     expect(f.send).toHaveBeenCalledWith(expect.objectContaining({ action: 'open', target: 'merchant' }))
   )
-  await waitFor(() => expect((screen.getByText('识别当前店铺') as HTMLButtonElement).disabled).toBe(false))
-  fireEvent.click(screen.getByText('识别当前店铺'))
+  expect(f.send.mock.calls.some(([request]) => request.action === 'identify')).toBe(false)
+  await screen.findByText(shopBrowserCopy.zh.loginHint)
+  await waitFor(() => expect((screen.getByText(shopBrowserCopy.zh.identify) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByText(shopBrowserCopy.zh.identify))
   await screen.findByText(/店铺身份已核验/)
+  await screen.findByText(shopBrowserCopy.zh.sharedReady)
   view.unmount()
   expect(f.send).toHaveBeenCalledWith({ action: 'close' })
   expect(
@@ -78,7 +83,7 @@ it('closes the view before asking for destructive confirmation and does not rese
   const f = fixture()
   render(<ShopBrowserProfilesPanel runtime={f.runtime} />)
   await screen.findByText('暂无内嵌登录档案')
-  fireEvent.click(screen.getByText('新增登录档案'))
+  fireEvent.click(screen.getByText(shopBrowserCopy.zh.create))
   await screen.findByText('店铺身份未核验')
   fireEvent.click(screen.getByText('清除登录并重新登录'))
   await screen.findByText('确认清除登录')

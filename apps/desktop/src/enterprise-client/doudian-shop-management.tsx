@@ -3,14 +3,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useI18n } from '@/i18n/context'
+import { customerServiceLayoutCopy } from '@/i18n/customer-service-layout'
 
 import type { DoudianRequest, DoudianShopOperation, ManagedDoudianShop } from '../../electron/doudian-types'
+
+import { CustomerServicePage } from './customer-service-page'
 import type { EnterpriseClientRuntime } from './runtime'
-import { ShopBrowserProfilesPanel } from './shop-browser-profiles'
 
 const labels = {
-  zh: { title: '店铺管理', refresh: '刷新', close: '关闭', name: '店铺', status: '后台状态', remark: '备注', save: '保存备注', pin: '置顶', unpin: '取消置顶', up: '上移', down: '下移', remove: '删除店铺', cancel: '取消', confirm: '确认删除', warning: '将删除本机店铺记录及其 Chrome 和 WebView 登录资料，无法撤销。平台店铺及历史业务记录会保留。', pending: '等待登录', deleting: '删除未完成', empty: '暂无店铺', unavailable: '当前模块暂不支持内嵌店铺管理。', busy: '正在处理，请稍候', failed: '操作未完成，请刷新后重试', loginPending: '新增店铺及登录功能正在接入。' },
-  en: { title: 'Shop management', refresh: 'Refresh', close: 'Close', name: 'Shop', status: 'Status', remark: 'Remark', save: 'Save remark', pin: 'Pin', unpin: 'Unpin', up: 'Move up', down: 'Move down', remove: 'Remove shop', cancel: 'Cancel', confirm: 'Confirm removal', warning: 'This permanently removes the local shop record and Chrome and WebView login profiles. The platform shop and historical records are retained.', pending: 'Login pending', deleting: 'Removal incomplete', empty: 'No shops', unavailable: 'Embedded shop management is unavailable in this module.', busy: 'Processing', failed: 'Operation failed. Refresh and try again.', loginPending: 'Adding and signing in to shops is not yet available.' }
+  zh: { title: '店铺管理', refresh: '刷新', close: '关闭', name: '店铺', status: '后台状态', remark: '备注', save: '保存备注', pin: '置顶', unpin: '取消置顶', up: '上移', down: '下移', remove: '删除店铺', cancel: '取消', confirm: '确认删除', warning: '将删除本机店铺记录及其 Chrome 和 WebView 登录资料，无法撤销。平台店铺及历史业务记录会保留。', pending: '等待登录', deleting: '删除未完成', empty: '暂无店铺', unavailable: '当前模块暂不支持内嵌店铺管理。', busy: '正在处理，请稍候', failed: '操作未完成，请刷新后重试' },
+  en: { title: 'Shop management', refresh: 'Refresh', close: 'Close', name: 'Shop', status: 'Status', remark: 'Remark', save: 'Save remark', pin: 'Pin', unpin: 'Unpin', up: 'Move up', down: 'Move down', remove: 'Remove shop', cancel: 'Cancel', confirm: 'Confirm removal', warning: 'This permanently removes the local shop record and Chrome and WebView login profiles. The platform shop and historical records are retained.', pending: 'Login pending', deleting: 'Removal incomplete', empty: 'No shops', unavailable: 'Embedded shop management is unavailable in this module.', busy: 'Processing', failed: 'Operation failed. Refresh and try again.' }
 }
 
 export function DoudianShopManagement({ runtime, onClose, onChanged, operationsSupported = false }: {
@@ -28,6 +30,7 @@ export function DoudianShopManagement({ runtime, onClose, onChanged, operationsS
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [managingSharedShops, setManagingSharedShops] = useState(false)
   const [operation, setOperation] = useState<DoudianShopOperation>()
   const operationRef = useRef<DoudianShopOperation | undefined>(undefined)
   const shop = shops.find(item => item.id === selected)
@@ -97,15 +100,6 @@ export function DoudianShopManagement({ runtime, onClose, onChanged, operationsS
       if (!['running', 'awaiting_confirmation', 'stopping'].includes(reply.shopOperation.state)) { await refresh(); await onChanged() }
     }
   })
-  const add = () => void run(async () => {
-    const reply = await invoke({ action: 'shopManagementAdd' })
-    if (!reply?.shopMutation?.id) return
-    const id = reply.shopMutation.id
-    await refresh()
-    setSelected(id)
-    const started = await invoke({ action: 'shopLoginStart', shopId: id })
-    if (started?.shopOperation) setOperation(started.shopOperation)
-  })
   const remove = () => void run(async () => {
     if (!shop || !confirmDelete) return
     const prepared = await invoke({ action: 'shopManagementPrepareDelete', shopId: shop.id })
@@ -127,14 +121,24 @@ export function DoudianShopManagement({ runtime, onClose, onChanged, operationsS
     await onChanged()
   })
 
+  if (managingSharedShops) {
+    return (
+      <>
+        <Button onClick={() => { setManagingSharedShops(false); void onChanged() }} variant="secondary">
+          {copy.close}
+        </Button>
+        <CustomerServicePage runtime={runtime} />
+      </>
+    )
+  }
+
   return <section aria-label={copy.title} className="space-y-3 border-t border-(--ui-stroke-tertiary) pt-4">
-    {runtime.shopBrowser ? <ShopBrowserProfilesPanel runtime={runtime} /> : null}
     <div className="flex flex-wrap items-center gap-2"><h2>{copy.title}</h2>
       <Button disabled={busy} onClick={() => void run(refresh)} variant="secondary">{copy.refresh}</Button>
       <Button disabled={busy || operationActive} onClick={onClose} variant="secondary">{copy.close}</Button>
       {busy ? <span role="status">{copy.busy}</span> : null}
     </div>
-    {operationsSupported ? <Button disabled={busy || operationActive} onClick={add} variant="secondary">{locale.startsWith('zh') ? '新增店铺并登录' : 'Add and sign in'}</Button> : <p role="status">{copy.loginPending}</p>}
+    <Button disabled={busy || operationActive || !runtime.shopBrowser} onClick={() => setManagingSharedShops(true)} variant="secondary">{customerServiceLayoutCopy[locale].title}</Button>
     {error ? <p role="alert">{copy.failed} ({error})</p> : null}
     {shops.length === 0 ? <p>{copy.empty}</p> : <table className="w-full text-left"><thead><tr><th>{copy.name}</th><th>{copy.status}</th></tr></thead><tbody>
       {shops.map(item => <tr key={item.id}><td><button aria-pressed={selected === item.id} disabled={operationActive} onClick={() => setSelected(item.id)} type="button">{item.pinned ? '★ ' : ''}{item.alias || item.name}</button>{item.verifiedName ? <span> ({item.verifiedName} {item.platformId})</span> : null}</td><td>{item.pendingDeletion ? copy.deleting : item.pendingLogin ? copy.pending : item.status ?? ''} {item.checkedAt ?? ''} / {item.feigeStatus ?? ''} {item.feigeCheckedAt ?? ''}</td></tr>)}
