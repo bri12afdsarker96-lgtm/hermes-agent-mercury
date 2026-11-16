@@ -72,6 +72,13 @@ try {
   assert.deepEqual(await native.evaluate(api => api.cookieNames()), ['hermes_storage_test'])
   await capture('01-native-profile.png')
   record('persistent-cookie-written', { profileId: first.id })
+  const restored = await native.evaluate(api => api.cloudPortability())
+  assert.equal(restored.differentPartition, true)
+  assert.equal(restored.enterpriseCookieExcluded, true)
+  assert.deepEqual(restored.cookieNames, ['hermes_storage_test'])
+  assert.equal(restored.localStorageRestored, true)
+  assert.deepEqual(restored.exportedOrigins, ['https://fxg.jinritemai.com'])
+  record('cloud-portable-cookie-and-localstorage-restore', restored)
   await call({ action: 'close' })
   await active.close()
   active = undefined

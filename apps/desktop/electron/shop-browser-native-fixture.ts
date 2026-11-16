@@ -3,6 +3,7 @@ import path from 'node:path'
 
 import { createShopBrowserView, clearShopBrowserStorage } from './shop-browser-electron'
 import { ShopBrowserProfiles } from './shop-browser-profiles'
+import { exportShopBrowserSession, importShopBrowserSession } from './shop-browser-session'
 import type { ShopBrowserRequest } from './shop-browser-types'
 
 // Standalone storage acceptance. Platform HTTPS is served locally, never logged in.
@@ -72,6 +73,29 @@ app
         },
         async cookieNames() {
           return (await session.fromPath(activeStorage).cookies.get({})).map(cookie => cookie.name)
+        },
+        async cloudPortability() {
+          const source = window.contentView.children.at(-1) as Electron.WebContentsView
+          await source.webContents.executeJavaScript("localStorage.setItem('hermes_cloud_test','synthetic-local-storage')")
+          await session.fromPath(activeStorage).cookies.set({ url: 'https://enterprise.example/', name: 'synthetic_enterprise', value: 'not-a-shop-credential', secure: true })
+          const backup = await exportShopBrowserSession(activeStorage, () => {})
+          await session.fromPath(activeStorage).cookies.remove('https://enterprise.example/', 'synthetic_enterprise')
+          const destination = path.join(root, 'cloud-restored-session')
+          const restoredSession = session.fromPath(destination)
+          await restoredSession.clearStorageData()
+          await restoredSession.setProxy({ mode: 'fixed_servers', proxyRules: '127.0.0.1:9', proxyBypassRules: '<-loopback>' })
+          await restoredSession.protocol.handle('https', () => new Response('<title>Local restore fixture</title><h3>Cloud restore fixture</h3>', { headers: { 'Content-Type': 'text/html; charset=utf-8' } }))
+          await importShopBrowserSession(destination, backup, () => {})
+          const view = await createShopBrowserView(window, destination, 'merchant', { x: 20, y: 150, width: 1000, height: 540 })
+          try {
+            const contents = (window.contentView.children.at(-1) as Electron.WebContentsView).webContents
+            if (contents.isLoading()) await new Promise<void>(resolve => contents.once('did-finish-load', () => resolve()))
+            return { differentPartition: destination !== activeStorage,
+              enterpriseCookieExcluded: backup.cookies.every(cookie => cookie.name !== 'synthetic_enterprise'),
+              cookieNames: (await restoredSession.cookies.get({})).map(cookie => cookie.name),
+              localStorageRestored: await contents.executeJavaScript("localStorage.getItem('hermes_cloud_test')==='synthetic-local-storage'"),
+              exportedOrigins: backup.origins.map(item => item.origin) }
+          } finally { await view.close() }
         },
         async revoke() {
           allowed = false

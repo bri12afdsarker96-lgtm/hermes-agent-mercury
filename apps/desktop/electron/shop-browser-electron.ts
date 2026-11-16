@@ -42,7 +42,7 @@ export async function clearShopBrowserStorage(storagePath: string) {
   await browserSession.cookies.flushStore()
 }
 
-function configureShopSession(storagePath: string) {
+export function configureShopSession(storagePath: string) {
   const browserSession = session.fromPath(storagePath)
   if (!configuredSessions.has(browserSession)) {
     browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))

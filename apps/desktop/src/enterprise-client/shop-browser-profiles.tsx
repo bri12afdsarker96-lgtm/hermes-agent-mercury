@@ -6,12 +6,14 @@ import { useI18n } from '@/i18n/context'
 import { customerServiceCopy } from '@/i18n/customer-service'
 import { customerServiceLayoutCopy } from '@/i18n/customer-service-layout'
 import { shopBrowserCopy } from '@/i18n/shop-browser'
+import { shopCloudCopy } from '@/i18n/shop-cloud'
 
-import type { ShopBrowserProfile, ShopBrowserRequest } from '../../electron/shop-browser-types'
+import type { ShopBrowserProfile, ShopBrowserReply, ShopBrowserRequest } from '../../electron/shop-browser-types'
 import { recoverableShopBrowserErrors } from '../../electron/shop-browser-types'
 
 import type { EnterpriseClientRuntime } from './runtime'
 import { ShopBrowserWorkspacePanel } from './shop-browser-workspace'
+import { ShopServiceAssignment } from './shop-service-assignment'
 
 export function ShopBrowserProfilesPanel({
   runtime,
@@ -36,10 +38,13 @@ export function ShopBrowserProfilesPanel({
   const [profiles, setProfiles] = useState<ShopBrowserProfile[]>([])
   const [localSelected, setSelected] = useState('')
   const selected = selectedProfileId ?? localSelected
+  const selection = useRef(selected)
+  selection.current = selected
   const [search, setSearch] = useState('')
   const [opened, setOpened] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [cloud, setCloud] = useState<ShopBrowserReply['cloud']>()
   const [confirmation, setConfirmation] = useState<'relogin' | 'delete' | null>(null)
   const slot = useRef<HTMLDivElement>(null)
   const initialNavigation = useMemo(() => ({ target: initialTarget, opened: false }), [initialTarget])
@@ -54,6 +59,7 @@ export function ShopBrowserProfilesPanel({
     }
 
     if (!reply.ok) {
+      setCloud(undefined)
       setOpened(null)
       setProfiles([])
       setSelected('')
@@ -62,7 +68,16 @@ export function ShopBrowserProfilesPanel({
       throw new Error(reply.error)
     }
 
-    setProfiles(reply.profiles ?? [])
+    const available = reply.profiles ?? []
+    setProfiles(available)
+
+    if (selection.current && !available.some(profile => profile.id === selection.current)) {
+      setSelected('')
+      setConfirmation(null)
+      onSelectedProfile?.('')
+    }
+
+    setCloud(reply.cloud)
     onProfilesChange?.(reply.profiles ?? [])
     setOpened(reply.openProfileId ?? null)
   }, [lifecycle, onProfilesChange, onSelectedProfile])
@@ -89,6 +104,7 @@ export function ShopBrowserProfilesPanel({
           }
 
           if (/OWNER_CHANGED|ACCESS_UNAVAILABLE|FORBIDDEN/.test(code)) {
+            setCloud(undefined)
             setProfiles([])
             setSelected('')
             setConfirmation(null)
@@ -114,6 +130,7 @@ export function ShopBrowserProfilesPanel({
     setSearch('')
     setOpened(null)
     setConfirmation(null)
+    setCloud(undefined)
     void run(refresh)
 
     return () => {
@@ -123,7 +140,7 @@ export function ShopBrowserProfilesPanel({
   }, [runtime, lifecycle, refresh, run])
 
   useEffect(() => {
-    if (!opened) {
+    if (!runtime.shopBrowser) {
       return
     }
 
@@ -134,7 +151,7 @@ export function ShopBrowserProfilesPanel({
     }, 10000)
 
     return () => clearInterval(timer)
-  }, [opened, refresh, run, lifecycle])
+  }, [runtime, refresh, run, lifecycle])
 
   const bounds = useCallback(() => {
     const rectangle = slot.current!.getBoundingClientRect()
@@ -295,6 +312,7 @@ export function ShopBrowserProfilesPanel({
     return (
       <section aria-label={layout.shops} className="cs-native-page cs-shops" data-browser-open={!!opened}>
         <h2>{layout.shops}</h2>
+        {cloud ? <p data-testid="shop-cloud-status" role="status">{shopCloudCopy[locale][cloud.state]}</p> : null}
         <div className="cs-toolbar">
           <Button disabled={busy} onClick={() => invoke({ action: 'create' })}>
             {copy.create}
@@ -400,6 +418,7 @@ export function ShopBrowserProfilesPanel({
               {copy[selectedProfile.loginState]} · {selectedProfile.shopName || selectedProfile.displayName}
             </span>
             {selectedProfile.loginState === 'verified' ? <p role="status">{copy.sharedReady}</p> : null}
+            <ShopServiceAssignment onTransferred={refresh} profileId={selectedProfile.id} runtime={runtime} />
             <div className="cs-actions">
               <Button disabled={busy} onClick={() => open('merchant')} variant="secondary">
                 {copy.merchant}
@@ -432,6 +451,7 @@ export function ShopBrowserProfilesPanel({
             {confirmation ? (
               <div className="cs-confirm" role="alert">
                 <p>{confirmation === 'delete' ? copy.deleteWarning : copy.resetWarning}</p>
+                {cloud ? <p>{shopCloudCopy[locale].sharedDelete}</p> : null}
                 <Button disabled={busy} onClick={() => invoke({ action: confirmation, profileId: selected })}>
                   {confirmation === 'delete' ? copy.confirmDelete : copy.confirmReset}
                 </Button>
@@ -484,6 +504,7 @@ export function ShopBrowserProfilesPanel({
   return (
     <section aria-label={copy.title} className="space-y-3">
       <h3>{copy.title}</h3>
+      {cloud ? <p data-testid="shop-cloud-status" role="status">{shopCloudCopy[locale][cloud.state]}</p> : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button disabled={busy} onClick={() => invoke({ action: 'create' })} variant="secondary">
           {copy.create}
@@ -527,6 +548,7 @@ export function ShopBrowserProfilesPanel({
             {copy[selectedProfile.loginState]} {selectedProfile.shopName ?? ''} {selectedProfile.checkedAt ?? ''}
           </p>
           {selectedProfile.loginState === 'verified' ? <p role="status">{copy.sharedReady}</p> : null}
+          <ShopServiceAssignment onTransferred={refresh} profileId={selectedProfile.id} runtime={runtime} />
           <div className="flex flex-wrap items-center gap-2">
             <Button disabled={busy} onClick={() => open('merchant')} variant="secondary">
               {copy.merchant}
@@ -554,6 +576,7 @@ export function ShopBrowserProfilesPanel({
           {confirmation ? (
             <div role="alert">
               <p>{confirmation === 'delete' ? copy.deleteWarning : copy.resetWarning}</p>
+              {cloud ? <p>{shopCloudCopy[locale].sharedDelete}</p> : null}
               <Button disabled={busy} onClick={() => invoke({ action: confirmation, profileId: selected })}>
                 {confirmation === 'delete' ? copy.confirmDelete : copy.confirmReset}
               </Button>

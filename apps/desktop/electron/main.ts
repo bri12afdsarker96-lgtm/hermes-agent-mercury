@@ -6,6 +6,8 @@ import { ShopBrowserProfiles, validShopBounds } from './shop-browser-profiles'
 import { clearShopBrowserStorage, createShopExecutionPage, shopBrowserExecutionTargets } from './shop-browser-electron'
 import { createShopExecutionTransport } from './shop-browser-execution'
 import { createShopBrowserWorkspace } from './shop-browser-workspace'
+import { createShopProfileCloud, isShopProfileCredentialRequest } from './shop-browser-cloud'
+import { exportShopBrowserSession, importShopBrowserSession } from './shop-browser-session'
 import type { ShopBrowserRequest } from './shop-browser-types'
 import { CustomerServicePreview } from './customer-service-preview'
 import type { CustomerServiceRequest } from './customer-service-types'
@@ -13677,6 +13679,26 @@ function shopBrowserController(event: IpcMainInvokeEvent, sessionId: string) {
   }
   if (!entry) {
     const current = () => isEnterpriseUpdateSender(event) && enterpriseSessions.resolve(event.sender.id, activeSession.sessionId) === activeSession
+    const assertCurrent = () => { if (!current()) throw new Error('SHOP_PROFILE_OWNER_CHANGED') }
+    const cloud = createShopProfileCloud({
+      assertCurrent,
+      async request<T>(method, apiPath, body) {
+        const active = await refreshedEnterpriseSession(event.sender.id, activeSession.sessionId)
+        assertCurrent()
+        if (!active) throw new Error('SHOP_PROFILE_OWNER_CHANGED')
+        const origin = new URL(active.baseUrl)
+        if (origin.protocol !== 'https:' && !(origin.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(origin.hostname)))
+          throw new Error('SHOP_CLOUD_SECURE_TRANSPORT_REQUIRED')
+        try {
+          return await fetchJson(resolveEnterpriseUrl(active.baseUrl, apiPath), '', {
+            bearer: active.token, headers: { Origin: origin.origin }, method, body, timeoutMs: 15000
+          }) as T
+        } catch (error) {
+          // Server response bodies may contain credentials. Only expose an error class.
+          throw new Error(error instanceof Error && /^409:/.test(error.message) ? 'SHOP_CLOUD_CONFLICT' : 'SHOP_CLOUD_UNAVAILABLE')
+        }
+      }
+    })
     const controller = new ShopBrowserProfiles({
       root: path.join(app.getPath('userData'), 'shop-browser-profiles'),
       isCurrent: current,
@@ -13697,7 +13719,10 @@ function shopBrowserController(event: IpcMainInvokeEvent, sessionId: string) {
       createView: (storage, target, bounds) => createShopBrowserWorkspace(parent, storage, target, bounds, current),
       createExecution: (storage, target) => createShopExecutionTransport(shopBrowserExecutionTargets[target],
         url => createShopExecutionPage(storage, url, parent), current),
-      clearStorage: clearShopBrowserStorage
+      clearStorage: clearShopBrowserStorage,
+      cloud,
+      exportSession: storage => exportShopBrowserSession(storage, assertCurrent),
+      importSession: (storage, data) => importShopBrowserSession(storage, data, assertCurrent)
     })
     entry = { sessionId: activeSession.sessionId, controller, current }
     shopBrowserControllers.set(event.sender.id, entry)
@@ -14532,6 +14557,10 @@ ipcMain.handle('hermes:enterprise:request', async (event, req) => {
     url = resolveEnterpriseUrl(session.baseUrl, req?.path)
   } catch {
     return { code: 'error', kind: 'error', message: 'invalid path', status: 0 }
+  }
+
+  if (isShopProfileCredentialRequest(String(method), new URL(url).pathname)) {
+    return { code: 'forbidden', kind: 'error', message: 'shop credentials require the main-owned profile bridge', status: 403 }
   }
 
   try {

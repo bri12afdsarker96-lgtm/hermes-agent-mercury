@@ -36,6 +36,7 @@ export interface ShopBrowserReply {
   openProfileId?: string | null
   browser?: ShopBrowserSnapshot
   bookmarks?: ShopBookmarkSnapshot
+  cloud?: { state: 'synced' | 'unavailable' | 'conflict'; checkedAt: string }
 }
 export function isShopBrowserUrl(raw: string): boolean {
   try {
