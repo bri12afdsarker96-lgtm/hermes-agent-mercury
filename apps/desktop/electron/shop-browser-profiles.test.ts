@@ -65,6 +65,24 @@ async function fixture(existingRoot?: string, initialScope?: ShopBrowserAuthorit
 }
 
 describe('persistent shop browser profiles', () => {
+  it('checks the live shop before acquiring a task and checks it again before execution', async () => {
+    const f = await fixture()
+    const profile = await f.create()
+    await f.open(profile.id)
+    await f.call('identify', { profileId: profile.id })
+    f.execution.identify.mockRejectedValueOnce(new Error('SHOP_PROFILE_IDENTITY_UNAVAILABLE'))
+    await expect(f.controller.acquireExecution(profile.id, 'merchant')).rejects.toThrow('IDENTITY_UNAVAILABLE')
+    expect(f.execution.close).toHaveBeenCalledOnce()
+    const execution = await f.controller.acquireExecution(profile.id, 'merchant')
+    expect(f.execution.identify).toHaveBeenCalledTimes(2)
+    f.execution.identify.mockResolvedValueOnce(null as never)
+    await expect(execution.validate()).rejects.toThrow('IDENTITY_CHANGED')
+    expect(f.execution.command).not.toHaveBeenCalled()
+    await execution.validate()
+    expect(f.execution.identify).toHaveBeenCalledTimes(4)
+    await execution.close()
+  })
+
   it('binds execution to the saved verified profile and keeps it while the visible page closes', async () => {
     const f = await fixture()
     const profile = await f.create()

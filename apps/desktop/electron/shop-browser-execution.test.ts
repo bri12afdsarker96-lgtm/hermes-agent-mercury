@@ -96,7 +96,30 @@ describe('TD bound shop browser transport', () => {
     await browser.close()
   })
 
-  it('counts pending page creations toward the concurrency bound', async () => {
+  it('leaves room for eight capture lanes, their replacement pages and a shared live-login probe', async () => {
+    const f = fixture()
+    const browser = await createShopExecutionTransport('https://fxg.jinritemai.com/', f.create, f.current)
+    const create = () => browser.command('root', 'Target.createTarget', {
+      url: 'https://fxg.jinritemai.com/ffa/maftersale/comment'
+    }) as Promise<{ targetId: string }>
+    const lanes = await Promise.all(Array.from({ length: 8 }, create))
+    const probe = await create()
+    const replacements = await Promise.all(Array.from({ length: 8 }, create))
+    expect(f.pages).toHaveLength(18)
+    await expect(create()).rejects.toThrow('TARGET_LIMIT')
+    for (const target of [...lanes, probe]) {
+      await browser.command('root', 'Target.closeTarget', target)
+    }
+    for (const target of replacements) {
+      await browser.command(target.targetId, 'Page.captureScreenshot', { format: 'png' })
+    }
+    const nextProbe = await create()
+    await browser.command('root', 'Target.closeTarget', nextProbe)
+    await browser.close()
+    expect(f.pages.every(page => page.close.mock.calls.length === 1)).toBe(true)
+  })
+
+  it('counts pending page creations toward the capture and recovery bound', async () => {
     const f = fixture()
     const browser = await createShopExecutionTransport('https://fxg.jinritemai.com/', f.create, f.current)
     let release!: () => void
@@ -109,7 +132,7 @@ describe('TD bound shop browser transport', () => {
 
       return create(url)
     })
-    const pending = Array.from({ length: 8 }, () =>
+    const pending = Array.from({ length: 17 }, () =>
       browser.command('root', 'Target.createTarget', { url: 'https://fxg.jinritemai.com/' })
     )
     await expect(
@@ -117,7 +140,7 @@ describe('TD bound shop browser transport', () => {
     ).rejects.toThrow('TARGET_LIMIT')
     release()
     await Promise.all(pending)
-    expect(f.pages).toHaveLength(9)
+    expect(f.pages).toHaveLength(18)
     await browser.close()
     expect(f.pages.every(page => page.close.mock.calls.length === 1)).toBe(true)
   })

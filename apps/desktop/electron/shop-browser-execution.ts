@@ -33,6 +33,9 @@ const commands = new Set([
   'Input.insertText'
 ])
 
+// Root, eight capture lanes, one replacement per lane, and the shared login probe.
+const maximumTaskPages = 1 + 8 + 8 + 1
+
 /** One TD task can address only the pages created from its bound shop session. */
 export async function createShopExecutionTransport(
   url: string,
@@ -100,7 +103,7 @@ export async function createShopExecutionTransport(
       }
 
       if (method === 'Target.createTarget') {
-        if (pages.size + creating >= 9 || typeof params.url !== 'string') {
+        if (pages.size + creating >= maximumTaskPages || typeof params.url !== 'string') {
           throw new Error('SHOP_BROWSER_TARGET_LIMIT')
         }
         creating++

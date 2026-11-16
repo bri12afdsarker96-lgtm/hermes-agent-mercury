@@ -30,11 +30,12 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
   const [workbook, setWorkbook] = useState<DoudianReply['workbook']>()
   const [task, setTask] = useState<DoudianTask>()
   const [busy, setBusy] = useState(false)
+  const [checkingShop, setCheckingShop] = useState(false)
   const [error, setError] = useState('')
   const [unknown, setUnknown] = useState(false)
-  const [startRow, setStartRow] = useState('2')
+  const [startRow, setStartRow] = useState('1')
   const [maxRows, setMaxRows] = useState('0')
-  const [concurrency, setConcurrency] = useState('1')
+  const [concurrency, setConcurrency] = useState('4')
   const [optionsChanged, setOptionsChanged] = useState(false)
   const [managingShops, setManagingShops] = useState(false)
   const lifecycle = useMemo(() => ({ runtime, alive: true, inFlight: false }), [runtime])
@@ -62,7 +63,12 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
       TASK_BUSY: copy.busy,
       WORKBOOK_BUSY: copy.workbookBusy,
       REVIEW_OPTIONS_UNSUPPORTED: entry.rangeReason,
-      INVALID_RANGE: entry.invalidRange
+      INVALID_RANGE: entry.invalidRange,
+      SHOP_PROFILE_UNVERIFIED: entry.shopLoginRequired,
+      SHOP_PROFILE_IDENTITY_CHANGED: entry.shopLoginChanged,
+      SHOP_PROFILE_IDENTITY_UNAVAILABLE: entry.shopLoginUnavailable,
+      SHOP_PROFILE_PAGE_NOT_READY: entry.shopLoginUnavailable,
+      SHOP_BROWSER_TARGET_LIMIT: entry.browserTargetLimit
     })[code] ?? `${copy.failed}: ${code}`
 
   const call = useCallback(
@@ -130,13 +136,14 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
   }, [call])
 
   const action = useCallback(
-    async (run: () => Promise<unknown>) => {
+    async (run: () => Promise<unknown>, checkShop = false) => {
       if (lifecycle.inFlight) {
         return
       }
 
       lifecycle.inFlight = true
       setBusy(true)
+      setCheckingShop(checkShop)
       setError('')
 
       try {
@@ -151,6 +158,7 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
 
         if (lifecycle.alive) {
           setBusy(false)
+          setCheckingShop(false)
         }
       }
     },
@@ -165,9 +173,9 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
     setWorkbook(undefined)
     setTask(undefined)
     setUnknown(false)
-    setStartRow('2')
+    setStartRow('1')
     setMaxRows('0')
-    setConcurrency('1')
+    setConcurrency('4')
     setOptionsChanged(false)
     setManagingShops(false)
     setOwner(runtime)
@@ -255,6 +263,7 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
           </span>
         ) : null}
       </div>
+      {checkingShop ? <p role="status">{entry.shopLoginChecking}</p> : null}
       {managingShops ? <DoudianShopManagement onChanged={refresh} onClose={() => setManagingShops(false)} operationsSupported={capabilities?.shopOperations === 1} runtime={runtime} /> : null}
       {error ? (
         <p className="text-(--ui-text-primary)" role="alert">
@@ -321,7 +330,7 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
               await call({ action: 'prepare', shopId, workbookId: workbook!.id,
                 ...(selectedShop?.browserProfileId ? { browserProfileId: selectedShop.browserProfileId } : {}),
                 ...(optionsSupported ? { startRow, maxRows, concurrency } : {}) })
-            })
+            }, true)
           }
         >
           <Play />
@@ -358,7 +367,7 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
               onClick={() =>
                 void action(async () => {
                   await call({ action: 'start', taskId: task.taskId! })
-                })
+                }, true)
               }
             >
               <Play />
@@ -367,7 +376,7 @@ export function DoudianWorkbench({ runtime, standalone = false }: Props) {
           ) : null}
           {task.error ? (
             <p className="break-words" role="alert">
-              {task.error}
+              {errorText(task.error)}
             </p>
           ) : null}
           {task.messages.length ? (

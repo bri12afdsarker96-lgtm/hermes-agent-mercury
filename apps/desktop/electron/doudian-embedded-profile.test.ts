@@ -113,6 +113,24 @@ async function fixture(embeddedBrowser = 1) {
 }
 
 describe('real controller embedded shop binding', () => {
+  it('does not preflight or start when live login verification is unavailable', async () => {
+    const f = await fixture()
+    const request = { sessionId: 's', action: 'prepare' as const, shopId: profileId,
+      browserProfileId: profileId, workbookId: f.workbookId, startRow: '1', maxRows: '0', concurrency: '4' }
+    f.deps.connectBrowser.mockRejectedValueOnce(new Error('SHOP_PROFILE_IDENTITY_UNAVAILABLE'))
+    expect((await f.controller.operate(request)).error).toBe('SHOP_PROFILE_IDENTITY_UNAVAILABLE')
+    expect(f.host.request.mock.calls.some(([method]) => ['prepare', 'start'].includes(method))).toBe(false)
+    const prepared = await f.controller.operate(request)
+    expect(prepared.ok).toBe(true)
+    f.execution.validate.mockRejectedValueOnce(new Error('SHOP_PROFILE_IDENTITY_UNAVAILABLE'))
+    expect((await f.controller.operate({ sessionId: 's', action: 'start', taskId: prepared.task!.taskId! })).error)
+      .toBe('SHOP_PROFILE_IDENTITY_UNAVAILABLE')
+    expect(f.host.request.mock.calls.some(([method]) => method === 'start')).toBe(false)
+    expect((await f.controller.operate({ sessionId: 's', action: 'start', taskId: prepared.task!.taskId! })).ok).toBe(true)
+    expect(f.host.request.mock.calls.filter(([method]) => method === 'start')).toHaveLength(1)
+    f.controller.close()
+  })
+
   it.each(['review', 'payment'] as const)(
     'passes the verified %s binding through prepare and rechecks it at start',
     async kind => {

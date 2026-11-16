@@ -71,6 +71,29 @@ function setup(reviewOptions?: number, shops: DoudianShop[] = [legacyShop], revi
 }
 
 describe('Doudian workbench (offline fixtures)', () => {
+  it('shows the live-login check and blocks start after a failed check, allowing retry', async () => {
+    const { send } = setup(1, [profileShop], true)
+    await screen.findByRole('option', { name: `${profileShop.name} (${profileShop.platformId})` })
+    fireEvent.change(screen.getByRole('combobox', { name: '店铺' }), { target: { value: profileShop.id } })
+    fireEvent.click(screen.getByText('选择工作簿副本'))
+    await screen.findByText('测试副本.xlsx')
+    const original = send.getMockImplementation()!
+    let finish!: (reply: DoudianReply) => void
+    send.mockImplementation(request => request.action === 'prepare'
+      ? new Promise(resolve => { finish = resolve })
+      : original(request))
+    fireEvent.click(screen.getByText('检查待回填表格'))
+    await screen.findByText('正在检查店铺登录状态并准备截图任务…')
+    expect(screen.queryByText('确认截图并回填')).toBeNull()
+    await act(async () => { finish({ ok: false, error: 'SHOP_PROFILE_IDENTITY_UNAVAILABLE' }) })
+    await screen.findByText('暂时无法核验店铺登录状态，请检查网络并重试。')
+    expect(screen.queryByText('正在检查店铺登录状态并准备截图任务…')).toBeNull()
+    expect(send.mock.calls.some(([request]) => request.action === 'start')).toBe(false)
+    send.mockImplementation(original)
+    fireEvent.click(screen.getByText('检查待回填表格'))
+    await screen.findByText('确认截图并回填')
+  })
+
   it('reports a blocked local security environment instead of a raw error code', async () => {
     const send = vi.fn(async (_request: Omit<DoudianRequest, 'sessionId'>) => ({ ok: false, error: 'DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE' }))
     render(<ReviewCapturePage runtime={{ doudian: send } as unknown as EnterpriseClientRuntime} />)
@@ -108,6 +131,8 @@ describe('Doudian workbench (offline fixtures)', () => {
     const { send } = setup(reviewOptions, [legacyShop, profileShop], true)
     await screen.findByRole('option', { name: `${profileShop.name} (${profileShop.platformId})` })
     expect(screen.getByTestId('review-capture-page')).toBeTruthy()
+    expect((screen.getByLabelText('起始行') as HTMLInputElement).value).toBe('1')
+    expect((screen.getByLabelText('截图并发') as HTMLSelectElement).value).toBe('4')
     expect(screen.getByRole('option', { name: '模拟店铺 (123)' })).toBeTruthy()
     fireEvent.change(screen.getByRole('combobox', { name: '店铺' }), { target: { value: profileShop.id } })
     fireEvent.click(screen.getByText('选择工作簿副本'))
@@ -118,7 +143,7 @@ describe('Doudian workbench (offline fixtures)', () => {
       shopId: profileShop.id,
       browserProfileId: profileShop.browserProfileId,
       workbookId: 'b'.repeat(32),
-      ...(reviewOptions === 1 ? { startRow: '2', maxRows: '0', concurrency: '1' } : {})
+      ...(reviewOptions === 1 ? { startRow: '1', maxRows: '0', concurrency: '4' } : {})
     }))
     expect((screen.getByRole('combobox', { name: '店铺' }) as HTMLSelectElement).disabled).toBe(true)
     expect(send.mock.calls.some(([request]) => ['start', 'openReview', 'openFeige'].includes(request.action))).toBe(false)
