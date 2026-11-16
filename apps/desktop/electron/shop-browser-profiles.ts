@@ -796,7 +796,8 @@ export class ShopBrowserProfiles {
       savePayoutSettings: ['profileId', 'payoutSettings', 'expectedRevision']
     }
 
-    const allowed = fields[request?.action]
+    const allowed =
+      typeof request?.action === 'string' && Object.hasOwn(fields, request.action) ? fields[request.action] : undefined
 
     if (
       !allowed ||

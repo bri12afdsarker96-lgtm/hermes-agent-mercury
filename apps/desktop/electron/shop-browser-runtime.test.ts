@@ -213,6 +213,46 @@ async function fixture(options: { root?: string; authority?: ShopBrowserAuthorit
 }
 
 describe('local shop browser runtime', () => {
+  it.each(['constructor', '__proto__'])('rejects inherited action %s without closing valid shop views', async action => {
+    const f = await fixture()
+    const a = await f.create()
+    const b = await f.create()
+    await f.open(a.id)
+    await f.open(b.id)
+
+    const loginBefore = await Promise.all(
+      f.views.map(view => fs.readFile(path.join(view.storage, 'synthetic-login-marker')))
+    )
+
+    const reply = await f.runtime.operate({ sessionId: 'test', action } as unknown as ShopBrowserRequest)
+
+    expect(reply).toEqual({ ok: false, error: 'SHOP_PROFILE_INVALID_REQUEST' })
+    expect(f.views.map(view => view.closed)).toEqual([false, false])
+    expect((await f.snapshot()).browsers.map(browser => browser.profileId)).toEqual([a.id, b.id])
+    expect(await Promise.all(f.views.map(view => fs.readFile(path.join(view.storage, 'synthetic-login-marker')))))
+      .toEqual(loginBefore)
+    expect(f.clearStorage).not.toHaveBeenCalled()
+  })
+
+  it('finishes invalidation when a retained native view throws while hiding', async () => {
+    const f = await fixture()
+    const a = await f.register('10001')
+    await f.register('10002')
+    const execution = await f.runtime.acquireExecution(a.id, 'feige')
+    const retainedView = await f.createView.mock.results[0].value
+    vi.spyOn(retainedView, 'setBounds').mockImplementation(() => {
+      throw new Error('SYNTHETIC_DESTROYED_VIEW')
+    })
+
+    expect(() => f.runtime.invalidate()).not.toThrow()
+    await f.runtime.revalidate()
+
+    expect(f.views.map(view => view.closed)).toEqual([true, true])
+    expect(f.executions[0].close).toHaveBeenCalledTimes(1)
+    await expect(execution.validate()).rejects.toThrow('SHOP_PROFILE_OWNER_CHANGED')
+    expect(f.clearStorage).not.toHaveBeenCalled()
+  })
+
   it.each(['null', '[]', '{"version":1,"maxConcurrentBrowsers":11}'])(
     'preserves an invalid runtime settings document %s',
     async document => {

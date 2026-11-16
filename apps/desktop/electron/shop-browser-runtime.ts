@@ -357,7 +357,11 @@ export class ShopBrowserRuntime {
     this.profiles.invalidate()
 
     for (const entry of this.entries.values()) {
-      entry.view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+      try {
+        entry.view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+      } catch {
+        // A destroyed native view must not interrupt the remaining cleanup.
+      }
     }
 
     void this.closeAll().catch(() => {})
