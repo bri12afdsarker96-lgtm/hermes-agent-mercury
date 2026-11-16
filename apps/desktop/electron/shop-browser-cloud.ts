@@ -1,4 +1,5 @@
 import type { ShopBrowserProfile } from './shop-browser-types'
+import { type ShopPayoutSettings, validShopPayoutSettings } from './shop-payout-settings'
 
 export interface PortableShopCookie {
   name: string
@@ -32,11 +33,19 @@ export interface CloudShopRecord {
   servicing_principal_id?: string | null
   profile?: CloudShopMetadata
   session?: PortableShopSession
+  payout_settings?: ShopPayoutSettings | null
+  payout_settings_revision?: number
 }
 export interface ShopProfileCloud {
   list(): Promise<{ profiles: CloudShopRecord[]; hiddenProfileIds: string[] }>
   get(profileId: string): Promise<CloudShopRecord>
   save(profile: ShopBrowserProfile, revision: number, session: PortableShopSession): Promise<CloudShopRecord>
+  savePayoutSettings(
+    profileId: string,
+    revision: number,
+    settingsRevision: number,
+    settings: ShopPayoutSettings
+  ): Promise<CloudShopRecord>
   hide(profileId: string, revision: number): Promise<void>
 }
 export interface ShopProfileCloudTransport {
@@ -164,6 +173,17 @@ function record(value: unknown, withSession = false): CloudShopRecord {
     if (withSession) {
       validatePortableShopSession(data.session)
     }
+
+    if ('payout_settings' in data || 'payout_settings_revision' in data) {
+      if (
+        !Number.isSafeInteger(data.payout_settings_revision) ||
+        (data.payout_settings === null
+          ? data.payout_settings_revision !== 0
+          : !validShopPayoutSettings(data.payout_settings) || data.payout_settings_revision! < 1)
+      ) {
+        throw new Error('SHOP_CLOUD_RESPONSE_INVALID')
+      }
+    }
   }
 
   return data
@@ -208,6 +228,42 @@ export function createShopProfileCloud(transport: ShopProfileCloudTransport): Sh
       const value = record(result?.profile, true)
 
       if (value.profile_id !== profileId) {
+        throw new Error('SHOP_CLOUD_RESPONSE_INVALID')
+      }
+
+      return value
+    },
+    async savePayoutSettings(profileId, revision, settingsRevision, settings) {
+      if (
+        !uuid.test(profileId) ||
+        !Number.isSafeInteger(revision) ||
+        revision < 1 ||
+        revision >= Number.MAX_SAFE_INTEGER ||
+        !Number.isSafeInteger(settingsRevision) ||
+        settingsRevision < 0 ||
+        settingsRevision >= Number.MAX_SAFE_INTEGER ||
+        !validShopPayoutSettings(settings)
+      ) {
+        throw new Error('SHOP_CLOUD_REQUEST_INVALID')
+      }
+
+      const normalized = { ...settings, remitAmount: settings.remitAmount.trim() }
+      const result = await request<{ profile: unknown }>('POST', '/api/shop-login-profiles', {
+        profile_id: profileId,
+        expected_revision: revision,
+        expected_payout_settings_revision: settingsRevision,
+        payout_settings: normalized
+      })
+      const value = record(result?.profile)
+
+      if (
+        value.profile_id !== profileId ||
+        value.deleted ||
+        value.revision !== revision + 1 ||
+        value.payout_settings_revision !== settingsRevision + 1 ||
+        !value.payout_settings ||
+        Object.entries(normalized).some(([key, item]) => value.payout_settings![key as keyof ShopPayoutSettings] !== item)
+      ) {
         throw new Error('SHOP_CLOUD_RESPONSE_INVALID')
       }
 

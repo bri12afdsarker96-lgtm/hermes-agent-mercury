@@ -13,6 +13,7 @@ import {
 } from './shop-browser-cloud'
 import { ShopBrowserProfiles } from './shop-browser-profiles'
 import type { ShopBrowserRequest } from './shop-browser-types'
+import type { ShopPayoutSettings } from './shop-payout-settings'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -101,6 +102,23 @@ function remoteBoundary() {
       return { profile_id: body.profile_id, hidden: true }
     }
 
+    if ('payout_settings' in body) {
+      if (!old || old.payout_settings_revision !== body.expected_payout_settings_revision) {
+        throw new Error('409: revision_conflict')
+      }
+
+      const updated: CloudShopRecord = {
+        ...old,
+        revision: old.revision + 1,
+        updated_at: new Date().toISOString(),
+        payout_settings: structuredClone(body.payout_settings),
+        payout_settings_revision: body.expected_payout_settings_revision + 1
+      }
+      records.set(updated.profile_id, updated)
+
+      return { profile: meta(updated) }
+    }
+
     const record: CloudShopRecord = {
       profile_id: body.profile_id,
       revision: body.expected_revision + 1,
@@ -108,6 +126,8 @@ function remoteBoundary() {
       updated_at: new Date().toISOString(),
       created_by: old?.created_by ?? principal,
       servicing_principal_id: old?.servicing_principal_id ?? principal,
+      payout_settings: old?.payout_settings ?? null,
+      payout_settings_revision: old?.payout_settings_revision ?? 0,
       profile: structuredClone(body.profile),
       session: structuredClone(body.session)
     }
@@ -127,9 +147,10 @@ function remoteBoundary() {
   return { request, tenants, transfer }
 }
 
-async function computer(remote: ReturnType<typeof remoteBoundary>, principalId = 'employee-a', tenantId = 'tenant-a') {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hermes-cloud-shop-'))
-  roots.push(root)
+async function computer(remote: ReturnType<typeof remoteBoundary>, principalId = 'employee-a', tenantId = 'tenant-a',
+  existingRoot?: string) {
+  const root = existingRoot ?? await fs.mkdtemp(path.join(os.tmpdir(), 'hermes-cloud-shop-'))
+  if (!existingRoot) roots.push(root)
   let current = true
   let unavailable = false
 
@@ -197,6 +218,9 @@ async function computer(remote: ReturnType<typeof remoteBoundary>, principalId =
     offline: () => {
       unavailable = true
     },
+    online: () => {
+      unavailable = false
+    },
     logout: () => {
       current = false
       controller.invalidate()
@@ -204,8 +228,16 @@ async function computer(remote: ReturnType<typeof remoteBoundary>, principalId =
   }
 }
 
+const payoutSettings: ShopPayoutSettings = {
+  remitAmount: '5.25',
+  payoutReviewDays: 21,
+  payoutRequireReviewWithinDays: true,
+  payoutGoodReviewMode: 0,
+  payoutRefundChannel: 'refund_only'
+}
+
 describe('tenant cloud shop profile recovery', () => {
-  it('retains local payout configuration when a newer cloud login session replaces storage and enforces transfer revocation', async () => {
+  it('retains cloud payout configuration when a newer login session replaces storage and enforces transfer revocation', async () => {
     const remote = remoteBoundary()
     const first = await computer(remote)
     const profile = await first.register()
@@ -534,5 +566,253 @@ describe('tenant cloud shop profile recovery', () => {
     }
 
     expect(validatePortableShopSession(portable)).toBe(portable)
+  })
+})
+
+describe('enterprise-owned cloud payout settings', () => {
+  it('keeps different shop amounts, review conditions and refund channels separate on recovery', async () => {
+    const remote = remoteBoundary()
+    const first = await computer(remote)
+    const shopA = await first.register()
+    await first.call('savePayoutSettings', { profileId: shopA.id, expectedRevision: 0, payoutSettings })
+    await first.call('close')
+    first.identify.mockResolvedValue({ shopId: '67890', shopName: 'Another synthetic shop' })
+    const shopB = await first.register()
+    const settingsB: ShopPayoutSettings = {
+      remitAmount: '12.80', payoutReviewDays: 7, payoutRequireReviewWithinDays: false,
+      payoutGoodReviewMode: 1, payoutRefundChannel: 'small_remit'
+    }
+    await first.call('savePayoutSettings', { profileId: shopB.id, expectedRevision: 0, payoutSettings: settingsB })
+    const second = await computer(remote)
+    second.identify.mockResolvedValueOnce({ shopId: '12345', shopName: 'Synthetic shop' })
+      .mockResolvedValueOnce({ shopId: '67890', shopName: 'Another synthetic shop' })
+    const recovered = (await second.call('list')).profiles!
+    expect(recovered.find(item => item.id === shopA.id)).toMatchObject({
+      payoutSettings, payoutSettingsRevision: 1, loginState: 'verified'
+    })
+    expect(recovered.find(item => item.id === shopB.id)).toMatchObject({
+      payoutSettings: settingsB, payoutSettingsRevision: 1, loginState: 'verified'
+    })
+  })
+
+  it('restores all five settings on a fresh computer and after restarting the profile store', async () => {
+    const remote = remoteBoundary()
+    const first = await computer(remote)
+    const profile = await first.register()
+    const saved = await first.call('savePayoutSettings', {
+      profileId: profile.id, expectedRevision: 0, payoutSettings
+    })
+    expect(saved).toMatchObject({ ok: true, profile: { payoutSettings, payoutSettingsRevision: 1 } })
+    const value = remote.tenants.get('tenant-a')!.get(profile.id)!
+    expect(value).toMatchObject({ payout_settings: payoutSettings, payout_settings_revision: 1 })
+    expect(value.session).toEqual(portable)
+    const second = await computer(remote)
+    expect(second.root).not.toBe(first.root)
+    expect((await second.call('list')).profiles?.[0]).toMatchObject({
+      id: profile.id, payoutSettings, payoutSettingsRevision: 1
+    })
+    await first.call('close')
+    const restarted = await computer(remote, 'employee-a', 'tenant-a', first.root)
+    expect((await restarted.call('list')).profiles?.[0]).toMatchObject({ payoutSettings, payoutSettingsRevision: 1 })
+    expect(JSON.stringify(saved)).not.toContain('synthetic-value')
+  })
+
+  it('keeps the settings with the asset after transfer, hiding A and restoring only for B and admin', async () => {
+    const remote = remoteBoundary()
+    const first = await computer(remote)
+    const profile = await first.register()
+    await first.call('savePayoutSettings', { profileId: profile.id, expectedRevision: 0, payoutSettings })
+    remote.transfer(profile.id, 'employee-b')
+    expect((await first.call('list')).profiles).toEqual([])
+    expect((await first.call('savePayoutSettings', {
+      profileId: profile.id, expectedRevision: 1, payoutSettings: { ...payoutSettings, remitAmount: '99' }
+    })).ok).toBe(false)
+    for (const principal of ['employee-b', 'admin']) {
+      const next = await computer(remote, principal)
+      expect((await next.call('list')).profiles?.[0]).toMatchObject({
+        id: profile.id, principalId: principal, payoutSettings, payoutSettingsRevision: 1
+      })
+    }
+    const unrelated = await computer(remote, 'supervisor')
+    expect((await unrelated.call('list')).profiles).toEqual([])
+    const otherTenant = await computer(remote, 'employee-b', 'tenant-b')
+    expect((await otherTenant.call('list')).profiles).toEqual([])
+    expect(remote.tenants.get('tenant-a')!.get(profile.id)).toMatchObject({
+      created_by: 'employee-a', servicing_principal_id: 'employee-b', payout_settings: payoutSettings
+    })
+  })
+
+  it('rejects a stale configuration edit and refreshes an open profile without replacing its browser session', async () => {
+    const remote = remoteBoundary()
+    const first = await computer(remote)
+    const profile = await first.register()
+    await first.call('savePayoutSettings', { profileId: profile.id, expectedRevision: 0, payoutSettings })
+    const second = await computer(remote)
+    await second.call('list')
+    const newer = { ...payoutSettings, remitAmount: '12.80', payoutReviewDays: 30, payoutGoodReviewMode: 1 as const }
+    expect((await second.call('savePayoutSettings', {
+      profileId: profile.id, expectedRevision: 1, payoutSettings: newer
+    })).profile).toMatchObject({ payoutSettings: newer, payoutSettingsRevision: 2 })
+    expect((await first.call('savePayoutSettings', {
+      profileId: profile.id, expectedRevision: 1, payoutSettings: { ...payoutSettings, remitAmount: '77' }
+    })).error).toBe('SHOP_PAYOUT_SETTINGS_CONFLICT')
+    expect((await first.call('list')).profiles?.[0]).toMatchObject({ payoutSettings: newer, payoutSettingsRevision: 2 })
+    expect(first.imported).not.toHaveBeenCalled()
+    expect(first.closeView).not.toHaveBeenCalled()
+    expect(remote.tenants.get('tenant-a')!.get(profile.id)?.payout_settings).toEqual(newer)
+  })
+
+  it('preserves settings on login backup and personal removal while allowing the administrator to recover them', async () => {
+    const remote = remoteBoundary()
+    const first = await computer(remote)
+    const profile = await first.register()
+    await first.call('savePayoutSettings', { profileId: profile.id, expectedRevision: 0, payoutSettings })
+    await first.call('close')
+    expect(remote.tenants.get('tenant-a')!.get(profile.id)).toMatchObject({
+      payout_settings: payoutSettings, payout_settings_revision: 1, session: portable
+    })
+    expect((await first.call('delete', { profileId: profile.id })).ok).toBe(true)
+    expect((await first.call('list')).profiles).toEqual([])
+    const admin = await computer(remote, 'admin')
+    expect((await admin.call('list')).profiles?.[0]).toMatchObject({ payoutSettings, payoutSettingsRevision: 1 })
+  })
+
+  it('migrates a pre-cloud local configuration once without changing the existing login', async () => {
+    const remote = remoteBoundary()
+    const first = await computer(remote)
+    const profile = await first.register()
+    await first.call('close')
+    const files = await fs.readdir(first.root, { recursive: true })
+    const store = path.join(first.root, String(files.find(file => String(file).endsWith('profiles.json'))))
+    const local = JSON.parse(await fs.readFile(store, 'utf8'))
+    Object.assign(local.profiles[0], { payoutSettings, payoutSettingsRevision: 7 })
+    await fs.writeFile(store, JSON.stringify(local))
+    const before = structuredClone(remote.tenants.get('tenant-a')!.get(profile.id)!.session)
+    const restart = await computer(remote, 'employee-a', 'tenant-a', first.root)
+    expect((await restart.call('list')).profiles?.[0]).toMatchObject({ payoutSettings, payoutSettingsRevision: 1 })
+    await restart.call('list')
+    expect(remote.request.mock.calls.filter(call => call[4]?.payout_settings)).toHaveLength(1)
+    expect(remote.tenants.get('tenant-a')!.get(profile.id)!.session).toEqual(before)
+  })
+
+  it('uploads settings saved before shop identification when the verified asset is first backed up', async () => {
+    const remote = remoteBoundary()
+    const first = await computer(remote)
+    const profile = (await first.call('create')).profile!
+    expect((await first.call('savePayoutSettings', { profileId: profile.id, expectedRevision: 0, payoutSettings })).ok).toBe(true)
+    expect(remote.tenants.size).toBe(0)
+    await first.call('open', { profileId: profile.id, target: 'merchant', bounds })
+    expect((await first.call('identify', { profileId: profile.id })).profile).toMatchObject({
+      payoutSettings, payoutSettingsRevision: 1
+    })
+    expect(remote.tenants.get('tenant-a')!.get(profile.id)).toMatchObject({ payout_settings: payoutSettings })
+  })
+
+  it('does not report a successful save or replace local data after a cloud write fails', async () => {
+    const remote = remoteBoundary()
+    const first = await computer(remote)
+    const profile = await first.register()
+    await first.call('savePayoutSettings', { profileId: profile.id, expectedRevision: 0, payoutSettings })
+    const original = remote.request.getMockImplementation()!
+    remote.request.mockImplementation(async (...args) => {
+      if (args[2] === 'POST' && args[4]?.payout_settings) throw new Error('500: unavailable')
+      return original(...args)
+    })
+    expect((await first.call('savePayoutSettings', {
+      profileId: profile.id, expectedRevision: 1, payoutSettings: { ...payoutSettings, remitAmount: '88' }
+    })).error).toBe('SHOP_PAYOUT_SETTINGS_CLOUD_UNAVAILABLE')
+    expect(first.closeView).not.toHaveBeenCalled()
+    expect((await first.call('list')).profiles?.[0]).toMatchObject({ payoutSettings, payoutSettingsRevision: 1 })
+    expect(remote.tenants.get('tenant-a')!.get(profile.id)?.payout_settings).toEqual(payoutSettings)
+  })
+
+  it('keeps an old server compatible for login but refuses to claim a cloud configuration save', async () => {
+    const remote = remoteBoundary()
+    const original = remote.request.getMockImplementation()!
+    remote.request.mockImplementation(async (...args) => {
+      const result = await original(...args)
+      const strip = (record: any) => {
+        delete record.payout_settings
+        delete record.payout_settings_revision
+      }
+      if ('profiles' in result) result.profiles.forEach(strip)
+      if ('profile' in result) strip(result.profile)
+      return result
+    })
+    const first = await computer(remote)
+    const profile = await first.register()
+    expect(profile.loginState).toBe('verified')
+    expect((await first.call('savePayoutSettings', {
+      profileId: profile.id, expectedRevision: 0, payoutSettings
+    })).error).toBe('SHOP_PAYOUT_SETTINGS_CLOUD_UNAVAILABLE')
+    expect(remote.request.mock.calls.filter(call => call[4]?.payout_settings)).toHaveLength(0)
+    expect((await first.call('list')).profiles?.[0].payoutSettings).toBeUndefined()
+  })
+
+  it('rejects the configuration race at the server boundary instead of retrying or overwriting', async () => {
+    const remote = remoteBoundary()
+    const first = await computer(remote)
+    const profile = await first.register()
+    const original = remote.request.getMockImplementation()!
+    remote.request.mockImplementation(async (...args) => {
+      if (args[2] === 'POST' && args[4]?.payout_settings) {
+        const row = remote.tenants.get('tenant-a')!.get(profile.id)!
+        row.payout_settings = { ...payoutSettings, remitAmount: '9' }
+        row.payout_settings_revision = 1
+        row.revision++
+      }
+      return original(...args)
+    })
+    expect((await first.call('savePayoutSettings', {
+      profileId: profile.id, expectedRevision: 0, payoutSettings
+    })).error).toBe('SHOP_PAYOUT_SETTINGS_CONFLICT')
+    expect(remote.request.mock.calls.filter(call => call[4]?.payout_settings)).toHaveLength(1)
+    expect(remote.tenants.get('tenant-a')!.get(profile.id)?.payout_settings?.remitAmount).toBe('9')
+  })
+
+  it('fences a late cloud configuration response after logout', async () => {
+    const remote = remoteBoundary()
+    const first = await computer(remote)
+    const profile = await first.register()
+    const original = remote.request.getMockImplementation()!
+    let finish!: () => void
+    let entered!: () => void
+    const waiting = new Promise<void>(resolve => { entered = resolve })
+    remote.request.mockImplementation(async (...args) => {
+      const value = await original(...args)
+      if (args[2] === 'POST' && args[4]?.payout_settings) {
+        entered()
+        await new Promise<void>(resolve => { finish = resolve })
+      }
+      return value
+    })
+    const saving = first.call('savePayoutSettings', { profileId: profile.id, expectedRevision: 0, payoutSettings })
+    await waiting
+    first.logout()
+    finish()
+    expect((await saving).error).toBe('SHOP_PROFILE_OWNER_CHANGED')
+    const files = await fs.readdir(first.root, { recursive: true })
+    const stored = await fs.readFile(path.join(first.root, String(files.find(file => String(file).endsWith('profiles.json')))), 'utf8')
+    expect(JSON.parse(stored).profiles[0].payoutSettings).toBeUndefined()
+  })
+
+  it('refuses malformed cloud configuration instead of restoring it into a new profile', async () => {
+    const remote = remoteBoundary()
+    const first = await computer(remote)
+    const profile = await first.register()
+    const record = remote.tenants.get('tenant-a')!.get(profile.id)!
+    for (const change of [
+      { payout_settings: payoutSettings, payout_settings_revision: 0 },
+      { payout_settings: null, payout_settings_revision: 1 },
+      { payout_settings: { ...payoutSettings, payoutReviewDays: false }, payout_settings_revision: 1 },
+      { payout_settings: { ...payoutSettings, remitAmount: '' }, payout_settings_revision: 1 }
+    ]) {
+      Object.assign(record, change)
+      const next = await computer(remote)
+      const reply = await next.call('list')
+      expect(reply.cloud?.state).toBe('unavailable')
+      expect(reply.profiles).toEqual([])
+      expect(next.imported).not.toHaveBeenCalled()
+    }
   })
 })

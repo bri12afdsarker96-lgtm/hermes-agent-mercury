@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 
 import { ShopBrowserBookmarks } from './shop-browser-bookmarks'
-import type { PortableShopSession, ShopProfileCloud } from './shop-browser-cloud'
+import type { CloudShopRecord, PortableShopSession, ShopProfileCloud } from './shop-browser-cloud'
 import type { BoundShopExecution, ShopExecutionTransport } from './shop-browser-execution'
 import type { ShopBrowserBounds, ShopBrowserProfile, ShopBrowserReply, ShopBrowserRequest } from './shop-browser-types'
 import { recoverableShopBrowserErrors } from './shop-browser-types'
@@ -297,6 +297,43 @@ export class ShopBrowserProfiles {
     }
   }
 
+  private applyCloudPayoutSettings(profile: StoredProfile, remote: CloudShopRecord) {
+    if (!remote.payout_settings) {
+      return false
+    }
+
+    const changed = profile.payoutSettingsRevision !== remote.payout_settings_revision ||
+      Object.entries(remote.payout_settings).some(
+        ([key, value]) => profile.payoutSettings?.[key as keyof typeof remote.payout_settings] !== value
+      )
+    if (!changed) {
+      return false
+    }
+    profile.payoutSettings = { ...remote.payout_settings }
+    profile.payoutSettingsRevision = remote.payout_settings_revision!
+
+    return changed
+  }
+
+  private async migratePayoutSettings(profile: StoredProfile, remote: CloudShopRecord) {
+    if (remote.payout_settings !== null || !profile.payoutSettings) {
+      return remote
+    }
+
+    const saved = await this.deps.cloud!.savePayoutSettings(profile.id, remote.revision, 0, profile.payoutSettings)
+    await this.authority()
+    await this.checkProfileAccess(profile, true)
+    this.applyCloudPayoutSettings(profile, saved)
+
+    if (profile.cloudRevision === remote.revision) {
+      profile.cloudRevision = saved.revision
+    }
+
+    this.cloudAccess = undefined
+
+    return saved
+  }
+
   private async backup(scope: ShopBrowserAuthority, profiles: StoredProfile[], profile: StoredProfile) {
     if (!this.deps.cloud || !this.deps.exportSession || !profile.shopId || !profile.shopName) {
       return
@@ -338,9 +375,11 @@ export class ShopBrowserProfiles {
         session.origins = [...origins.values()]
       }
 
-      const saved = await this.deps.cloud.save(publicProfile(profile), profile.cloudRevision ?? 0, session)
+      let saved = await this.deps.cloud.save(publicProfile(profile), profile.cloudRevision ?? 0, session)
       await this.authority()
       profile.cloudRevision = saved.revision
+      saved = await this.migratePayoutSettings(profile, saved)
+      this.applyCloudPayoutSettings(profile, saved)
       await this.save(scope, profiles)
       this.cloudStatus = { state: 'synced', checkedAt: new Date().toISOString() }
       this.nextCloudCheck = 0
@@ -423,12 +462,25 @@ export class ShopBrowserProfiles {
         await this.save(scope, profiles)
       }
 
-      for (const remote of records) {
+      for (let remote of records) {
         if (!remote.deleted) {
           this.revokedProfiles.delete(remote.profile_id)
         }
 
         const local = profiles.find(profile => profile.id === remote.profile_id)
+
+        if (local && !remote.deleted) {
+          const previousRevision = remote.revision
+          const changed = this.applyCloudPayoutSettings(local, remote)
+
+          if (![...this.executions].some(item => item.profileId === local.id)) {
+            remote = await this.migratePayoutSettings(local, remote)
+          }
+
+          if (changed || remote.revision !== previousRevision) {
+            await this.save(scope, profiles)
+          }
+        }
 
         if (
           this.opened?.id === remote.profile_id ||
@@ -478,8 +530,11 @@ export class ShopBrowserProfiles {
           cloudRevision: detail.revision
         }
 
-        // Login-session refresh must preserve this machine's shop configuration.
-        if (local?.payoutSettings) {
+        // Cloud settings follow the enterprise asset. Legacy local settings are
+        // retained only while the cloud has no configuration to restore.
+        if (detail.payout_settings) {
+          this.applyCloudPayoutSettings(restored, detail)
+        } else if (local?.payoutSettings) {
           restored.payoutSettings = local.payoutSettings
           restored.payoutSettingsRevision = local.payoutSettingsRevision ?? 0
         }
@@ -826,8 +881,57 @@ export class ShopBrowserProfiles {
         fail('SHOP_PAYOUT_SETTINGS_CONFLICT')
       }
 
-      profile.payoutSettings = { ...request.payoutSettings, remitAmount: request.payoutSettings.remitAmount.trim() }
-      profile.payoutSettingsRevision = (profile.payoutSettingsRevision ?? 0) + 1
+      const settings = { ...request.payoutSettings, remitAmount: request.payoutSettings.remitAmount.trim() }
+
+      if (profile.cloudRevision && this.deps.cloud) {
+        try {
+          const remote = await this.deps.cloud.get(profile.id)
+          await this.authority()
+
+          if (remote.deleted || remote.payout_settings === undefined) {
+            fail('SHOP_PAYOUT_SETTINGS_CLOUD_UNAVAILABLE')
+          }
+
+          if (remote.payout_settings && remote.payout_settings_revision !== request.expectedRevision) {
+            fail('SHOP_PAYOUT_SETTINGS_CONFLICT')
+          }
+
+          const saved = await this.deps.cloud.savePayoutSettings(
+            profile.id,
+            remote.revision,
+            remote.payout_settings_revision!,
+            settings
+          )
+          await this.authority()
+          await this.checkProfileAccess(profile, true)
+          this.applyCloudPayoutSettings(profile, saved)
+
+          if (profile.cloudRevision === remote.revision) {
+            profile.cloudRevision = saved.revision
+          }
+
+          this.cloudAccess = undefined
+          this.nextCloudCheck = 0
+          this.cloudStatus = { state: 'synced', checkedAt: new Date().toISOString() }
+        } catch (error) {
+          this.assertCurrent()
+          const code = error instanceof Error ? error.message : ''
+          this.cloudAccess = undefined
+          this.nextCloudCheck = 0
+          const conflict = /CONFLICT|409|revision_conflict/.test(code)
+          this.cloudStatus = { state: conflict ? 'conflict' : 'unavailable', checkedAt: new Date().toISOString() }
+
+          if (/OWNER_CHANGED|SHOP_PROFILE_FORBIDDEN/.test(code)) {
+            throw error
+          }
+
+          fail(conflict ? 'SHOP_PAYOUT_SETTINGS_CONFLICT' : 'SHOP_PAYOUT_SETTINGS_CLOUD_UNAVAILABLE')
+        }
+      } else {
+        profile.payoutSettings = settings
+        profile.payoutSettingsRevision = (profile.payoutSettingsRevision ?? 0) + 1
+      }
+
       await this.authority()
       await this.checkProfileAccess(profile, true)
       await this.save(scope, profiles)
