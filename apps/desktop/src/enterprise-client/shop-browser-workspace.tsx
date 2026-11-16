@@ -69,8 +69,8 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
   const [dragging, setDragging] = useState(false)
   const [externalDialogOpen, setExternalDialogOpen] = useState(false)
   const workspace = useRef<HTMLDivElement>(null)
-  const drag = useRef<{ x: number; width: number } | null>(null)
-  const lifecycle = useMemo(() => ({ runtime, profileId, alive: true, busy: false }), [runtime, profileId])
+  const drag = useRef<{ x: number; width: number; nextWidth: number } | null>(null)
+  const lifecycle = useMemo(() => ({ runtime, profileId, alive: true, busy: false, layoutVersion: 0 }), [runtime, profileId])
   const active = snapshot?.tabs.find(tab => tab.id === snapshot.activeTabId)
 
   const overlayOpen =
@@ -78,6 +78,7 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
 
   const send = useCallback(
     async (request: Omit<ShopBrowserRequest, 'sessionId' | 'profileId'>) => {
+      const layoutVersion = lifecycle.layoutVersion
       const reply = await lifecycle.runtime.shopBrowser!({ ...request, profileId: lifecycle.profileId })
 
       if (!lifecycle.alive) {
@@ -96,6 +97,14 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
 
       if (reply.browser) {
         setSnapshot(reply.browser)
+
+        if (
+          reply.browser.layout && !drag.current && layoutVersion === lifecycle.layoutVersion &&
+          request.action === 'browser' && ['state', 'layout'].includes(request.browser?.action ?? '')
+        ) {
+          setSideWidth(reply.browser.layout.sideWidth)
+          setCollapsed(reply.browser.layout.collapsed)
+        }
       }
 
       if (reply.bookmarks) {
@@ -140,6 +149,16 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
 
   const browser = useCallback((command: ShopBrowserCommand) => send({ action: 'browser', browser: command }), [send])
 
+  const saveLayout = useCallback((command: ShopBrowserCommand) => {
+    lifecycle.layoutVersion++
+    void browser(command).catch(async reason => {
+      if (lifecycle.alive) {
+        setError(reason instanceof Error ? reason.message : 'SHOP_BROWSER_FAILED')
+        await browser({ action: 'state' }).catch(() => {})
+      }
+    })
+  }, [browser, lifecycle])
+
   const mutate = async (command: ShopBookmarkCommand) => {
     const reply = await send({ action: 'bookmarks', bookmark: command, expectedRevision: bookmarks?.revision })
 
@@ -161,6 +180,13 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
 
     return () => observer.disconnect()
   }, [])
+
+  useEffect(() => {
+    drag.current = null
+    setDragging(false)
+    setSideWidth(320)
+    setCollapsed(false)
+  }, [lifecycle])
 
   useEffect(() => {
     lifecycle.alive = true
@@ -194,9 +220,19 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
   }, [overlayOpen, browser, lifecycle])
 
   const finishDrag = useCallback(() => {
+    const completed = drag.current
+
+    if (!completed) {
+      return
+    }
+
     drag.current = null
     setDragging(false)
-  }, [])
+
+    if (completed.nextWidth !== completed.width) {
+      saveLayout({ action: 'layout', sideWidth: completed.nextWidth, containerWidth: workspace.current?.clientWidth ?? 0 })
+    }
+  }, [saveLayout])
 
   useEffect(() => {
     if (!dragging) {
@@ -212,6 +248,7 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
       const max = Math.max((workspace.current?.clientWidth ?? 0) * 0.6, 320)
 
       if (width >= 260 && width <= max) {
+        drag.current.nextWidth = width
         setSideWidth(width)
       }
     }
@@ -484,7 +521,8 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
               className="shop-browser-resizer"
               onPointerDown={event => {
                 event.preventDefault()
-                drag.current = { x: event.clientX, width: sideWidth }
+                lifecycle.layoutVersion++
+                drag.current = { x: event.clientX, width: sideWidth, nextWidth: sideWidth }
                 setDragging(true)
               }}
               role="separator"
@@ -500,7 +538,10 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
                 </button>
                 <button
                   aria-label={collapsed ? copy.expand : copy.collapse}
-                  onClick={() => setCollapsed(value => !value)}
+                  onClick={() => {
+                    setCollapsed(!collapsed)
+                    saveLayout({ action: 'layout', collapsed: !collapsed })
+                  }}
                   type="button"
                 >
                   {collapsed ? <ChevronLeft aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}

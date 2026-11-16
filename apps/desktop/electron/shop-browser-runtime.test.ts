@@ -208,6 +208,9 @@ async function fixture(options: { root?: string; authority?: ShopBrowserAuthorit
     changeOwner: () => {
       authority = { ...authority, principalId: 'employee-b' }
     },
+    changeTenant: () => {
+      authority = { ...authority, tenantId: 'tenant-b' }
+    },
     failCreation: () => {
       failCreation = true
     },
@@ -218,6 +221,61 @@ async function fixture(options: { root?: string; authority?: ShopBrowserAuthorit
 }
 
 describe('local shop browser runtime', () => {
+  it('keeps layout in the live workspace only and resets after close, LRU eviction and restart', async () => {
+    const f = await fixture()
+    const a = await f.create()
+    const b = await f.create()
+    await f.open(a.id)
+    const layout = { sideWidth: 460, collapsed: true }
+    expect((await f.call('browser', { profileId: a.id,
+      browser: { action: 'layout', ...layout, containerWidth: 1000 } })).browser?.layout).toEqual(layout)
+    const profilesBefore = (await f.call('list')).profiles
+    const sentinel = path.join(f.views[0].storage, 'layout-session-sentinel')
+    await fs.writeFile(sentinel, 'unchanged-session-bytes')
+    const loginBefore = await fs.readFile(sentinel)
+    await f.open(b.id)
+    expect((await f.call('browser', { profileId: b.id, browser: { action: 'state' } })).browser?.layout)
+      .toEqual({ sideWidth: 320, collapsed: false })
+    expect((await f.call('browser', { profileId: a.id,
+      browser: { action: 'layout', collapsed: false } })).error).toBe('SHOP_PROFILE_NOT_OPEN')
+    await f.open(a.id)
+    expect((await f.call('browser', { profileId: a.id, browser: { action: 'state' } })).browser?.layout).toEqual(layout)
+    await f.call('close')
+    await f.open(a.id)
+    expect((await f.call('browser', { profileId: a.id, browser: { action: 'state' } })).browser?.layout)
+      .toEqual({ sideWidth: 320, collapsed: false })
+    await f.call('browser', { profileId: a.id, browser: { action: 'layout', sideWidth: 500, containerWidth: 1000 } })
+    await f.setLimit(1)
+    await f.open(b.id)
+    await f.open(a.id)
+    expect((await f.call('browser', { profileId: a.id, browser: { action: 'state' } })).browser?.layout)
+      .toEqual({ sideWidth: 320, collapsed: false })
+    expect((await f.call('list')).profiles).toEqual(profilesBefore)
+    expect(await fs.readFile(sentinel)).toEqual(loginBefore)
+    expect(f.clearStorage).not.toHaveBeenCalled()
+    await f.call('browser', { profileId: a.id, browser: { action: 'layout', sideWidth: 500, containerWidth: 1000 } })
+    f.runtime.invalidate()
+    await f.runtime.revalidate()
+    const restarted = await fixture({ root: f.root })
+    await restarted.open(a.id)
+    expect((await restarted.call('browser', { profileId: a.id, browser: { action: 'state' } })).browser?.layout)
+      .toEqual({ sideWidth: 320, collapsed: false })
+  })
+
+  it.each(['expire', 'changeOwner', 'changeTenant', 'revoke'] as const)('fences old layout after %s', async action => {
+    const f = await fixture()
+    const a = await f.create()
+    await f.open(a.id)
+    expect((await f.call('browser', { profileId: a.id,
+      browser: { action: 'layout', sideWidth: 460, containerWidth: 1000 } })).ok).toBe(true)
+    f[action]()
+    const reply = await f.call('browser', { profileId: a.id, browser: { action: 'layout', collapsed: true } })
+    expect(reply.ok).toBe(false)
+    expect(reply.browser).toBeUndefined()
+    expect(f.views.every(view => view.closed)).toBe(true)
+    expect(f.clearStorage).not.toHaveBeenCalled()
+  })
+
   it.each(['command', 'identify', 'validate'] as const)(
     'rejects %s when its execution closes during an access check before native dispatch',
     async action => {
@@ -240,7 +298,7 @@ describe('local shop browser runtime', () => {
     }
   )
 
-  it.each(['periodic', 'command', 'identify', 'validate', 'browser', 'offline-command', 'offline-browser',
+  it.each(['periodic', 'command', 'identify', 'validate', 'browser', 'layout-browser', 'offline-layout-browser', 'offline-command', 'offline-browser',
     'concurrent-command', 'pending-command', 'inflight-command'] as const)(
     'fences removed members before %s dispatch while keeping the other assigned employee usable', async trigger => {
     let record: CloudShopRecord | undefined
@@ -369,6 +427,10 @@ describe('local shop browser runtime', () => {
     const execution = await a.runtime.acquireExecution(profile.id, 'merchant')
     await execution.command('root', 'Runtime.evaluate', {})
     expect((await a.open(profile.id)).ok).toBe(true)
+    expect((await a.call('browser', { profileId: profile.id,
+      browser: { action: 'layout', sideWidth: 460, containerWidth: 1000 } })).ok).toBe(true)
+    expect((await b.call('browser', { profileId: profile.id, browser: { action: 'state' } })).browser?.layout)
+      .toEqual({ sideWidth: 320, collapsed: false })
     const oldView = a.views[0]
     let finishInFlight: (() => void) | undefined
     let inFlight: Promise<unknown> | undefined
@@ -470,7 +532,8 @@ describe('local shop browser runtime', () => {
         await repeatedClose
         await refreshing
       } else if (trigger.endsWith('browser')) {
-        const reply = await a.call('browser', { profileId: profile.id, browser: { action: 'reload' } })
+        const browser = trigger.includes('layout') ? { action: 'layout' as const, collapsed: true } : { action: 'reload' as const }
+        const reply = await a.call('browser', { profileId: profile.id, browser })
         expect(reply).toEqual({ ok: false, error: aOffline ? 'SHOP_PROFILE_ACCESS_UNAVAILABLE' : 'SHOP_PROFILE_FORBIDDEN' })
       } else {
         const result = trigger.endsWith('command')

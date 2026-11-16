@@ -27,6 +27,47 @@ async function fixture() {
 }
 
 describe('native browser tab lifetime and navigation', () => {
+  it('validates finite layout fields and native drag limits atomically and preserves expanded width', async () => {
+    const f = await fixture()
+    expect(f.tabs.snapshot().layout).toEqual({ sideWidth: 320, collapsed: false })
+    for (const [sideWidth, containerWidth] of [[260, 1000], [600, 1000], [320, 0], [320.5, 1000]]) {
+      expect((await f.tabs.operate({ action: 'layout', sideWidth, containerWidth })).layout)
+        .toEqual({ sideWidth, collapsed: false })
+    }
+    await f.tabs.operate({ action: 'layout', collapsed: true })
+    expect(f.tabs.snapshot().layout).toEqual({ sideWidth: 320.5, collapsed: true })
+    await f.tabs.operate({ action: 'layout', collapsed: false })
+    const valid = f.tabs.snapshot().layout
+    for (const command of [
+      { action: 'layout' },
+      { action: 'layout', sideWidth: 259, containerWidth: 1000 },
+      { action: 'layout', sideWidth: 601, containerWidth: 1000 },
+      { action: 'layout', sideWidth: 321, containerWidth: 0 },
+      { action: 'layout', sideWidth: NaN, containerWidth: 1000 },
+      { action: 'layout', sideWidth: Infinity, containerWidth: 1000 },
+      { action: 'layout', sideWidth: '320', containerWidth: 1000 },
+      { action: 'layout', sideWidth: undefined, containerWidth: 1000 },
+      { action: 'layout', sideWidth: 320 },
+      { action: 'layout', sideWidth: 320, containerWidth: Infinity },
+      { action: 'layout', sideWidth: 320, containerWidth: -1 },
+      { action: 'layout', sideWidth: 320, containerWidth: '1000' },
+      { action: 'layout', containerWidth: 1000 },
+      { action: 'layout', collapsed: 1 },
+      { action: 'layout', collapsed: undefined },
+      { action: 'layout', collapsed: 'false' },
+      { action: 'layout', sideWidth: 460, containerWidth: 1000, collapsed: null },
+      { action: 'layout', collapsed: true, profileId: 'other' }
+    ]) {
+      await expect(f.tabs.operate(command as never)).rejects.toThrow('SHOP_BROWSER_INVALID_COMMAND')
+      expect(f.tabs.snapshot().layout).toEqual(valid)
+    }
+    const snapshot = f.tabs.snapshot()
+    snapshot.layout!.sideWidth = 999
+    expect(f.tabs.snapshot().layout).toEqual(valid)
+    f.revoke()
+    await expect(f.tabs.operate({ action: 'layout', collapsed: true })).rejects.toThrow('SHOP_PROFILE_OWNER_CHANGED')
+  })
+
   it('switches live pages and selects the previous neighbor when closing the active tab', async () => {
     const f = await fixture()
     const first = f.tabs.snapshot().tabs[0].id

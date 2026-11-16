@@ -9,18 +9,27 @@ export interface ShopBrowserTabState {
   canGoForward: boolean
 }
 
+export interface ShopBrowserLayout {
+  sideWidth: number
+  collapsed: boolean
+}
+
 export interface ShopBrowserSnapshot {
   tabs: ShopBrowserTabState[]
   activeTabId: string | null
   suspended: boolean
+  layout?: ShopBrowserLayout
   error?: string
 }
 
 export interface ShopBrowserCommand {
-  action: 'state' | 'new' | 'switch' | 'close' | 'navigate' | 'back' | 'forward' | 'reload' | 'home' | 'suspend'
+  action: 'state' | 'new' | 'switch' | 'close' | 'navigate' | 'back' | 'forward' | 'reload' | 'home' | 'suspend' | 'layout'
   tabId?: string
   url?: string
   value?: boolean
+  sideWidth?: number
+  collapsed?: boolean
+  containerWidth?: number
 }
 
 export interface ShopBrowserPageControls {

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type { ShopBrowserBounds } from './shop-browser-types'
 import type {
   ShopBrowserCommand,
+  ShopBrowserLayout,
   ShopBrowserSnapshot,
   ShopBrowserTabPage,
   ShopBrowserWorkspace
@@ -23,6 +24,7 @@ export class ShopBrowserTabs implements ShopBrowserWorkspace {
   private closed = false
   private tail: Promise<unknown> = Promise.resolve()
   private error?: string
+  private layout: ShopBrowserLayout = { sideWidth: 320, collapsed: false }
 
   constructor(
     private deps: Dependencies,
@@ -73,6 +75,7 @@ export class ShopBrowserTabs implements ShopBrowserWorkspace {
       tabs: this.pages.map(({ id, page }) => ({ id, ...page.browser.state() })),
       activeTabId: this.activeTabId,
       suspended: this.suspended,
+      layout: { ...this.layout },
       ...(this.error ? { error: this.error } : {})
     }
   }
@@ -97,7 +100,8 @@ export class ShopBrowserTabs implements ShopBrowserWorkspace {
       forward: [],
       reload: [],
       home: [],
-      suspend: ['value']
+      suspend: ['value'],
+      layout: ['sideWidth', 'collapsed', 'containerWidth']
     }
 
     const allowed = fields[command?.action]
@@ -106,6 +110,28 @@ export class ShopBrowserTabs implements ShopBrowserWorkspace {
       {throw new Error('SHOP_BROWSER_INVALID_COMMAND')}
 
     this.error = undefined
+
+    if (command.action === 'layout') {
+      const hasWidth = Object.hasOwn(command, 'sideWidth')
+      const hasCollapsed = Object.hasOwn(command, 'collapsed')
+
+      if (
+        (!hasWidth && !hasCollapsed) ||
+        (hasCollapsed && typeof command.collapsed !== 'boolean') ||
+        (hasWidth && (
+          typeof command.sideWidth !== 'number' || !Number.isFinite(command.sideWidth) ||
+          typeof command.containerWidth !== 'number' || !Number.isFinite(command.containerWidth) ||
+          command.containerWidth < 0 || command.sideWidth < 260 ||
+          command.sideWidth > Math.max(command.containerWidth * 0.6, 320)
+        )) ||
+        (!hasWidth && Object.hasOwn(command, 'containerWidth'))
+      ) {throw new Error('SHOP_BROWSER_INVALID_COMMAND')}
+
+      this.layout = {
+        sideWidth: hasWidth ? command.sideWidth! : this.layout.sideWidth,
+        collapsed: hasCollapsed ? command.collapsed! : this.layout.collapsed
+      }
+    }
 
     if (command.action === 'new') {await this.add(command.url === undefined ? 'about:blank' : command.url)}
 
@@ -170,6 +196,7 @@ export class ShopBrowserTabs implements ShopBrowserWorkspace {
 
   async close() {
     this.closed = true
+    this.layout = { sideWidth: 320, collapsed: false }
     const pages = this.pages
     this.pages = []
     this.activeTabId = null
