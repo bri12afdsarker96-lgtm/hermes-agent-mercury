@@ -474,6 +474,9 @@ describe('local shop browser runtime', () => {
 
         return record
       },
+      savePayoutSettings: async () => {
+        throw new Error('UNEXPECTED_PAYOUT_SETTINGS_WRITE')
+      },
       hide: async id => {
         records.delete(id)
       }
