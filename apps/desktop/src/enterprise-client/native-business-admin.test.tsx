@@ -347,9 +347,24 @@ it('allows a read-only retry when a selected shop remains absent after bounded r
   })
   render(<ShopSharedAssignment onSaved={() => {}} profileId="p1" runtime={f.runtime} />)
   await screen.findByRole('alert', {}, { timeout: 4000 })
+  expect(f.get.mock.calls.filter(([path]) => path === '/api/shop-login-profiles')).toHaveLength(5)
   available = true
   fireEvent.click(screen.getByRole('button', { name: '刷新' }))
   expect(await screen.findByRole('checkbox', { name: '员工甲' })).toBeTruthy()
+  expect(f.post).not.toHaveBeenCalled()
+})
+
+it('stops retrying the old shop after the editor unmounts', async () => {
+  const f = fixture()
+  const originalGet = f.get.getMockImplementation()!
+  f.get.mockImplementation(async path =>
+    path === '/api/shop-login-profiles' ? { profiles: [] } : originalGet(path)
+  )
+  const view = render(<ShopSharedAssignment onSaved={() => {}} profileId="p1" runtime={f.runtime} />)
+  await waitFor(() => expect(f.get.mock.calls.some(([path]) => path === '/api/principals')).toBe(true))
+  view.unmount()
+  await act(async () => new Promise(resolve => setTimeout(resolve, 650)))
+  expect(f.get.mock.calls.filter(([path]) => path === '/api/shop-login-profiles')).toHaveLength(1)
   expect(f.post).not.toHaveBeenCalled()
 })
 
