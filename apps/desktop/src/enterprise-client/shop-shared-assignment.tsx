@@ -235,7 +235,19 @@ export function ShopSharedAssignment({
         return
       }
 
-      const data = await readShopAssignments(runtime, identity)
+      let data = await readShopAssignments(runtime, identity)
+
+      // A freshly verified local profile can appear before its cloud upload completes.
+      // Retry only a missing selected record, keeping permission and response errors visible.
+      for (let retry = 0; retry < 4 && !data.profiles.some(row => row.profile_id === profileId); retry++) {
+        await new Promise(resolve => setTimeout(resolve, 500))
+
+        if (!active) {
+          return
+        }
+
+        data = await readShopAssignments(runtime, identity)
+      }
 
       if (!active) {
         return
@@ -323,9 +335,14 @@ export function ShopSharedAssignment({
 
   if (!current.identity) {
     return current.error ? (
-      <p className="cs-error" role="alert">
-        {current.error}
-      </p>
+      <div>
+        <p className="cs-error" role="alert">
+          {current.error}
+        </p>
+        <Button onClick={() => setAttempt(value => value + 1)} variant="secondary">
+          {copy.refresh}
+        </Button>
+      </div>
     ) : null
   }
 

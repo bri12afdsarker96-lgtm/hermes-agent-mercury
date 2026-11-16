@@ -317,6 +317,42 @@ it('saves multiple employees and then an empty administrator-only list with auth
   ])
 })
 
+it('loads a newly created local shop after its cloud record appears', async () => {
+  const f = fixture()
+  const originalGet = f.get.getMockImplementation()!
+  let reads = 0
+  f.get.mockImplementation(async path => {
+    if (path === '/api/shop-login-profiles' && ++reads === 1) {
+      return { profiles: [] }
+    }
+
+    return originalGet(path)
+  })
+  render(<ShopSharedAssignment onSaved={() => {}} profileId="p1" runtime={f.runtime} />)
+  expect(await screen.findByRole('checkbox', { name: '员工甲' }, { timeout: 4000 })).toBeTruthy()
+  expect(reads).toBe(2)
+  expect(f.post).not.toHaveBeenCalled()
+})
+
+it('allows a read-only retry when a selected shop remains absent after bounded retries', async () => {
+  const f = fixture()
+  const originalGet = f.get.getMockImplementation()!
+  let available = false
+  f.get.mockImplementation(async path => {
+    if (path === '/api/shop-login-profiles' && !available) {
+      return { profiles: [] }
+    }
+
+    return originalGet(path)
+  })
+  render(<ShopSharedAssignment onSaved={() => {}} profileId="p1" runtime={f.runtime} />)
+  await screen.findByRole('alert', {}, { timeout: 4000 })
+  available = true
+  fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+  expect(await screen.findByRole('checkbox', { name: '员工甲' })).toBeTruthy()
+  expect(f.post).not.toHaveBeenCalled()
+})
+
 it('edits visible shops while preserving other employees and keeps scope-all unavailable', async () => {
   const f = fixture()
   render(<NativeAgentsPanel runtime={f.runtime} />)
