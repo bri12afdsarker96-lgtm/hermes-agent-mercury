@@ -543,7 +543,7 @@
   line-height: 1.7;
 }
 .cs-native-dialog {
-  background: var(--ui-bg-surface) !important;
+  background: var(--ui-bg-elevated) !important;
   color: var(--ui-text-primary) !important;
   border: 1px solid var(--ui-stroke-secondary) !important;
   border-radius: 10px !important;
@@ -623,6 +623,23 @@
 }
 .cs-evidence-dialog {
   max-width: 760px !important;
+}
+.cs-payout-dialog {
+  width: min(580px, 92vw) !important;
+  max-width: 580px !important;
+}
+.cs-payout-dialog select {
+  width: 100%;
+}
+.cs-payout-check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.cs-payout-dialog .cs-message-form .cs-payout-check input {
+  width: 17px;
+  flex-shrink: 0;
+  margin: 0;
 }
 @media (max-width: 1250px) {
   .cs-sidebar {

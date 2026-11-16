@@ -90,6 +90,27 @@ async function fixture(existingRoot?: string) {
 }
 
 describe('native rule editor contract', () => {
+  it('records the selected shop settings on a simulated claim and preserves historical snapshots', async () => {
+    const f = await fixture()
+
+    const settings = { remitAmount: '5', payoutReviewDays: 15, payoutRequireReviewWithinDays: true,
+      payoutGoodReviewMode: 0 as const, payoutRefundChannel: 'small_remit' as const }
+
+    f.changeProfile({ payoutSettings: settings })
+    await f.act('saveRule', { rule: draft({ transferHuman: false, processEvaluatedClaim: true }) })
+    const result = await f.message()
+
+    expect(result.snapshot!.events.find(event => event.action === 'process_evaluated_claim')?.payoutSettings).toEqual(settings)
+    f.changeProfile({ payoutSettings: { ...settings, payoutRefundChannel: 'refund_only' } })
+    const next = await f.message()
+    const claims = next.snapshot!.events.filter(event => event.action === 'process_evaluated_claim')
+
+    expect(claims.map(event => event.payoutSettings?.payoutRefundChannel)).toEqual(['refund_only', 'small_remit'])
+    expect(claims.every(event => event.payoutSettings?.remitAmount === '5')).toBe(true)
+    const restored = await fixture(f.root)
+
+    expect((await restored.snapshot()).events.filter(event => event.action === 'process_evaluated_claim')).toEqual(claims)
+  })
   it('retains native fields, Int32 boundaries and optional empty keyword text', () => {
     const rule = nativeCustomerRule(
       draft({ name: '  规则  ', reply: '  回复  ', priority: 2147483647, cooldownSeconds: 2147483647, keywords: '  ' }),

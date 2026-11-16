@@ -682,7 +682,8 @@ export class DoudianController {
           this.current()
           const embedded = profiles.filter(profile => profile.loginState === 'verified' && profile.shopId && profile.shopName)
             .map(profile => ({ id: profile.id, name: profile.displayName, platformId: profile.shopId!,
-              status: 'verified', browserProfileId: profile.id }))
+              status: 'verified', browserProfileId: profile.id,
+              ...(profile.payoutSettings ? { payoutSettings: profile.payoutSettings } : {}) }))
           return { ok: true, shops: [...embedded, ...result.filter(shop => !embedded.some(profile => profile.id === shop.id))] }
         }
 

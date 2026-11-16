@@ -1,3 +1,5 @@
+import type { ShopPayoutSettings } from './shop-payout-settings'
+
 export type DoudianAction =
   | 'capabilities' | 'shops' | 'manageShops' | 'chooseWorkbook'
   | 'prepare' | 'start' | 'stop' | 'status'
@@ -33,6 +35,7 @@ export interface DoudianShop {
   platformId: string
   status: string
   browserProfileId?: string
+  payoutSettings?: ShopPayoutSettings
 }
 export interface ManagedDoudianShop {
   id: string

@@ -15,6 +15,7 @@ import type {
 } from './customer-service-types'
 import type { ShopBrowserAuthority } from './shop-browser-profiles'
 import type { ShopBrowserProfile } from './shop-browser-types'
+import type { ShopPayoutSettings } from './shop-payout-settings'
 
 interface Authority extends ShopBrowserAuthority {
   profile: ShopBrowserProfile
@@ -208,13 +209,14 @@ export class CustomerServicePreview {
     }
   }
 
-  private event(store: Store, conversationId: string, action: string, detail: string, messageId?: string) {
+  private event(store: Store, conversationId: string, action: string, detail: string, messageId?: string, payoutSettings?: ShopPayoutSettings) {
     store.events.push({
       id: randomUUID(),
       at: Date.now(),
       conversationId,
       action,
       detail,
+      ...(payoutSettings ? { payoutSettings: { ...payoutSettings } } : {}),
       ...(messageId ? { messageId } : {})
     })
   }
@@ -292,7 +294,8 @@ export class CustomerServicePreview {
     }
 
     for (const effect of result.effects) {
-      this.event(store, conversation.id, effect.action, effect.text ?? effect.ruleName, message.messageId)
+      this.event(store, conversation.id, effect.action, effect.text ?? effect.ruleName, message.messageId,
+        effect.action === 'process_evaluated_claim' ? authority.profile.payoutSettings : undefined)
 
       if (
         effect.action === 'transfer_human' &&

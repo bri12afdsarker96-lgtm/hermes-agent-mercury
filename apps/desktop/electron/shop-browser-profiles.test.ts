@@ -65,6 +65,59 @@ async function fixture(existingRoot?: string, initialScope?: ShopBrowserAuthorit
 }
 
 describe('persistent shop browser profiles', () => {
+  it('saves settings per profile without altering login storage and restores them after restart', async () => {
+    const f = await fixture()
+    const first = await f.create()
+    const second = await f.create()
+
+    await f.open(first.id)
+    await f.call('identify', { profileId: first.id })
+    const storage = f.createView.mock.calls[0][0]
+
+    const settings = { remitAmount: ' 5 ', payoutReviewDays: 15, payoutRequireReviewWithinDays: true,
+      payoutGoodReviewMode: 0 as const, payoutRefundChannel: 'small_remit' as const }
+
+    const saved = await f.call('savePayoutSettings', { profileId: first.id, payoutSettings: settings, expectedRevision: 0 })
+
+    expect(saved.profile).toMatchObject({ shopId: '10001', loginState: 'verified', payoutSettingsRevision: 1,
+      payoutSettings: { ...settings, remitAmount: '5' } })
+    expect(f.clearStorage).not.toHaveBeenCalled()
+    await f.call('close')
+    const reopened = await fixture(f.root)
+    const profiles = (await reopened.call('list')).profiles!
+
+    expect(profiles.find(item => item.id === first.id)).toEqual(saved.profile)
+    expect(profiles.find(item => item.id === second.id)?.payoutSettings).toBeUndefined()
+    await reopened.open(first.id)
+    expect(reopened.createView.mock.calls[0][0]).toBe(storage)
+    const otherEmployee = await fixture(f.root, { origin: 'https://enterprise.example', tenantId: 'tenant-a', principalId: 'employee-b' })
+
+    expect((await otherEmployee.call('savePayoutSettings', { profileId: first.id, payoutSettings: settings, expectedRevision: 1 })).ok).toBe(false)
+  })
+
+  it('rejects invalid settings and stale concurrent edits, and rechecks revoked authority', async () => {
+    const f = await fixture()
+    const profile = await f.create()
+
+    const settings = { remitAmount: '5', payoutReviewDays: 15, payoutRequireReviewWithinDays: true,
+      payoutGoodReviewMode: 0 as const, payoutRefundChannel: 'small_remit' as const }
+
+    for (const invalid of [{ remitAmount: ' ' }, { payoutReviewDays: 0 }, { payoutReviewDays: 2147483648 },
+      { payoutReviewDays: 1.5 }, { payoutGoodReviewMode: 2 }, { payoutRefundChannel: 'new-order' }]) {
+      expect((await f.call('savePayoutSettings', { profileId: profile.id, expectedRevision: 0, payoutSettings: { ...settings, ...invalid } as never })).error)
+        .toBe('SHOP_PAYOUT_SETTINGS_INVALID')
+    }
+
+    const results = await Promise.all(['small_remit', 'refund_only'].map(channel =>
+      f.call('savePayoutSettings', { profileId: profile.id, expectedRevision: 0, payoutSettings: { ...settings, payoutRefundChannel: channel as 'small_remit' | 'refund_only' } })))
+
+    expect(results.filter(result => result.ok)).toHaveLength(1)
+    expect(results.find(result => !result.ok)?.error).toBe('SHOP_PAYOUT_SETTINGS_CONFLICT')
+    f.setAllowed(false)
+    expect((await f.call('savePayoutSettings', { profileId: profile.id, expectedRevision: 1, payoutSettings: settings })).ok).toBe(false)
+    f.setAllowed(true)
+    expect((await f.call('list')).profiles![0].payoutSettingsRevision).toBe(1)
+  })
   it('checks the live shop before acquiring a task and checks it again before execution', async () => {
     const f = await fixture()
     const profile = await f.create()

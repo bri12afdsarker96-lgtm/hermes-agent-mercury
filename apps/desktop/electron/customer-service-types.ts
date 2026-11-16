@@ -1,4 +1,5 @@
 import type { ShopBrowserProfile } from './shop-browser-types'
+import type { ShopPayoutSettings } from './shop-payout-settings'
 
 export interface CustomerRuleDraft {
   id?: string
@@ -60,6 +61,7 @@ export interface CustomerServiceEvent {
   messageId?: string
   action: string
   detail: string
+  payoutSettings?: ShopPayoutSettings
 }
 
 export interface CustomerServiceSnapshot {

@@ -30,6 +30,25 @@ const profileShop: DoudianShop = {
 
 const legacyShop: DoudianShop = { id: 'a'.repeat(32), name: '旧 TD 店铺', platformId: '123', status: 'Valid' }
 
+it('loads the configured five yuan only on request and prepares the selected single-order strategy', async () => {
+  const shop: DoudianShop = { ...profileShop, payoutSettings: { remitAmount: '5', payoutReviewDays: 15,
+    payoutRequireReviewWithinDays: true, payoutGoodReviewMode: 0, payoutRefundChannel: 'small_remit' } }
+
+  const f = setup(capability(true, 'enterprise-session-v1', 1), undefined, 'zh', [shop])
+
+  await screen.findByRole('option', { name: /已登录店铺/ })
+  fireEvent.change(screen.getByLabelText('登录档案'), { target: { value: shop.browserProfileId } })
+  expect((screen.getByLabelText('金额') as HTMLInputElement).value).toBe('')
+  fireEvent.click(screen.getByRole('button', { name: '载入店铺每单金额 (5)' }))
+  expect((screen.getByLabelText('金额') as HTMLInputElement).value).toBe('5')
+  fireEvent.click(screen.getByRole('button', { name: '选择工作簿' }))
+  await screen.findByText('副本.xlsx')
+  fireEvent.click(screen.getByRole('button', { name: '检查并准备' }))
+  await waitFor(() => expect(f.send).toHaveBeenCalledWith(expect.objectContaining({ action: 'preparePayment', amount: '5', mode: 'standard', transport: 'cdp', browserProfileId: shop.browserProfileId })))
+  expect(f.send.mock.calls.some(([request]) => request.action === 'startPayment')).toBe(false)
+  expect((screen.getByRole('button', { name: '载入店铺每单金额 (5)' }) as HTMLButtonElement).disabled).toBe(true)
+})
+
 const capability = (authorized = true, authorizationMode?: string, embeddedBrowser?: number): DoudianReply => ({
   ok: true,
   capabilities: { protocol: 1, version: '1.0.54', authorized, chrome: true, spreadsheet: true, authorizationMode, paymentControls: 1, paymentCdp: 1, embeddedBrowser }

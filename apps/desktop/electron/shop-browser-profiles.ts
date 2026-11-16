@@ -8,6 +8,7 @@ import type { BoundShopExecution, ShopExecutionTransport } from './shop-browser-
 import type { ShopBrowserBounds, ShopBrowserProfile, ShopBrowserReply, ShopBrowserRequest } from './shop-browser-types'
 import { recoverableShopBrowserErrors } from './shop-browser-types'
 import type { ShopBrowserPageControls, ShopBrowserWorkspace } from './shop-browser-workspace-types'
+import { validShopPayoutSettings } from './shop-payout-settings'
 
 export interface ShopBrowserAuthority {
   origin: string
@@ -52,7 +53,11 @@ const publicProfile = (profile: StoredProfile): ShopBrowserProfile => ({
   shopName: profile.shopName,
   createdAt: profile.createdAt,
   checkedAt: profile.checkedAt,
-  loginState: profile.loginState
+  loginState: profile.loginState,
+  ...(profile.payoutSettings ? {
+    payoutSettings: { ...profile.payoutSettings },
+    payoutSettingsRevision: profile.payoutSettingsRevision ?? 0
+  } : {})
 })
 
 const scopeKey = (scope: ShopBrowserAuthority) =>
@@ -165,6 +170,9 @@ export class ShopBrowserProfiles {
         (profile.shopId !== null && !/^\d{1,32}$/.test(profile.shopId)) ||
         (profile.shopName !== null && typeof profile.shopName !== 'string') ||
         (profile.storageLayout !== undefined && profile.storageLayout !== 2) ||
+        (profile.payoutSettings !== undefined && !validShopPayoutSettings(profile.payoutSettings)) ||
+        (profile.payoutSettingsRevision !== undefined &&
+          (!Number.isSafeInteger(profile.payoutSettingsRevision) || profile.payoutSettingsRevision < 0)) ||
         (profile.cloudRevision !== undefined &&
           (!Number.isSafeInteger(profile.cloudRevision) || profile.cloudRevision < 1))
       ) {
@@ -470,6 +478,12 @@ export class ShopBrowserProfiles {
           cloudRevision: detail.revision
         }
 
+        // Login-session refresh must preserve this machine's shop configuration.
+        if (local?.payoutSettings) {
+          restored.payoutSettings = local.payoutSettings
+          restored.payoutSettingsRevision = local.payoutSettingsRevision ?? 0
+        }
+
         const storage = this.storage(scope, restored)
 
         try {
@@ -723,7 +737,8 @@ export class ShopBrowserProfiles {
       delete: ['profileId'],
       bounds: ['profileId', 'bounds'],
       browser: ['profileId', 'browser'],
-      bookmarks: ['profileId', 'bookmark', 'expectedRevision']
+      bookmarks: ['profileId', 'bookmark', 'expectedRevision'],
+      savePayoutSettings: ['profileId', 'payoutSettings', 'expectedRevision']
     }
 
     const allowed = fields[request?.action]
@@ -801,6 +816,24 @@ export class ShopBrowserProfiles {
     }
 
     await this.checkProfileAccess(profile!, request.action !== 'browser')
+
+    if (request.action === 'savePayoutSettings') {
+      if (!validShopPayoutSettings(request.payoutSettings)) {
+        fail('SHOP_PAYOUT_SETTINGS_INVALID')
+      }
+
+      if (request.expectedRevision !== (profile.payoutSettingsRevision ?? 0)) {
+        fail('SHOP_PAYOUT_SETTINGS_CONFLICT')
+      }
+
+      profile.payoutSettings = { ...request.payoutSettings, remitAmount: request.payoutSettings.remitAmount.trim() }
+      profile.payoutSettingsRevision = (profile.payoutSettingsRevision ?? 0) + 1
+      await this.authority()
+      await this.checkProfileAccess(profile, true)
+      await this.save(scope, profiles)
+
+      return { ok: true, profile: publicProfile(profile) }
+    }
 
     if (request.action === 'bookmarks') {
       const bookmarks = await this.bookmarks.operate(request.bookmark!, request.expectedRevision)

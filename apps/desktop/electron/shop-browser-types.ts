@@ -8,6 +8,8 @@ export interface ShopBrowserProfile {
   createdAt: string
   checkedAt: string | null
   loginState: 'unverified' | 'verified' | 'expired'
+  payoutSettings?: ShopPayoutSettings
+  payoutSettingsRevision?: number
 }
 
 export interface ShopBrowserBounds {
@@ -19,13 +21,14 @@ export interface ShopBrowserBounds {
 
 export interface ShopBrowserRequest {
   sessionId: string
-  action: 'list' | 'create' | 'open' | 'identify' | 'close' | 'relogin' | 'delete' | 'bounds' | 'browser' | 'bookmarks'
+  action: 'list' | 'create' | 'open' | 'identify' | 'close' | 'relogin' | 'delete' | 'bounds' | 'browser' | 'bookmarks' | 'savePayoutSettings'
   profileId?: string
   target?: 'merchant' | 'feige'
   bounds?: ShopBrowserBounds
   browser?: ShopBrowserCommand
   bookmark?: ShopBookmarkCommand
   expectedRevision?: number
+  payoutSettings?: ShopPayoutSettings
 }
 
 export interface ShopBrowserReply {
@@ -47,6 +50,8 @@ export function isShopBrowserUrl(raw: string): boolean {
 }
 export const recoverableShopBrowserErrors = [
   'SHOP_PROFILE_INVALID_REQUEST',
+  'SHOP_PAYOUT_SETTINGS_INVALID',
+  'SHOP_PAYOUT_SETTINGS_CONFLICT',
   'SHOP_PROFILE_NOT_FOUND',
   'SHOP_PROFILE_NOT_OPEN',
   'SHOP_PROFILE_IN_USE',
@@ -67,3 +72,4 @@ import type {
   ShopBrowserCommand,
   ShopBrowserSnapshot
 } from './shop-browser-workspace-types'
+import type { ShopPayoutSettings } from './shop-payout-settings'

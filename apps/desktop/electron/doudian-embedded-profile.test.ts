@@ -7,6 +7,7 @@ import { PassThrough } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DoudianController, DoudianHost } from './doudian-host'
+import type { ShopBrowserProfile } from './shop-browser-types'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -91,7 +92,7 @@ async function fixture(embeddedBrowser = 1) {
     chooseWorkbook: async () => workbook,
     createHost: () => host,
     connectBrowser: vi.fn(async (_id: string, _target: string) => execution),
-    listBrowserProfiles: vi.fn(async () => [
+    listBrowserProfiles: vi.fn(async (): Promise<ShopBrowserProfile[]> => [
       {
         id: profileId,
         displayName: 'Shop',
@@ -113,6 +114,29 @@ async function fixture(embeddedBrowser = 1) {
 }
 
 describe('real controller embedded shop binding', () => {
+  it('passes saved per-shop payout settings through the authorized shop list', async () => {
+    const f = await fixture()
+    const profiles = await f.deps.listBrowserProfiles()
+
+    const payoutSettings = {
+      remitAmount: '5',
+      payoutReviewDays: 15,
+      payoutRequireReviewWithinDays: true,
+      payoutGoodReviewMode: 0 as const,
+      payoutRefundChannel: 'small_remit' as const
+    }
+
+    f.deps.listBrowserProfiles.mockResolvedValue([{ ...profiles[0]!, payoutSettings }])
+
+    expect((await f.controller.operate({ sessionId: 's', action: 'shops' })).shops)
+      .toContainEqual(expect.objectContaining({ id: profileId, payoutSettings }))
+    expect(f.deps.connectBrowser).not.toHaveBeenCalled()
+    expect(f.host.request.mock.calls.some(([method]) => ['preparePayment', 'startPayment'].includes(method)))
+      .toBe(false)
+
+    f.controller.close()
+  })
+
   it('does not preflight or start when live login verification is unavailable', async () => {
     const f = await fixture()
     const request = { sessionId: 's', action: 'prepare' as const, shopId: profileId,

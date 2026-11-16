@@ -509,6 +509,7 @@ export function CustomerServicePreviewPanel({
                 <li key={event.id}>
                   <time>{new Date(event.at).toLocaleTimeString(locale)}</time> · <code>{event.action}</code>
                   <p>{event.detail}</p>
+                  {event.payoutSettings ? <pre className="cs-action-json">{JSON.stringify(event.payoutSettings, null, 2)}</pre> : null}
                 </li>
               ))}
             </ol>

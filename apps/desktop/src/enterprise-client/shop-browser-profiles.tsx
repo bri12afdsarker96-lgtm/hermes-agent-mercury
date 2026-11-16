@@ -13,6 +13,7 @@ import { recoverableShopBrowserErrors } from '../../electron/shop-browser-types'
 
 import type { EnterpriseClientRuntime } from './runtime'
 import { ShopBrowserWorkspacePanel } from './shop-browser-workspace'
+import { ShopPayoutSettingsButton } from './shop-payout-settings'
 import { ShopServiceAssignment } from './shop-service-assignment'
 
 export function ShopBrowserProfilesPanel({
@@ -420,6 +421,7 @@ export function ShopBrowserProfilesPanel({
             {selectedProfile.loginState === 'verified' ? <p role="status">{copy.sharedReady}</p> : null}
             <ShopServiceAssignment onTransferred={refresh} profileId={selectedProfile.id} runtime={runtime} />
             <div className="cs-actions">
+              <ShopPayoutSettingsButton disabled={busy} key={selectedProfile.id} onSaved={refresh} profile={selectedProfile} runtime={runtime} />
               <Button disabled={busy} onClick={() => open('merchant')} variant="secondary">
                 {copy.merchant}
               </Button>
@@ -550,6 +552,7 @@ export function ShopBrowserProfilesPanel({
           {selectedProfile.loginState === 'verified' ? <p role="status">{copy.sharedReady}</p> : null}
           <ShopServiceAssignment onTransferred={refresh} profileId={selectedProfile.id} runtime={runtime} />
           <div className="flex flex-wrap items-center gap-2">
+            <ShopPayoutSettingsButton disabled={busy} key={selectedProfile.id} onSaved={refresh} profile={selectedProfile} runtime={runtime} />
             <Button disabled={busy} onClick={() => open('merchant')} variant="secondary">
               {copy.merchant}
             </Button>

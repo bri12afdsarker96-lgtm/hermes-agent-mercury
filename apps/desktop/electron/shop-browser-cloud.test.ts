@@ -205,6 +205,24 @@ async function computer(remote: ReturnType<typeof remoteBoundary>, principalId =
 }
 
 describe('tenant cloud shop profile recovery', () => {
+  it('retains local payout configuration when a newer cloud login session replaces storage and enforces transfer revocation', async () => {
+    const remote = remoteBoundary()
+    const first = await computer(remote)
+    const profile = await first.register()
+
+    const settings = { remitAmount: '5', payoutReviewDays: 15, payoutRequireReviewWithinDays: true,
+      payoutGoodReviewMode: 0 as const, payoutRefundChannel: 'refund_only' as const }
+
+    expect((await first.call('savePayoutSettings', { profileId: profile.id, expectedRevision: 0, payoutSettings: settings })).ok).toBe(true)
+    await first.call('close')
+    remote.transfer(profile.id, 'employee-a')
+    const reply = await first.call('list')
+
+    expect(reply.profiles![0]).toMatchObject({ payoutSettings: settings, payoutSettingsRevision: 1 })
+    remote.transfer(profile.id, 'employee-b')
+    expect((await first.call('savePayoutSettings', { profileId: profile.id, expectedRevision: 1, payoutSettings: settings })).error).toBe('SHOP_PROFILE_FORBIDDEN')
+    expect((await first.call('list')).profiles).toEqual([])
+  })
   it('keeps credential endpoints main-owned while allowing metadata and service assignment', () => {
     expect(isShopProfileCredentialRequest('GET', '/api/shop-login-profile')).toBe(true)
     expect(isShopProfileCredentialRequest('POST', '/api/shop-login-profiles')).toBe(true)

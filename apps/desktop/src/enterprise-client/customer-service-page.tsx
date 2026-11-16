@@ -8,6 +8,7 @@ import { Loader } from '@/components/ui/loader'
 import { useI18n } from '@/i18n/context'
 import { customerServiceCopy } from '@/i18n/customer-service'
 import { customerServiceLayoutCopy } from '@/i18n/customer-service-layout'
+import { shopBrowserCopy } from '@/i18n/shop-browser'
 import { LayoutDashboard, MessageSquareText, NotebookTabs, Users } from '@/lib/icons'
 
 import type { ShopBrowserProfile } from '../../electron/shop-browser-types'
@@ -34,6 +35,9 @@ export function CustomerServicePage({
   const [evidenceOpen, setEvidenceOpen] = useState(false)
   const [initialTarget, setInitialTarget] = useState<'feige'>()
   const [owner, setOwner] = useState(runtime)
+  const [profilesLoading, setProfilesLoading] = useState(true)
+  const [profilesError, setProfilesError] = useState('')
+  const [profilesRevision, setProfilesRevision] = useState(0)
 
   useEffect(() => {
     setPage('shops')
@@ -42,15 +46,77 @@ export function CustomerServicePage({
     setInitialTarget(undefined)
     setEvidenceOpen(false)
     setOwner(runtime)
+    setProfilesLoading(true)
+    setProfilesError('')
   }, [runtime])
 
   const updateProfiles = useCallback((next: ShopBrowserProfile[]) => {
     setProfiles(next)
+    setProfilesLoading(false)
+    setProfilesError('')
     setSelected(current => (next.some(profile => profile.id === current) ? current : (next[0]?.id ?? '')))
   }, [])
 
+  useEffect(() => {
+    if (!runtime?.shopBrowser || owner !== runtime || page === 'shops') {
+      return
+    }
+
+    let alive = true
+    let pending = false
+
+    const refresh = async () => {
+      if (pending) {
+        return
+      }
+
+      pending = true
+      setProfilesLoading(true)
+
+      try {
+        const reply = await runtime.shopBrowser!({ action: 'list' })
+
+        if (alive) {
+          if (!reply.ok) {
+            throw new Error(reply.error ?? 'SHOP_PROFILE_FAILED')
+          }
+
+          updateProfiles(reply.profiles ?? [])
+        }
+      } catch (reason) {
+        if (alive) {
+          setProfiles([])
+          setSelected('')
+          setProfilesError(reason instanceof Error ? reason.message : 'SHOP_PROFILE_FAILED')
+        }
+      } finally {
+        pending = false
+
+        if (alive) {
+          setProfilesLoading(false)
+        }
+      }
+    }
+
+    // This request belongs to the feature, so leaving the shop browser cannot
+    // discard the only list response required by rules and the agent workspace.
+    void refresh()
+    const timer = setInterval(() => void refresh(), 10000)
+
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [runtime, owner, page, profilesRevision, updateProfiles])
+
   const navigate = (next: Page) => {
+    if (next === page) {
+      return
+    }
+
     setInitialTarget(undefined)
+    setProfilesError('')
+    setProfilesLoading(next !== 'shops')
     setPage(next)
   }
 
@@ -97,6 +163,15 @@ export function CustomerServicePage({
           <p className="cs-empty">{copy.noTransport}</p>
         ) : (
           <>
+            {page !== 'shops' && profilesLoading ? <p role="status">{shopBrowserCopy[locale].pending}</p> : null}
+            {page !== 'shops' && profilesError ? (
+              <div className="cs-error" role="alert">
+                <p>{shopBrowserCopy[locale].failed} ({profilesError})</p>
+                <Button onClick={() => setProfilesRevision(value => value + 1)} variant="secondary">
+                  {shopBrowserCopy[locale].refresh}
+                </Button>
+              </div>
+            ) : null}
             {page === 'shops' ? (
               <ShopBrowserProfilesPanel
                 initialTarget={initialTarget}
@@ -140,9 +215,9 @@ export function CustomerServicePage({
                     runtime={runtime}
                     view={page}
                   />
-                ) : (
+                ) : !profilesLoading && !profilesError ? (
                   <p className="cs-empty">{layout.noProfile}</p>
-                )}
+                ) : null}
               </>
             ) : null}
             {page === 'authorization' ? (

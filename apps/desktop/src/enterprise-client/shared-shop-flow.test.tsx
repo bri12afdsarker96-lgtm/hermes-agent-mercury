@@ -409,7 +409,8 @@ describe('shared shop flow through real controllers and temporary profile storag
     await screen.findByRole('alert')
     expect(screen.queryByText('Verified shop A')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: customerServiceCopy.zh.rules }))
-    await screen.findByText(customerServiceLayoutCopy.zh.noProfile)
+    expect((await screen.findByRole('alert')).textContent).toContain('SHOP_PROFILE_OWNER_CHANGED')
+    expect(screen.queryByText(customerServiceLayoutCopy.zh.noProfile)).toBeNull()
     expect(f.runtime.customerService).not.toHaveBeenCalled()
   })
 

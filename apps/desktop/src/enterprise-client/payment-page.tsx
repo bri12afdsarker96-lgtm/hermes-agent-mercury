@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { useI18n } from '@/i18n/context'
 import { customerServiceLayoutCopy } from '@/i18n/customer-service-layout'
 import { shopBrowserCopy } from '@/i18n/shop-browser'
+import { shopPayoutCopy } from '@/i18n/shop-payout'
 
 import type { DoudianReply, DoudianRequest, DoudianShop, DoudianTask } from '../../electron/doudian-types'
 
@@ -612,6 +613,14 @@ function PaymentWorkspace({ runtime }: DoudianPageProps) {
           />
         </label>
       </div>
+      {selectedProfile?.payoutSettings ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button disabled={busy || !!active} onClick={() => setAmount(selectedProfile.payoutSettings!.remitAmount)} variant="secondary">
+            {shopPayoutCopy[locale].useAmount} ({selectedProfile.payoutSettings.remitAmount})
+          </Button>
+          {selectedProfile.payoutSettings.payoutRefundChannel === 'refund_only' ? <p role="status">{shopPayoutCopy[locale].refundOnlyHint}</p> : null}
+        </div>
+      ) : null}
       <div className="flex flex-wrap gap-2">
         <Button
           disabled={
