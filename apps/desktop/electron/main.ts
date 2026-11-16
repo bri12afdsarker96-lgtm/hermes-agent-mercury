@@ -13707,7 +13707,7 @@ function shopBrowserController(event: IpcMainInvokeEvent, sessionId: string) {
       async authorize() {
         const active = await refreshedEnterpriseSession(event.sender.id, activeSession.sessionId)
         if (!active || !current()) throw new Error('SHOP_PROFILE_OWNER_CHANGED')
-        let identity: { tenant_id?: string; principal_id?: string }
+        let identity: { tenant_id?: string; principal_id?: string; role?: string }
         try {
           identity = await fetchJson(resolveEnterpriseUrl(active.baseUrl, '/api/whoami'), '', {
             bearer: active.token, headers: { Origin: new URL(active.baseUrl).origin }, method: 'GET', timeoutMs: 15000
@@ -13716,7 +13716,7 @@ function shopBrowserController(event: IpcMainInvokeEvent, sessionId: string) {
           doudianScope(active.baseUrl, identity)
         } catch { throw new Error('SHOP_PROFILE_ACCESS_UNAVAILABLE') }
         if (!current()) throw new Error('SHOP_PROFILE_OWNER_CHANGED')
-        return { origin: new URL(active.baseUrl).origin, tenantId: identity.tenant_id!, principalId: identity.principal_id! }
+        return { origin: new URL(active.baseUrl).origin, tenantId: identity.tenant_id!, principalId: identity.principal_id!, role: identity.role }
       },
       createView: (storage, target, bounds) => createShopBrowserWorkspace(parent, storage, target, bounds, current),
       createExecution: (storage, target) => createShopExecutionTransport(shopBrowserExecutionTargets[target],

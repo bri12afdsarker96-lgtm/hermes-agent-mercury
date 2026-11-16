@@ -65,14 +65,15 @@ function remoteBoundary() {
       return structuredClone(rest)
     }
 
-    const accessible = (record: CloudShopRecord) => principal === 'admin' || record.servicing_principal_id === principal
+    const accessible = (record: CloudShopRecord) => principal === 'admin' ||
+      (record.servicing_principal_ids ?? [record.servicing_principal_id]).includes(principal)
 
     if (method === 'GET' && url === '/api/shop-login-profiles') {
       return {
         profiles: [...records.values()]
           .filter(record => accessible(record) && !hiddenIds.has(record.profile_id))
           .map(meta),
-        hidden_profile_ids: [...hiddenIds]
+        hidden_profile_ids: [...hiddenIds].filter(id => records.has(id) && accessible(records.get(id)!))
       }
     }
 
@@ -102,6 +103,33 @@ function remoteBoundary() {
       return { profile_id: body.profile_id, hidden: true }
     }
 
+    if (url === '/api/shop-login-profiles-assign') {
+      if (principal !== 'admin') {
+        throw new Error('403')
+      }
+
+      if (!old || body.principal_ids.some((id: string) => !['employee-a', 'employee-b', 'supervisor'].includes(id))) {
+        throw new Error('404')
+      }
+
+      const updated = {
+        ...old,
+        revision: old.revision + 1,
+        servicing_principal_ids: [...body.principal_ids],
+        servicing_principal_names: body.principal_ids.map((id: string) => `Name ${id}`),
+        servicing_principal_id: body.principal_ids[0] ?? null,
+        servicing_principal_name: body.principal_ids[0] ? `Name ${body.principal_ids[0]}` : null
+      }
+
+      records.set(updated.profile_id, updated)
+
+      for (const id of body.principal_ids) {
+        hidden.get(JSON.stringify([tenant, id]))?.delete(updated.profile_id)
+      }
+
+      return { profile: meta(updated) }
+    }
+
     if ('payout_settings' in body) {
       if (!old || old.payout_settings_revision !== body.expected_payout_settings_revision) {
         throw new Error('409: revision_conflict')
@@ -126,6 +154,10 @@ function remoteBoundary() {
       updated_at: new Date().toISOString(),
       created_by: old?.created_by ?? principal,
       servicing_principal_id: old?.servicing_principal_id ?? principal,
+      ...(old?.servicing_principal_ids ? {
+        servicing_principal_ids: old.servicing_principal_ids,
+        servicing_principal_names: old.servicing_principal_names
+      } : {}),
       payout_settings: old?.payout_settings ?? null,
       payout_settings_revision: old?.payout_settings_revision ?? 0,
       profile: structuredClone(body.profile),
@@ -141,6 +173,8 @@ function remoteBoundary() {
   const transfer = (profileId: string, principalId: string) => {
     const record = tenants.get('tenant-a')!.get(profileId)!
     record.servicing_principal_id = principalId
+    delete record.servicing_principal_ids
+    delete record.servicing_principal_names
     record.revision++
   }
 
@@ -183,7 +217,8 @@ async function computer(remote: ReturnType<typeof remoteBoundary>, principalId =
   const controller = new ShopBrowserProfiles({
     root,
     cloud,
-    authorize: async () => ({ origin: 'https://enterprise.example', tenantId, principalId }),
+    authorize: async () => ({ origin: 'https://enterprise.example', tenantId, principalId,
+      role: principalId === 'admin' ? 'tenant_admin' : principalId === 'supervisor' ? 'supervisor' : 'operator' }),
     isCurrent: () => current,
     createView: async () => ({ identify, close: closeView, setBounds() {} }),
     createExecution,
@@ -206,6 +241,7 @@ async function computer(remote: ReturnType<typeof remoteBoundary>, principalId =
     root,
     call,
     controller,
+    cloud,
     register,
     identify,
     imported,
@@ -237,6 +273,189 @@ const payoutSettings: ShopPayoutSettings = {
 }
 
 describe('tenant cloud shop profile recovery', () => {
+  it('lets an assigned supervisor work while personal hiding preserves the other assigned employee and asset', async () => {
+    const remote = remoteBoundary()
+    const a = await computer(remote)
+    const profile = await a.register()
+    const admin = await computer(remote, 'admin')
+
+    await admin.call('list')
+    expect(
+      (
+        await admin.call('assign', {
+          profileId: profile.id,
+          expectedRevision: remote.tenants.get('tenant-a')!.get(profile.id)!.revision,
+          principalIds: ['employee-a', 'supervisor']
+        })
+      ).ok
+    ).toBe(true)
+
+    const supervisor = await computer(remote, 'supervisor')
+
+    expect((await supervisor.call('list')).profiles![0].id).toBe(profile.id)
+    expect((await supervisor.call('open', { profileId: profile.id, target: 'merchant', bounds })).ok).toBe(true)
+    expect(
+      (
+        await supervisor.call('savePayoutSettings', {
+          profileId: profile.id,
+          expectedRevision: 0,
+          payoutSettings
+        })
+      ).ok
+    ).toBe(true)
+    expect(
+      (
+        await supervisor.call('assign', {
+          profileId: profile.id,
+          expectedRevision: remote.tenants.get('tenant-a')!.get(profile.id)!.revision,
+          principalIds: ['supervisor', 'employee-b']
+        })
+      ).error
+    ).toBe('SHOP_PROFILE_FORBIDDEN')
+    await a.call('list')
+    expect((await a.call('delete', { profileId: profile.id })).ok).toBe(true)
+    expect((await a.call('list')).profiles).toEqual([])
+    expect((await supervisor.call('list')).profiles![0].payoutSettings).toEqual(payoutSettings)
+    expect(remote.tenants.get('tenant-a')!.get(profile.id)!.servicing_principal_ids).toEqual(['employee-a', 'supervisor'])
+    expect(remote.tenants.get('tenant-a')!.get(profile.id)!.session).toEqual(portable)
+  })
+
+  it('fences an assignment response after logout and rejects a mismatched returned membership', async () => {
+    const remote = remoteBoundary()
+    const a = await computer(remote)
+    const profile = await a.register()
+    const original = structuredClone(remote.tenants.get('tenant-a')!.get(profile.id)!)
+    let current = true
+    let finish!: (value: unknown) => void
+
+    const response = new Promise((resolve) => {
+      finish = resolve
+    })
+
+    const cloud = createShopProfileCloud({
+      assertCurrent() {
+        if (!current) {
+          throw new Error('SHOP_PROFILE_OWNER_CHANGED')
+        }
+      },
+      request: async <T,>() => (await response) as T
+    })
+
+    const assignment = cloud.assign(profile.id, original.revision, ['employee-b'])
+
+    current = false
+    finish({
+      profile: {
+        ...original,
+        revision: original.revision + 1,
+        servicing_principal_ids: ['employee-b'],
+        servicing_principal_names: [null]
+      }
+    })
+    await expect(assignment).rejects.toThrow('OWNER_CHANGED')
+    current = true
+    await expect(cloud.assign(profile.id, original.revision, ['employee-a'])).rejects.toThrow('RESPONSE_INVALID')
+  })
+
+  it('normalizes legacy assignment and shares through the real Profiles request boundary', async () => {
+    const remote = remoteBoundary()
+    const a = await computer(remote)
+    const profile = await a.register()
+    const admin = await computer(remote, 'admin')
+    let listing = await admin.call('list')
+    expect(listing.profiles![0]).toMatchObject({
+      servicingPrincipalIds: ['employee-a'],
+      servicingPrincipalNames: [null],
+      createdBy: 'employee-a',
+      cloudRevision: 1
+    })
+
+    const assigned = await admin.call('assign', {
+      profileId: profile.id,
+      principalIds: ['employee-a', 'employee-b'],
+      expectedRevision: 1
+    })
+
+    expect(assigned).toMatchObject({
+      ok: true,
+      profile: {
+        servicingPrincipalIds: ['employee-a', 'employee-b'],
+        servicingPrincipalNames: ['Name employee-a', 'Name employee-b'],
+        cloudRevision: 2
+      }
+    })
+    const b = await computer(remote, 'employee-b')
+    expect((await b.call('list')).profiles![0]).toMatchObject({ id: profile.id, loginState: 'verified' })
+    expect((await a.call('list')).profiles![0].servicingPrincipalIds).toEqual(['employee-a', 'employee-b'])
+    expect((await b.call('open', { profileId: profile.id, target: 'merchant', bounds })).ok).toBe(true)
+    const execution = await b.controller.acquireExecution(profile.id, 'merchant')
+    await execution.command('root', 'Runtime.evaluate', {})
+    await execution.close()
+    expect((await b.call('savePayoutSettings', { profileId: profile.id, expectedRevision: 0, payoutSettings })).ok).toBe(
+      true
+    )
+    listing = await admin.call('list')
+    const revision = listing.profiles![0].cloudRevision!
+    expect(
+      (await admin.call('assign', { profileId: profile.id, expectedRevision: revision, principalIds: ['employee-b'] })).ok
+    ).toBe(true)
+    await a.controller.revalidate()
+    expect((await a.call('list')).profiles).toEqual([])
+    expect((await b.call('list')).profiles![0].payoutSettings).toEqual(payoutSettings)
+    expect(
+      (await admin.call('assign', { profileId: profile.id, expectedRevision: revision + 1, principalIds: [] })).ok
+    ).toBe(true)
+    expect((await b.call('list')).profiles).toEqual([])
+    expect((await admin.call('list')).profiles![0].servicingPrincipalIds).toEqual([])
+    expect(remote.tenants.get('tenant-a')!.get(profile.id)!.session).toEqual(portable)
+  })
+
+  it('refuses employee and supervisor assignment and malformed or stale assignment without a write', async () => {
+    const remote = remoteBoundary()
+    const a = await computer(remote)
+    const profile = await a.register()
+    expect(
+      (await a.call('assign', { profileId: profile.id, expectedRevision: 1, principalIds: ['employee-b'] })).error
+    ).toBe('SHOP_PROFILE_FORBIDDEN')
+    const supervisor = await computer(remote, 'supervisor')
+    expect((await supervisor.call('assign', { profileId: profile.id, expectedRevision: 1, principalIds: [] })).ok).toBe(
+      false
+    )
+    const admin = await computer(remote, 'admin')
+    await admin.call('list')
+    const revision = remote.tenants.get('tenant-a')!.get(profile.id)!.revision
+    const assignmentWrites = () => remote.request.mock.calls.filter((call) => call[3].endsWith('-assign')).length
+    expect(assignmentWrites()).toBe(0)
+    await expect(admin.cloud.assign(profile.id, revision, ['employee-a', 'employee-a'])).rejects.toThrow(
+      'REQUEST_INVALID'
+    )
+    await expect(admin.cloud.assign(profile.id, revision, [' foreign '])).rejects.toThrow('REQUEST_INVALID')
+    expect(assignmentWrites()).toBe(0)
+    await expect(admin.cloud.assign(profile.id, revision, ['missing'])).rejects.toThrow('404')
+    await expect(admin.cloud.assign(profile.id, revision + 1, [])).rejects.toThrow('409')
+    expect(remote.tenants.get('tenant-a')!.get(profile.id)!.revision).toBe(revision)
+  })
+
+  it('rejects malformed assignment arrays and derives legacy fields from the authoritative arrays', async () => {
+    const remote = remoteBoundary()
+    const a = await computer(remote)
+    const profile = await a.register()
+    const raw = remote.tenants.get('tenant-a')!.get(profile.id)!
+    raw.servicing_principal_ids = ['employee-b']
+    raw.servicing_principal_names = [null]
+    const admin = await computer(remote, 'admin')
+    expect((await admin.cloud.list()).profiles[0]).toMatchObject({
+      servicing_principal_id: 'employee-b',
+      servicing_principal_name: null,
+      servicing_principal_ids: ['employee-b']
+    })
+    raw.servicing_principal_names = []
+    await expect(admin.cloud.list()).rejects.toThrow('RESPONSE_INVALID')
+    raw.servicing_principal_names = [null, null]
+    raw.servicing_principal_ids = ['employee-b', 'employee-b']
+    await expect(admin.cloud.get(profile.id)).rejects.toThrow('RESPONSE_INVALID')
+  })
+
   it('retains cloud payout configuration when a newer login session replaces storage and enforces transfer revocation', async () => {
     const remote = remoteBoundary()
     const first = await computer(remote)

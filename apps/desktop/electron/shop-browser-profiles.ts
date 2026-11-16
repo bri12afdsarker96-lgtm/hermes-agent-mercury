@@ -4,6 +4,7 @@ import path from 'node:path'
 
 import { ShopBrowserBookmarks } from './shop-browser-bookmarks'
 import type { CloudShopRecord, PortableShopSession, ShopProfileCloud } from './shop-browser-cloud'
+import { validShopPrincipalIds } from './shop-browser-cloud'
 import type { BoundShopExecution, ShopExecutionTransport } from './shop-browser-execution'
 import type { ShopBrowserBounds, ShopBrowserProfile, ShopBrowserReply, ShopBrowserRequest } from './shop-browser-types'
 import { recoverableShopBrowserErrors } from './shop-browser-types'
@@ -14,11 +15,13 @@ export interface ShopBrowserAuthority {
   origin: string
   tenantId: string
   principalId: string
+  role?: string
 }
 interface StoredProfile extends ShopBrowserProfile {
   storageId: string
   storageLayout?: 2
-  cloudRevision?: number
+  // Metadata can advance while the imported login partition remains mounted.
+  cloudMetadataRevision?: number
 }
 export interface ShopBrowserView {
   identify(): Promise<{ shopId: string; shopName: string } | null>
@@ -54,6 +57,15 @@ const publicProfile = (profile: StoredProfile): ShopBrowserProfile => ({
   createdAt: profile.createdAt,
   checkedAt: profile.checkedAt,
   loginState: profile.loginState,
+  ...(profile.cloudRevision ? {
+    cloudRevision: profile.cloudMetadataRevision ?? profile.cloudRevision,
+    createdBy: profile.createdBy ?? null,
+    createdByName: profile.createdByName ?? null,
+    servicingPrincipalId: profile.servicingPrincipalIds?.[0] ?? null,
+    servicingPrincipalName: profile.servicingPrincipalNames?.[0] ?? null,
+    servicingPrincipalIds: [...(profile.servicingPrincipalIds ?? [])],
+    servicingPrincipalNames: [...(profile.servicingPrincipalNames ?? [])]
+  } : {}),
   ...(profile.payoutSettings ? {
     payoutSettings: { ...profile.payoutSettings },
     payoutSettingsRevision: profile.payoutSettingsRevision ?? 0
@@ -173,8 +185,15 @@ export class ShopBrowserProfiles {
         (profile.payoutSettings !== undefined && !validShopPayoutSettings(profile.payoutSettings)) ||
         (profile.payoutSettingsRevision !== undefined &&
           (!Number.isSafeInteger(profile.payoutSettingsRevision) || profile.payoutSettingsRevision < 0)) ||
+        (profile.servicingPrincipalIds !== undefined && !validShopPrincipalIds(profile.servicingPrincipalIds)) ||
+        (profile.servicingPrincipalNames !== undefined &&
+          (!Array.isArray(profile.servicingPrincipalNames) ||
+            profile.servicingPrincipalNames.length !== profile.servicingPrincipalIds?.length ||
+            profile.servicingPrincipalNames.some(name => name !== null && typeof name !== 'string'))) ||
         (profile.cloudRevision !== undefined &&
-          (!Number.isSafeInteger(profile.cloudRevision) || profile.cloudRevision < 1))
+          (!Number.isSafeInteger(profile.cloudRevision) || profile.cloudRevision < 1)) ||
+        (profile.cloudMetadataRevision !== undefined &&
+          (!Number.isSafeInteger(profile.cloudMetadataRevision) || profile.cloudMetadataRevision < 1))
       ) {
         fail('SHOP_PROFILE_STORE_INVALID')
       }
@@ -315,6 +334,28 @@ export class ShopBrowserProfiles {
     return changed
   }
 
+  private applyCloudAssignment(profile: StoredProfile, remote: CloudShopRecord) {
+    const ids = remote.servicing_principal_ids ??
+      (remote.servicing_principal_id == null ? [] : [remote.servicing_principal_id])
+
+    const names = remote.servicing_principal_names ?? ids.map(() => remote.servicing_principal_name ?? null)
+
+    const metadata = {
+      cloudMetadataRevision: remote.revision,
+      createdBy: remote.created_by ?? null,
+      createdByName: remote.created_by_name ?? null,
+      servicingPrincipalIds: [...ids],
+      servicingPrincipalNames: [...names]
+    }
+
+    const changed = Object.entries(metadata).some(([key, value]) =>
+      JSON.stringify(profile[key as keyof StoredProfile]) !== JSON.stringify(value))
+
+    Object.assign(profile, metadata)
+
+    return changed
+  }
+
   private async migratePayoutSettings(profile: StoredProfile, remote: CloudShopRecord) {
     if (remote.payout_settings !== null || !profile.payoutSettings) {
       return remote
@@ -379,6 +420,7 @@ export class ShopBrowserProfiles {
       await this.authority()
       profile.cloudRevision = saved.revision
       saved = await this.migratePayoutSettings(profile, saved)
+      this.applyCloudAssignment(profile, saved)
       this.applyCloudPayoutSettings(profile, saved)
       await this.save(scope, profiles)
       this.cloudStatus = { state: 'synced', checkedAt: new Date().toISOString() }
@@ -477,7 +519,9 @@ export class ShopBrowserProfiles {
             remote = await this.migratePayoutSettings(local, remote)
           }
 
-          if (changed || remote.revision !== previousRevision) {
+          const assignmentChanged = this.applyCloudAssignment(local, remote)
+
+          if (changed || assignmentChanged || remote.revision !== previousRevision) {
             await this.save(scope, profiles)
           }
         }
@@ -529,6 +573,8 @@ export class ShopBrowserProfiles {
           loginState: 'unverified',
           cloudRevision: detail.revision
         }
+
+        this.applyCloudAssignment(restored, detail)
 
         // Cloud settings follow the enterprise asset. Legacy local settings are
         // retained only while the cloud has no configuration to restore.
@@ -793,7 +839,8 @@ export class ShopBrowserProfiles {
       bounds: ['profileId', 'bounds'],
       browser: ['profileId', 'browser'],
       bookmarks: ['profileId', 'bookmark', 'expectedRevision'],
-      savePayoutSettings: ['profileId', 'payoutSettings', 'expectedRevision']
+      savePayoutSettings: ['profileId', 'payoutSettings', 'expectedRevision'],
+      assign: ['profileId', 'principalIds', 'expectedRevision']
     }
 
     const allowed =
@@ -826,6 +873,11 @@ export class ShopBrowserProfiles {
     }
 
     const scope = await this.authority()
+
+    if (request.action === 'assign' && scope.role !== 'tenant_admin') {
+      fail('SHOP_PROFILE_FORBIDDEN')
+    }
+
     let profiles = await this.read(scope)
 
     if (request.action === 'list') {
@@ -873,6 +925,36 @@ export class ShopBrowserProfiles {
 
     await this.checkProfileAccess(profile!, request.action !== 'browser')
 
+    if (request.action === 'assign') {
+      if (
+        !validShopPrincipalIds(request.principalIds) ||
+        !Number.isSafeInteger(request.expectedRevision) ||
+        request.expectedRevision! < 1 ||
+        !profile.cloudRevision ||
+        !this.deps.cloud
+      ) {
+        fail('SHOP_PROFILE_INVALID_REQUEST')
+      }
+
+      const saved = await this.deps.cloud.assign(profile.id, request.expectedRevision!, request.principalIds!)
+      await this.authority()
+      this.applyCloudAssignment(profile, saved)
+      this.applyCloudPayoutSettings(profile, saved)
+      this.cloudAccess = undefined
+      this.nextCloudCheck = 0
+      await this.save(scope, profiles)
+      profiles = await this.syncCloud(scope, profiles, true)
+
+      return {
+        ok: true,
+        profile: publicProfile(profiles.find(item => item.id === profile.id) ?? profile),
+        profiles: profiles
+          .filter(item => !this.revokedProfiles.has(item.id) && (!item.cloudRevision || this.cloudReady))
+          .map(publicProfile),
+        cloud: this.cloudStatus
+      }
+    }
+
     if (request.action === 'savePayoutSettings') {
       if (!validShopPayoutSettings(request.payoutSettings)) {
         fail('SHOP_PAYOUT_SETTINGS_INVALID')
@@ -906,6 +988,8 @@ export class ShopBrowserProfiles {
           await this.authority()
           await this.checkProfileAccess(profile, true)
           this.applyCloudPayoutSettings(profile, saved)
+
+          this.applyCloudAssignment(profile, saved)
 
           if (profile.cloudRevision === remote.revision) {
             profile.cloudRevision = saved.revision
@@ -1020,7 +1104,7 @@ export class ShopBrowserProfiles {
       }
 
       if (request.action === 'delete' && profile.cloudRevision && this.deps.cloud) {
-        await this.deps.cloud.hide(profile.id, profile.cloudRevision)
+        await this.deps.cloud.hide(profile.id, profile.cloudMetadataRevision ?? profile.cloudRevision)
         await this.authority()
       }
 

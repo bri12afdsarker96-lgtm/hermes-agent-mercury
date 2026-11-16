@@ -10,6 +10,13 @@ export interface ShopBrowserProfile {
   loginState: 'unverified' | 'verified' | 'expired'
   payoutSettings?: ShopPayoutSettings
   payoutSettingsRevision?: number
+  cloudRevision?: number
+  createdBy?: string | null
+  createdByName?: string | null
+  servicingPrincipalId?: string | null
+  servicingPrincipalName?: string | null
+  servicingPrincipalIds?: string[]
+  servicingPrincipalNames?: (string | null)[]
 }
 
 export interface ShopBrowserBounds {
@@ -21,7 +28,7 @@ export interface ShopBrowserBounds {
 
 export interface ShopBrowserRequest {
   sessionId: string
-  action: 'list' | 'create' | 'open' | 'identify' | 'close' | 'relogin' | 'delete' | 'bounds' | 'browser' | 'bookmarks' | 'savePayoutSettings'
+  action: 'list' | 'create' | 'open' | 'identify' | 'close' | 'relogin' | 'delete' | 'bounds' | 'browser' | 'bookmarks' | 'savePayoutSettings' | 'assign'
   profileId?: string
   target?: 'merchant' | 'feige'
   bounds?: ShopBrowserBounds
@@ -29,6 +36,7 @@ export interface ShopBrowserRequest {
   bookmark?: ShopBookmarkCommand
   expectedRevision?: number
   payoutSettings?: ShopPayoutSettings
+  principalIds?: string[]
 }
 
 export interface ShopBrowserReply {

@@ -30,7 +30,11 @@ export interface CloudShopRecord {
   deleted: boolean
   updated_at: string
   created_by?: string | null
+  created_by_name?: string | null
   servicing_principal_id?: string | null
+  servicing_principal_name?: string | null
+  servicing_principal_ids?: string[]
+  servicing_principal_names?: (string | null)[]
   profile?: CloudShopMetadata
   session?: PortableShopSession
   payout_settings?: ShopPayoutSettings | null
@@ -47,6 +51,7 @@ export interface ShopProfileCloud {
     settings: ShopPayoutSettings
   ): Promise<CloudShopRecord>
   hide(profileId: string, revision: number): Promise<void>
+  assign(profileId: string, revision: number, principalIds: string[]): Promise<CloudShopRecord>
 }
 export interface ShopProfileCloudTransport {
   request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T>
@@ -54,6 +59,14 @@ export interface ShopProfileCloudTransport {
 }
 
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/
+
+export function validShopPrincipalIds(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.every(id => typeof id === 'string' && id.length > 0 && id.length <= 200 && id.trim() === id) &&
+    new Set(value).size === value.length
+  )
+}
 
 export function isShopProfileCredentialRequest(method: string, pathname: string): boolean {
   return (
@@ -186,7 +199,32 @@ function record(value: unknown, withSession = false): CloudShopRecord {
     }
   }
 
-  return data
+  const hasAssignment = 'servicing_principal_ids' in data || 'servicing_principal_names' in data
+
+  const ids = hasAssignment
+    ? data.servicing_principal_ids
+    : data.servicing_principal_id == null ? [] : [data.servicing_principal_id]
+
+  const names = hasAssignment
+    ? data.servicing_principal_names
+    : ids?.length ? [data.servicing_principal_name ?? null] : []
+
+  if (
+    !validShopPrincipalIds(ids) ||
+    !Array.isArray(names) ||
+    names.length !== ids.length ||
+    names.some(name => name !== null && typeof name !== 'string')
+  ) {
+    throw new Error('SHOP_CLOUD_RESPONSE_INVALID')
+  }
+
+  return {
+    ...data,
+    servicing_principal_ids: [...ids],
+    servicing_principal_names: [...names],
+    servicing_principal_id: ids[0] ?? null,
+    servicing_principal_name: names[0] ?? null
+  }
 }
 
 /** Enterprise bearer and portable credentials stay in the main process. */
@@ -228,6 +266,39 @@ export function createShopProfileCloud(transport: ShopProfileCloudTransport): Sh
       const value = record(result?.profile, true)
 
       if (value.profile_id !== profileId) {
+        throw new Error('SHOP_CLOUD_RESPONSE_INVALID')
+      }
+
+      return value
+    },
+    async assign(profileId, revision, principalIds) {
+      if (
+        !uuid.test(profileId) ||
+        !Number.isSafeInteger(revision) ||
+        revision < 1 ||
+        revision >= Number.MAX_SAFE_INTEGER ||
+        !validShopPrincipalIds(principalIds)
+      ) {
+        throw new Error('SHOP_CLOUD_REQUEST_INVALID')
+      }
+
+      const requested = [...principalIds]
+
+      const result = await request<{ profile: unknown }>('POST', '/api/shop-login-profiles-assign', {
+        profile_id: profileId,
+        principal_ids: requested,
+        expected_revision: revision
+      })
+
+      const value = record(result?.profile)
+
+      if (
+        value.profile_id !== profileId ||
+        value.deleted ||
+        value.revision !== revision + 1 ||
+        value.servicing_principal_ids!.length !== requested.length ||
+        value.servicing_principal_ids!.some(id => !requested.includes(id))
+      ) {
         throw new Error('SHOP_CLOUD_RESPONSE_INVALID')
       }
 

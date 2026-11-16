@@ -5,6 +5,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { CloudShopRecord, ShopProfileCloud } from './shop-browser-cloud'
+import { createShopProfileCloud } from './shop-browser-cloud'
 import type { ShopBrowserAuthority } from './shop-browser-profiles'
 import { ShopBrowserRuntime } from './shop-browser-runtime'
 import { ShopBrowserTabs } from './shop-browser-tabs'
@@ -26,7 +27,8 @@ afterEach(async () => {
   }
 })
 
-async function fixture(options: { root?: string; authority?: ShopBrowserAuthority; cloud?: ShopProfileCloud } = {}) {
+async function fixture(options: { root?: string; authority?: ShopBrowserAuthority; cloud?: ShopProfileCloud;
+  identity?: { shopId: string; shopName: string } } = {}) {
   const root = options.root ?? (await fs.mkdtemp(path.join(os.tmpdir(), 'hermes-shop-runtime-')))
 
   if (!options.root) {
@@ -37,7 +39,7 @@ async function fixture(options: { root?: string; authority?: ShopBrowserAuthorit
   let allowed = true
   let current = true
   let failCreation = false
-  let identity = { shopId: '10001', shopName: 'Synthetic shop A' }
+  let identity = options.identity ?? { shopId: '10001', shopName: 'Synthetic shop A' }
   const identities = new Map<string, typeof identity>()
   const events: string[] = []
 
@@ -213,6 +215,191 @@ async function fixture(options: { root?: string; authority?: ShopBrowserAuthorit
 }
 
 describe('local shop browser runtime', () => {
+  it('keeps both assigned employees usable and fences removed members, retained views and execution handles', async () => {
+    let record: CloudShopRecord | undefined
+    const hidden = new Map<string, Set<string>>()
+    const requests: { principal: string; path: string }[] = []
+
+    const cloudFor = (principal: string) =>
+      createShopProfileCloud({
+        assertCurrent() {},
+        async request<T>(method: string, url: string, body?: any): Promise<T> {
+          requests.push({ principal, path: url })
+          const visible = () => principal === 'admin' || record?.servicing_principal_ids?.includes(principal)
+
+          const metadata = () => {
+            const { session: _session, ...rest } = record!
+
+            return structuredClone(rest)
+          }
+
+          if (url === '/api/shop-login-profiles' && method === 'GET') {
+            return {
+              profiles: record && visible() && !hidden.get(principal)?.has(record.profile_id) ? [metadata()] : [],
+              hidden_profile_ids: visible() ? [...(hidden.get(principal) ?? [])] : []
+            } as T
+          }
+
+          if (method === 'GET') {
+            if (!record || !visible() || hidden.get(principal)?.has(record.profile_id)) {
+              throw new Error('404')
+            }
+
+            return { profile: structuredClone(record) } as T
+          }
+
+          if (record && !visible()) {
+            throw new Error('403')
+          }
+
+          if ((record?.revision ?? 0) !== body.expected_revision) {
+            throw new Error('409')
+          }
+
+          if (url.endsWith('-assign')) {
+            if (principal !== 'admin') {
+              throw new Error('403')
+            }
+
+            record = {
+              ...record!,
+              revision: record!.revision + 1,
+              servicing_principal_ids: [...body.principal_ids],
+              servicing_principal_names: body.principal_ids.map(() => null),
+              servicing_principal_id: body.principal_ids[0] ?? null,
+              servicing_principal_name: null
+            }
+
+            for (const id of body.principal_ids) {
+              hidden.get(id)?.delete(record.profile_id)
+            }
+          } else if (url.endsWith('-delete')) {
+            if (!hidden.has(principal)) {
+              hidden.set(principal, new Set())
+            }
+
+            hidden.get(principal)!.add(body.profile_id)
+
+            return { profile_id: body.profile_id, hidden: true } as T
+          } else {
+            record = {
+              profile_id: body.profile_id,
+              revision: body.expected_revision + 1,
+              deleted: false,
+              updated_at: new Date().toISOString(),
+              created_by: record?.created_by ?? principal,
+              servicing_principal_ids: record?.servicing_principal_ids ?? [principal],
+              servicing_principal_names: record?.servicing_principal_names ?? [null],
+              profile: body.profile,
+              session: body.session
+            }
+          }
+
+          return { profile: metadata() } as T
+        }
+      })
+
+    const a = await fixture({ cloud: cloudFor('employee-a') })
+    const profile = await a.register('10001')
+
+    const admin = await fixture({
+      cloud: cloudFor('admin'),
+      authority: { ...initialAuthority, principalId: 'admin', role: 'tenant_admin' },
+      identity: { shopId: '10001', shopName: 'Synthetic shop 10001' }
+    })
+
+    await admin.call('list')
+    expect(
+      (
+        await admin.call('assign', {
+          profileId: profile.id,
+          expectedRevision: record!.revision,
+          principalIds: ['employee-a', 'employee-b']
+        })
+      ).ok
+    ).toBe(true)
+
+    const b = await fixture({
+      cloud: cloudFor('employee-b'),
+      authority: { ...initialAuthority, principalId: 'employee-b', role: 'operator' },
+      identity: { shopId: '10001', shopName: 'Synthetic shop 10001' }
+    })
+
+    expect((await b.call('list')).profiles![0].servicingPrincipalIds).toEqual(['employee-a', 'employee-b'])
+    expect((await b.open(profile.id)).ok).toBe(true)
+    const execution = await a.runtime.acquireExecution(profile.id, 'merchant')
+    await execution.command('root', 'Runtime.evaluate', {})
+    expect((await a.open(profile.id)).ok).toBe(true)
+    const oldView = a.views[0]
+    const oldCommandCount = a.executions.reduce((sum, item) => sum + item.command.mock.calls.length, 0)
+    expect(
+      (
+        await admin.call('assign', {
+          profileId: profile.id,
+          expectedRevision: record!.revision,
+          principalIds: ['employee-b']
+        })
+      ).ok
+    ).toBe(true)
+    let release!: () => void
+    let started!: () => void
+
+    const closing = new Promise<void>((resolve) => {
+      started = resolve
+    })
+
+    a.executions.at(-1)!.close.mockImplementationOnce(() => {
+      started()
+
+      return new Promise<void>((resolve) => {
+        release = resolve
+      })
+    })
+    const checking = a.runtime.revalidate()
+    await closing
+    expect(a.clearStorage).not.toHaveBeenCalled()
+    await expect(execution.command('root', 'Runtime.evaluate', {})).rejects.toThrow('OWNER_CHANGED')
+    release()
+    await checking
+    expect(oldView.closed).toBe(true)
+    expect(oldView.pages.every((page) => page.closed)).toBe(true)
+    expect(a.clearStorage).toHaveBeenCalledWith(oldView.storage)
+    expect((await a.snapshot()).browsers).toEqual([])
+    expect((await a.call('list')).profiles).toEqual([])
+    expect((await a.open(profile.id)).ok).toBe(false)
+    expect(
+      (
+        await a.call('savePayoutSettings', {
+          profileId: profile.id,
+          expectedRevision: 0,
+          payoutSettings: {
+            remitAmount: '7',
+            payoutReviewDays: 15,
+            payoutRequireReviewWithinDays: false,
+            payoutGoodReviewMode: 1,
+            payoutRefundChannel: 'small_remit'
+          }
+        })
+      ).ok
+    ).toBe(false)
+    expect(a.executions.reduce((sum, item) => sum + item.command.mock.calls.length, 0)).toBe(oldCommandCount)
+    expect((await b.call('list')).profiles![0].id).toBe(profile.id)
+    expect(b.views[0].closed).toBe(false)
+    const bExecution = await b.runtime.acquireExecution(profile.id, 'merchant')
+    await bExecution.command('root', 'Runtime.evaluate', {})
+    await bExecution.close()
+    expect((await b.call('delete', { profileId: profile.id })).ok).toBe(true)
+    expect((await b.call('list')).profiles).toEqual([])
+    expect((await admin.call('list')).profiles![0].id).toBe(profile.id)
+    expect(record!.session?.version).toBe(1)
+    expect(
+      (await admin.call('assign', { profileId: profile.id, expectedRevision: record!.revision, principalIds: [] })).ok
+    ).toBe(true)
+    expect((await b.call('list')).profiles).toEqual([])
+    expect((await admin.call('list')).profiles![0].servicingPrincipalIds).toEqual([])
+    expect(requests.some((item) => item.principal === 'admin' && item.path.endsWith('-assign'))).toBe(true)
+  })
+
   it.each(['constructor', '__proto__'])('rejects inherited action %s without closing valid shop views', async action => {
     const f = await fixture()
     const a = await f.create()
@@ -516,6 +703,9 @@ describe('local shop browser runtime', () => {
       },
       savePayoutSettings: async () => {
         throw new Error('UNEXPECTED_PAYOUT_SETTINGS_WRITE')
+      },
+      assign: async () => {
+        throw new Error('UNEXPECTED_ASSIGNMENT_WRITE')
       },
       hide: async id => {
         records.delete(id)
