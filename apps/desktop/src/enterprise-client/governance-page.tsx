@@ -251,7 +251,7 @@ export function GovernancePage({ runtime, reviewRequest = 0 }: { runtime: Enterp
         </div>
       ) : null}
 
-      {runtime && identity?.role === 'tenant_admin' ? <StaffSections runtime={runtime} reviewRequest={reviewRequest} /> : null}
+      {runtime && identity?.role === 'tenant_admin' ? <StaffSections identity={identity} reviewRequest={reviewRequest} runtime={runtime} /> : null}
       {isPlatformAdministrator ? <>
         <div className="hesc-governance-grid">
           <article className="hesc-card">
@@ -423,13 +423,14 @@ export function GovernancePage({ runtime, reviewRequest = 0 }: { runtime: Enterp
   )
 }
 
-function StaffSections({ runtime, reviewRequest }: {runtime: EnterpriseClientRuntime; reviewRequest:number}) {
+function StaffSections({ runtime, identity, reviewRequest }: {runtime: EnterpriseClientRuntime; identity: EnterpriseIdentity; reviewRequest:number}) {
   const web = useWebPresentation()
   const labels = useWebLayoutCopy()
   const [pendingCount, setPendingCount] = useState<number | null>(null)
-  if (!web.enabled) return <><TenantMembersPanel runtime={runtime} /><OperationsGroupPanel runtime={runtime} /><SeatRequestPanel review runtime={runtime} /></>
+  if (!web.enabled) {return <><TenantMembersPanel identity={identity} runtime={runtime} /><OperationsGroupPanel runtime={runtime} /><SeatRequestPanel review runtime={runtime} /></>}
+
   return <WebSections label={labels.settings} request={{id:'approvals',nonce:reviewRequest}} items={[
-    {id:'staff',label:labels.staff,content:<TenantMembersPanel runtime={runtime} />},
+    {id:'staff',label:labels.staff,content:<TenantMembersPanel identity={identity} runtime={runtime} />},
     {id:'groups',label:labels.groups,content:<OperationsGroupPanel runtime={runtime} />},
     {id:'approvals',label:`${labels.approvals} (${pendingCount ?? '—'})`,content:<SeatRequestPanel review runtime={runtime} onPendingCount={setPendingCount} />}
   ]} />

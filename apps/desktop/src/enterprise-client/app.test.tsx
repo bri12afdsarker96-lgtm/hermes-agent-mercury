@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ThemeProvider, useTheme } from '@/themes/context'
 
@@ -68,6 +68,92 @@ afterEach(() => {
 })
 
 describe('EnterpriseClientApp authority lifecycle', () => {
+  it('opens staff governance without shop capability and sends reset and status once through the actual runtime', async () => {
+    let status = 'active'
+    const bridge = installAuthorityBridge({})
+    bridge.request.mockImplementation(async (request: { path: string; method?: string; body?: unknown }) => {
+      if (request.path === '/api/health') {return {kind: 'ok', data: HEALTH}}
+
+      if (request.path === '/api/whoami') {return {kind: 'ok', data: {name: '管理员', tenant_id: 't1', principal_id: 'admin', role: 'tenant_admin', effective_permissions: ['principal.crud'], desktop_surfaces: {surfaces: {governance: {available: true}}}, product_capabilities: {}}}}
+
+      if (request.path === '/api/principals' && request.method === 'GET') {return {kind: 'ok', data: {principals: [{principal_id: 'seat', name: '坐席甲', login_name: 'seat-a', role: 'operator', status}]}}}
+
+      if (request.path === '/api/principals-password-reset') {return {kind: 'ok', data: {principal: {principal_id: 'seat', must_change_password: true}}}}
+
+      if (request.path === '/api/principals-status') { status = (request.body as {status: string}).status;
+
+ return {kind: 'ok', data: {principal: {principal_id: 'seat', status}}} }
+
+      return {kind: 'error', code: 'not_found', message: 'unavailable', status: 404}
+    })
+    render(<EnterpriseClientApp />)
+    fireEvent.click(await screen.findByRole('button', {name: '员工与权限'}))
+    let row = (await screen.findByText('seat-a')).closest('tr')!
+    fireEvent.click(within(row).getByRole('button', {name: /重置密码|Reset password/}))
+    let dialog = within(screen.getByRole('dialog'))
+    fireEvent.change(dialog.getByLabelText(/密码|Password/), {target: {value: ' 123456 '}})
+    fireEvent.click(dialog.getByRole('button', {name: /确定|Confirm/}))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    row = (await screen.findByText('seat-a')).closest('tr')!
+    fireEvent.click(within(row).getByRole('button', {name: /停用|Disable/}))
+    dialog = within(screen.getByRole('dialog'))
+    fireEvent.click(dialog.getByRole('button', {name: /确定|Confirm/}))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    row = (await screen.findByText('seat-a')).closest('tr')!
+    fireEvent.click(await within(row).findByRole('button', {name: /启用|Enable/}))
+    dialog = within(screen.getByRole('dialog'))
+    fireEvent.click(dialog.getByRole('button', {name: /确定|Confirm/}))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    const requests = bridge.request.mock.calls.map(([request]) => request as {path: string; method?: string; body?: unknown})
+    expect(requests.filter(item => item.path === '/api/principals-password-reset')).toMatchObject([{method:'POST',body:{principal_id:'seat',new_password:' 123456 '}}])
+    expect(requests.filter(item => item.path === '/api/principals-status')).toMatchObject([{method:'POST',body:{principal_id:'seat',status:'disabled'}}, {method:'POST',body:{principal_id:'seat',status:'active'}}])
+    expect(requests.filter(item => item.path === '/api/shop-login-profiles')).toHaveLength(0)
+  })
+  it.each(['reset', 'status'] as const)('keeps a pending %s action gated across real workspace navigation', async action => {
+    let finish!: (value: EnterpriseBridgeResponse) => void
+    const pending = new Promise<EnterpriseBridgeResponse>(resolve => { finish = resolve })
+    const endpoint = action === 'reset' ? '/api/principals-password-reset' : '/api/principals-status'
+    const bridge = installAuthorityBridge({})
+    bridge.request.mockImplementation(async (request: { path: string; method?: string; body?: unknown }) => {
+      if (request.path === '/api/health') {return {kind: 'ok', data: HEALTH}}
+
+      if (request.path === '/api/whoami') {return {kind: 'ok', data: {name: '管理员', tenant_id: 't1', principal_id: 'admin', role: 'tenant_admin', effective_permissions: ['principal.crud'], desktop_surfaces: {surfaces: {governance: {available: true}}}, product_capabilities: {}}}}
+
+      if (request.path === '/api/principals' && request.method === 'GET') {return {kind: 'ok', data: {principals: [{principal_id: 'seat', name: '坐席甲', login_name: 'seat-a', role: 'operator', status: 'active'}]}}}
+
+      if (request.path === endpoint) {return await pending}
+
+      return {kind: 'error', code: 'not_found', message: 'unavailable', status: 404}
+    })
+    render(<EnterpriseClientApp />)
+
+    const openAction = async () => {
+      fireEvent.click(await screen.findByRole('button', {name: '员工与权限'}))
+      const row = (await screen.findByText('seat-a')).closest('tr')!
+      fireEvent.click(within(row).getByRole('button', {name: action === 'reset' ? /重置密码|Reset password/ : /停用|Disable/}))
+      const dialog = within(screen.getByRole('dialog'))
+
+      if (action === 'reset') {fireEvent.change(dialog.getByLabelText(/密码|Password/), {target: {value: '123456'}})}
+      fireEvent.click(dialog.getByRole('button', {name: /确定|Confirm/}))
+    }
+
+    await openAction()
+    await waitFor(() => expect(bridge.request.mock.calls.filter(([request]) => request.path === endpoint)).toHaveLength(1))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', {name: /取消|Cancel/}))
+    fireEvent.click(screen.getByRole('button', {name: '运营总览'}))
+    await openAction()
+    expect((within(screen.getByRole('dialog')).getByRole('button', {name: /确定|Confirm/}) as HTMLButtonElement).disabled).toBe(true)
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)) })
+    expect(bridge.request.mock.calls.filter(([request]) => request.path === endpoint)).toHaveLength(1)
+    await act(async () => {
+      finish({kind: 'ok', data: {principal: {principal_id: 'seat', status: 'disabled', must_change_password: true}}})
+      await pending
+      await new Promise(resolve => setTimeout(resolve, 50))
+    })
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect((within(screen.getByRole('dialog')).getByRole('button', {name: /确定|Confirm/}) as HTMLButtonElement).disabled).toBe(false)
+    expect(bridge.request.mock.calls.filter(([request]) => request.path === endpoint)).toHaveLength(1)
+  })
   it.each([false, true])('retains overview modules but hides them only on web: %s', async web => {
     const time={now:'2026-10-03T09:00:00+08:00',timezone_label:'北京时间',reminder_rule:'测试规则',runner:{running:true}}
     installAuthorityBridge({

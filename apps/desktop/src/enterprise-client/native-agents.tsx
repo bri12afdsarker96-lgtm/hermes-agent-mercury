@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -21,7 +21,35 @@ function visibleTo(member: ShopAssignmentMember, record: ShopAssignmentRecord) {
   return member.role === 'tenant_admin' || assignedPrincipalIds(record).includes(member.principal_id)
 }
 
-function canSetSeatStatus(identity: EnterpriseIdentity | undefined, member: ShopAssignmentMember) {
+function createActionGate() {
+  let pending = false
+  const listeners = new Set<() => void>()
+
+  return {
+    get pending() { return pending },
+    setPending(value: boolean) { pending = value; listeners.forEach(listener => listener()) },
+    subscribe(listener: () => void) { listeners.add(listener);
+
+ return () => { listeners.delete(listener) } },
+    snapshot() { return pending }
+  }
+}
+
+type ActionGate = ReturnType<typeof createActionGate>
+const actionGates = new WeakMap<EnterpriseClientRuntime, { reset: ActionGate; status: ActionGate }>()
+
+export function seatActionGates(runtime: EnterpriseClientRuntime) {
+  let gates = actionGates.get(runtime)
+
+  if (!gates) {
+    gates = { reset: createActionGate(), status: createActionGate() }
+    actionGates.set(runtime, gates)
+  }
+
+  return gates
+}
+
+export function canSetSeatStatus(identity: EnterpriseIdentity | undefined, member: ShopAssignmentMember) {
   return !!identity?.tenant_id && !!identity.principal_id && identity.role === 'tenant_admin' &&
     ['operator', 'supervisor'].includes(member.role ?? '') &&
     ['active', 'disabled'].includes(member.status) && member.principal_id !== identity.principal_id
@@ -33,8 +61,7 @@ export function NativeAgentsPanel({ runtime }: { runtime: EnterpriseClientRuntim
   const [search, setSearch] = useState('')
   const [attempt, setAttempt] = useState(0)
   const scope = useMemo(() => ({ runtime, attempt, alive: true }), [runtime, attempt])
-  const resetGate = useMemo(() => ({ runtime, pending: false }), [runtime])
-  const statusGate = useMemo(() => ({ runtime, pending: false }), [runtime])
+  const { reset: resetGate, status: statusGate } = seatActionGates(runtime)
 
   const empty = useMemo(
     () => ({
@@ -234,12 +261,12 @@ export function NativeAgentsPanel({ runtime }: { runtime: EnterpriseClientRuntim
   )
 }
 
-function NativeSeatStatus({ runtime, identity, member, gate, parentScope, onClose, onSaved }: {
+export function NativeSeatStatus({ runtime, identity, member, gate, parentScope, onClose, onSaved }: {
   runtime: EnterpriseClientRuntime
   identity: EnterpriseIdentity
   member: ShopAssignmentMember
   parentScope: { alive: boolean }
-  gate: { pending: boolean }
+  gate: ActionGate
   onClose(): void
   onSaved(): void
 }) {
@@ -263,6 +290,7 @@ function NativeSeatStatus({ runtime, identity, member, gate, parentScope, onClos
   )
 
   const [busy, setBusy] = useState(false)
+  const gateBusy = useSyncExternalStore(gate.subscribe, gate.snapshot, gate.snapshot)
   const [error, setError] = useState('')
   useEffect(() => {
     scope.alive = true
@@ -280,7 +308,7 @@ function NativeSeatStatus({ runtime, identity, member, gate, parentScope, onClos
     }
 
     scope.pending = true
-    gate.pending = true
+    gate.setPending(true)
     setBusy(true)
     setError('')
     let dispatched = false
@@ -342,7 +370,7 @@ function NativeSeatStatus({ runtime, identity, member, gate, parentScope, onClos
       if (scope.alive && parentScope.alive) { setError(copy[businessAdminErrorKey(reason)]) }
     } finally {
       scope.pending = false
-      gate.pending = false
+      gate.setPending(false)
 
       if (scope.alive && parentScope.alive) { setBusy(false) }
     }
@@ -357,18 +385,18 @@ function NativeSeatStatus({ runtime, identity, member, gate, parentScope, onClos
       </div>
       <footer className="cs-admin-footer">
         <Button onClick={onClose} variant="secondary">{copy.cancel}</Button>
-        <Button disabled={busy} onClick={() => void save()}>{copy.confirm}</Button>
+        <Button disabled={busy || gateBusy} onClick={() => void save()}>{copy.confirm}</Button>
       </footer>
     </NativeAdminDialog>
   )
 }
 
-function NativeSeatPasswordReset({ runtime, identity, member, gate, parentScope, onClose, onSaved }: {
+export function NativeSeatPasswordReset({ runtime, identity, member, gate, parentScope, onClose, onSaved }: {
   runtime: EnterpriseClientRuntime
   identity: EnterpriseIdentity
   member: ShopAssignmentMember
   parentScope: { alive: boolean }
-  gate: { pending: boolean }
+  gate: ActionGate
   onClose(): void
   onSaved(): void
 }) {
@@ -381,6 +409,7 @@ function NativeSeatPasswordReset({ runtime, identity, member, gate, parentScope,
   const [password, setPassword] = useState('')
   const passwordLength = Array.from(password).length
   const [busy, setBusy] = useState(false)
+  const gateBusy = useSyncExternalStore(gate.subscribe, gate.snapshot, gate.snapshot)
   const [error, setError] = useState('')
   useEffect(() => {
     scope.alive = true
@@ -394,7 +423,7 @@ function NativeSeatPasswordReset({ runtime, identity, member, gate, parentScope,
       member.principal_id === identity.principal_id) { return }
 
     scope.pending = true
-    gate.pending = true
+    gate.setPending(true)
     setBusy(true)
     setError('')
     const value = password
@@ -461,7 +490,7 @@ function NativeSeatPasswordReset({ runtime, identity, member, gate, parentScope,
       if (scope.alive && parentScope.alive) { setError(copy[businessAdminErrorKey(reason)]) }
     } finally {
       scope.pending = false
-      gate.pending = false
+      gate.setPending(false)
 
       if (scope.alive && parentScope.alive) { setBusy(false) }
     }
@@ -476,7 +505,7 @@ function NativeSeatPasswordReset({ runtime, identity, member, gate, parentScope,
       {error ? <p className="cs-error" role="alert">{error}</p> : null}</div>
       <footer className="cs-admin-footer">
         <Button onClick={onClose} variant="secondary">{copy.cancel}</Button>
-        <Button disabled={busy || passwordLength < 6 || passwordLength > 256} onClick={() => void save()}>{copy.confirm}</Button>
+        <Button disabled={busy || gateBusy || passwordLength < 6 || passwordLength > 256} onClick={() => void save()}>{copy.confirm}</Button>
       </footer>
     </NativeAdminDialog>
   )
