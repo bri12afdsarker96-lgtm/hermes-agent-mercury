@@ -21,6 +21,12 @@ function visibleTo(member: ShopAssignmentMember, record: ShopAssignmentRecord) {
   return member.role === 'tenant_admin' || assignedPrincipalIds(record).includes(member.principal_id)
 }
 
+function canSetSeatStatus(identity: EnterpriseIdentity | undefined, member: ShopAssignmentMember) {
+  return !!identity?.tenant_id && !!identity.principal_id && identity.role === 'tenant_admin' &&
+    ['operator', 'supervisor'].includes(member.role ?? '') &&
+    ['active', 'disabled'].includes(member.status) && member.principal_id !== identity.principal_id
+}
+
 export function NativeAgentsPanel({ runtime }: { runtime: EnterpriseClientRuntime }) {
   const { locale } = useI18n()
   const copy = nativeBusinessAdminCopy[locale]
@@ -28,6 +34,7 @@ export function NativeAgentsPanel({ runtime }: { runtime: EnterpriseClientRuntim
   const [attempt, setAttempt] = useState(0)
   const scope = useMemo(() => ({ runtime, attempt, alive: true }), [runtime, attempt])
   const resetGate = useMemo(() => ({ runtime, pending: false }), [runtime])
+  const statusGate = useMemo(() => ({ runtime, pending: false }), [runtime])
 
   const empty = useMemo(
     () => ({
@@ -45,12 +52,14 @@ export function NativeAgentsPanel({ runtime }: { runtime: EnterpriseClientRuntim
   const current = state.scope === scope ? state : empty
   const [grants, setGrants] = useState<ShopAssignmentMember>()
   const [reset, setReset] = useState<ShopAssignmentMember>()
+  const [statusTarget, setStatusTarget] = useState<ShopAssignmentMember>()
   useEffect(() => {
     let active = true
     scope.alive = true
     setState(empty)
     setGrants(undefined)
     setReset(undefined)
+    setStatusTarget(undefined)
 
     async function load() {
       const identity = await runtime.get<EnterpriseIdentity>('/api/whoami')
@@ -149,7 +158,7 @@ export function NativeAgentsPanel({ runtime }: { runtime: EnterpriseClientRuntim
                     </td>
                     <td>
                       <span className="cs-agent-status" data-enabled={member.status === 'active'}>
-                        {member.status === 'active' ? copy.normal : copy.disabled}
+                        {member.status === 'active' ? copy.normal : member.status === 'disabled' ? copy.disabled : copy.restrictedSeat}
                       </span>
                     </td>
                     <td>{count ? copy.shopCount.replace('{count}', String(count)) : copy.noVisibleShops}</td>
@@ -171,11 +180,12 @@ export function NativeAgentsPanel({ runtime }: { runtime: EnterpriseClientRuntim
                         </Button>
                         <Button
                           aria-describedby="cs-native-seat-actions-unavailable"
-                          data-native-tone="danger"
-                          disabled
+                          data-native-tone={member.status === 'active' ? 'danger' : 'info'}
+                          disabled={!canSetSeatStatus(current.identity, member) || !runtime.post}
+                          onClick={() => setStatusTarget(member)}
                           variant="secondary"
                         >
-                          {member.status === 'active' ? copy.normal : copy.disabled}
+                          {member.status === 'active' ? copy.deactivateSeat : member.status === 'disabled' ? copy.activateSeat : copy.restrictedSeat}
                         </Button>
                       </div>
                     </td>
@@ -208,7 +218,148 @@ export function NativeAgentsPanel({ runtime }: { runtime: EnterpriseClientRuntim
           runtime={runtime}
         />
       ) : null}
+      {statusTarget && current.identity ? (
+        <NativeSeatStatus
+          gate={statusGate}
+          identity={current.identity}
+          key={statusTarget.principal_id}
+          member={statusTarget}
+          onClose={() => setStatusTarget(undefined)}
+          onSaved={() => { setStatusTarget(undefined); setAttempt(value => value + 1) }}
+          parentScope={scope}
+          runtime={runtime}
+        />
+      ) : null}
     </section>
+  )
+}
+
+function NativeSeatStatus({ runtime, identity, member, gate, parentScope, onClose, onSaved }: {
+  runtime: EnterpriseClientRuntime
+  identity: EnterpriseIdentity
+  member: ShopAssignmentMember
+  parentScope: { alive: boolean }
+  gate: { pending: boolean }
+  onClose(): void
+  onSaved(): void
+}) {
+  const { locale } = useI18n()
+  const copy = nativeBusinessAdminCopy[locale]
+  const targetStatus = member.status === 'active' ? 'disabled' : 'active'
+  const action = targetStatus === 'active' ? copy.activateSeat : copy.deactivateSeat
+  const confirmation = copy.confirmSeatStatus.replace('{action}', action).replace('{account}', member.login_name || member.name)
+
+  const scope = useMemo(
+    () => ({
+      alive: true,
+      pending: false,
+      runtime,
+      tenantId: identity.tenant_id,
+      principalId: identity.principal_id,
+      targetId: member.principal_id,
+      status: member.status
+    }),
+    [runtime, identity.tenant_id, identity.principal_id, member.principal_id, member.status]
+  )
+
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    scope.alive = true
+
+    return () => { scope.alive = false }
+  }, [scope])
+
+  function sameAdministrator(current: EnterpriseIdentity) {
+    return current.tenant_id === identity.tenant_id && current.principal_id === identity.principal_id && current.role === 'tenant_admin'
+  }
+
+  async function save() {
+    if (scope.pending || gate.pending || !scope.alive || !parentScope.alive || !canSetSeatStatus(identity, member)) {
+      return
+    }
+
+    scope.pending = true
+    gate.pending = true
+    setBusy(true)
+    setError('')
+    let dispatched = false
+    let verifying = false
+
+    try {
+      const current = await runtime.get<EnterpriseIdentity>('/api/whoami')
+
+      if (!scope.alive || !parentScope.alive) { return }
+
+      if (!sameAdministrator(current)) {
+        scope.alive = false
+
+        return
+      }
+
+      dispatched = true
+      await nativeBusinessAdminApi(runtime).setSeatStatus(member.principal_id, targetStatus)
+
+      if (!scope.alive || !parentScope.alive) { return }
+      verifying = true
+      const after = await runtime.get<EnterpriseIdentity>('/api/whoami')
+      verifying = false
+
+      if (!scope.alive || !parentScope.alive) { return }
+
+      if (!sameAdministrator(after)) {
+        scope.alive = false
+
+        return
+      }
+
+      onSaved()
+    } catch (reason) {
+      if (scope.alive && parentScope.alive && verifying) {
+        setError(copy.identityUncertain)
+
+        return
+      }
+
+      if (scope.alive && parentScope.alive && dispatched) {
+        try {
+          const current = await runtime.get<EnterpriseIdentity>('/api/whoami')
+
+          if (!scope.alive || !parentScope.alive) { return }
+
+          if (!sameAdministrator(current)) {
+            scope.alive = false
+
+            return
+          }
+        } catch {
+          if (scope.alive && parentScope.alive) { setError(copy.identityUncertain) }
+
+          return
+        }
+      }
+
+      if (scope.alive && parentScope.alive) { setError(copy[businessAdminErrorKey(reason)]) }
+    } finally {
+      scope.pending = false
+      gate.pending = false
+
+      if (scope.alive && parentScope.alive) { setBusy(false) }
+    }
+  }
+
+  return (
+    <NativeAdminDialog className="cs-agent-edit-dialog" compact description={confirmation} onClose={onClose} open
+      title={`${action} - ${member.login_name || member.name}`}>
+      <div className="cs-admin-form">
+        <p>{confirmation}</p>
+        {error ? <p className="cs-error" role="alert">{error}</p> : null}
+      </div>
+      <footer className="cs-admin-footer">
+        <Button onClick={onClose} variant="secondary">{copy.cancel}</Button>
+        <Button disabled={busy} onClick={() => void save()}>{copy.confirm}</Button>
+      </footer>
+    </NativeAdminDialog>
   )
 }
 

@@ -13,6 +13,38 @@ import { ShopSubAccountsButton } from './shop-subaccounts'
 vi.mock('@/i18n/context', () => ({ useI18n: () => ({ locale: 'zh', t: { common: { close: '关闭' } } }) }))
 afterEach(cleanup)
 
+it.each(['active', 'disabled'] as const)('sets seat status %s with exact opaque ID and DTO', async status => {
+  const f = fixture()
+  const principalId = ' a opaque '
+  f.post.mockResolvedValueOnce({ principal: { principal_id: principalId, status } })
+  await nativeBusinessAdminApi(f.runtime).setSeatStatus(principalId, status)
+  expect(f.post).toHaveBeenCalledExactlyOnceWith('/api/principals-status', { principal_id: principalId, status })
+})
+
+it.each([null, {}, { principal: {} }, { principal_id: 'a', status: 'disabled' },
+  { principal: { principal_id: 'b', status: 'disabled' } },
+  { principal: { principal_id: 'a', status: 'active' } },
+  { principal: { principal_id: 'a', status: 'revoked' } },
+  { principal: { principal_id: 'a', status: 'disabled', token: 'unexpected' } },
+  { principal: { principal_id: 'a', status: 'disabled' }, ok: true }
+])('rejects invalid seat status receipt %#', async result => {
+  const f = fixture()
+  f.post.mockResolvedValueOnce(result)
+  await expect(nativeBusinessAdminApi(f.runtime).setSeatStatus('a', 'disabled')).rejects.toThrow('RESPONSE_INVALID')
+})
+
+it.each(['', '   ', null, 12])('rejects invalid seat status ID %# before POST', async id => {
+  const f = fixture()
+  await expect(nativeBusinessAdminApi(f.runtime).setSeatStatus(id as string, 'active')).rejects.toThrow()
+  expect(f.post).not.toHaveBeenCalled()
+})
+
+it.each(['revoked', 'Active', true, null])('rejects invalid seat status target %# before POST', async status => {
+  const f = fixture()
+  await expect(nativeBusinessAdminApi(f.runtime).setSeatStatus('a', status as 'active')).rejects.toThrow()
+  expect(f.post).not.toHaveBeenCalled()
+})
+
 const profile: ShopBrowserProfile = {
   id: 'p1',
   tenantId: 't1',
@@ -848,4 +880,300 @@ it.each(['success', 'failure'])('shows neutral recoverable feedback when identit
   expect((dialog.getByLabelText('密码') as HTMLInputElement).disabled).toBe(false)
   expect((dialog.getByLabelText('密码') as HTMLInputElement).value).toBe('')
   expect(f.post).toHaveBeenCalledOnce()
+})
+
+function statusFixture() {
+  const f = fixture()
+  const post = f.post.getMockImplementation()!
+  f.post.mockImplementation(async (path, body) => {
+    if (path !== '/api/principals-status') { return post(path, body) }
+    const value = body as { principal_id: string; status: string }
+    const member = f.store.members.find(row => row.principal_id === value.principal_id)!
+    member.status = value.status
+
+    return { principal: { principal_id: value.principal_id, status: value.status } }
+  })
+
+  return f
+}
+
+async function openSeatStatus(name = 'agent-a', action = '停用') {
+  const row = (await screen.findByText(name)).closest('tr')!
+  fireEvent.click(within(row).getByRole('button', { name: action }))
+
+  return within(screen.getByRole('dialog'))
+}
+
+it.each(['operator', 'supervisor'])('seat status supports both directions for %s and preserves sharing', async role => {
+  const f = statusFixture()
+  f.store.members[0].role = role
+  f.store.members[0].principal_id = ' a opaque '
+  f.store.profiles[0].servicing_principal_ids = [' a opaque ', 'b']
+  const original = structuredClone(f.store.profiles)
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  let dialog = await openSeatStatus()
+  expect(f.post).not.toHaveBeenCalled()
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  const row = (await screen.findByText('agent-a')).closest('tr')!
+  expect(within(row).getByRole('button', { name: '启用' }).hasAttribute('disabled')).toBe(false)
+  expect(within(row).getByText('停用').className).toBe('cs-agent-status')
+  dialog = await openSeatStatus('agent-a', '启用')
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  await within((await screen.findByText('agent-a')).closest('tr')!).findByText('正常')
+  expect(f.post.mock.calls).toEqual([
+    ['/api/principals-status', { principal_id: ' a opaque ', status: 'disabled' }],
+    ['/api/principals-status', { principal_id: ' a opaque ', status: 'active' }]
+  ])
+  expect(f.store.profiles).toEqual(original)
+  expect(f.get.mock.calls.filter(([path]) => path === '/api/principals')).toHaveLength(3)
+})
+
+it.each(['active', 'disabled'])('seat status accepts an idempotent %s receipt and renders the authoritative roster', async target => {
+  const f = statusFixture()
+  f.store.members[0].status = target === 'active' ? 'disabled' : 'active'
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openSeatStatus('agent-a', target === 'active' ? '启用' : '停用')
+  f.store.members[0].status = target
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  const row = (await screen.findByText('agent-a')).closest('tr')!
+  expect(within(row).getByRole('button', { name: target === 'active' ? '停用' : '启用' })).toBeTruthy()
+  expect(f.post).toHaveBeenCalledOnce()
+})
+
+it('seat status follows a concurrent authoritative change instead of painting the POST target', async () => {
+  const f = statusFixture()
+  f.post.mockResolvedValueOnce({ principal: { principal_id: 'a', status: 'disabled' } })
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openSeatStatus()
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  const row = (await screen.findByText('agent-a')).closest('tr')!
+  expect(within(row).getByRole('button', { name: '停用' })).toBeTruthy()
+  expect(within(row).getByText('正常')).toBeTruthy()
+})
+
+it('seat status cancel sends zero POST requests', async () => {
+  const f = statusFixture()
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openSeatStatus()
+  fireEvent.click(dialog.getByRole('button', { name: '取消' }))
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(f.post).not.toHaveBeenCalled()
+})
+
+it.each([400, 401, 403, 404, 409, 503, 0])('seat status recovers from HTTP/network %i without automatic POST retry', async status => {
+  const f = statusFixture()
+  f.post.mockRejectedValueOnce(Object.assign(new Error('private error payload'), { status }))
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openSeatStatus()
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  const message = (await dialog.findByRole('alert')).textContent
+  expect(message).toBeTruthy()
+  expect(message).not.toContain('private error payload')
+  expect(f.post).toHaveBeenCalledOnce()
+  expect(dialog.getByRole('button', { name: '确定' }).hasAttribute('disabled')).toBe(false)
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(f.post).toHaveBeenCalledTimes(2)
+})
+
+it.each([{}, { principal: { principal_id: 'b', status: 'disabled' } },
+  { principal: { principal_id: 'a', status: 'active' } },
+  { principal: { principal_id: 'a', status: 'disabled' }, secret: 'old result' }
+])('seat status keeps an invalid receipt recoverable %#', async result => {
+  const f = statusFixture()
+  f.post.mockResolvedValueOnce(result)
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openSeatStatus()
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  await dialog.findByRole('alert')
+  expect(dialog.getByRole('button', { name: '确定' }).hasAttribute('disabled')).toBe(false)
+  expect(f.post).toHaveBeenCalledOnce()
+  expect(f.get.mock.calls.filter(([path]) => path === '/api/principals')).toHaveLength(1)
+})
+
+it('seat status synchronously gates double clicks and pending dialog reopening', async () => {
+  const f = statusFixture()
+  let resolve!: (value: unknown) => void
+  f.post.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  let dialog = await openSeatStatus()
+  const confirm = dialog.getByRole('button', { name: '确定' })
+  fireEvent.click(confirm)
+  fireEvent.click(confirm)
+  await waitFor(() => expect(f.post).toHaveBeenCalledOnce())
+  fireEvent.click(dialog.getByRole('button', { name: '取消' }))
+  dialog = await openSeatStatus('agent-b')
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  expect(f.post).toHaveBeenCalledOnce()
+  await act(async () => resolve({ principal: { principal_id: 'a', status: 'disabled' } }))
+  expect(screen.getByRole('dialog').textContent).toContain('agent-b')
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(f.post).toHaveBeenCalledTimes(2)
+})
+
+it.each(['close', 'target', 'runtime', 'tenant', 'actor', 'role', 'refresh', 'unmount'])('seat status isolates delayed success after %s', async mode => {
+  const f = statusFixture()
+  let resolve!: (value: unknown) => void
+  f.post.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  const view = render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openSeatStatus()
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  await waitFor(() => expect(f.post).toHaveBeenCalledOnce())
+
+  if (mode === 'close' || mode === 'target') {
+    fireEvent.click(dialog.getByRole('button', { name: '取消' }))
+
+    if (mode === 'target') { await openSeatStatus('agent-b') }
+  } else if (mode === 'runtime') {
+    view.rerender(<NativeAgentsPanel runtime={statusFixture().runtime} />)
+    await screen.findByText('agent-a')
+  } else if (mode === 'unmount') {
+    view.unmount()
+  } else if (mode === 'refresh') {
+    fireEvent.click(screen.getByRole('button', { name: '刷新', hidden: true }))
+    await screen.findByText('agent-a')
+  } else if (mode === 'tenant') {
+    f.store.identity.tenant_id = 't2'
+  } else if (mode === 'actor') {
+    f.store.identity.principal_id = 'other-admin'
+  } else {
+    f.store.identity.role = 'operator'
+  }
+
+  const rosterReads = f.get.mock.calls.filter(([path]) => path === '/api/principals').length
+  await act(async () => resolve({ principal: { principal_id: 'a', status: 'disabled' } }))
+  expect(f.get.mock.calls.filter(([path]) => path === '/api/principals')).toHaveLength(rosterReads)
+  expect(screen.queryByRole('alert')).toBeNull()
+
+  if (mode === 'target') { expect(screen.getByRole('dialog').textContent).toContain('agent-b') }
+  expect(f.post).toHaveBeenCalledOnce()
+})
+
+it.each(['tenant', 'actor', 'role', 'unmount'])('seat status isolates delayed failure after %s', async mode => {
+  const f = statusFixture()
+  let reject!: (reason: unknown) => void
+  f.post.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail }))
+  const view = render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openSeatStatus()
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  await waitFor(() => expect(f.post).toHaveBeenCalledOnce())
+
+  if (mode === 'tenant') { f.store.identity.tenant_id = 't2' }
+
+  if (mode === 'actor') { f.store.identity.principal_id = 'other-admin' }
+
+  if (mode === 'role') { f.store.identity.role = 'operator' }
+
+  if (mode === 'unmount') { view.unmount() }
+  await act(async () => reject(Object.assign(new Error('old context'), { status: 409 })))
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(f.post).toHaveBeenCalledOnce()
+})
+
+it.each(['success-503', 'failure-503', 'success-network', 'failure-network'])('seat status ends busy with neutral feedback after whoami %s', async outcome => {
+  const f = statusFixture()
+  const get = f.get.getMockImplementation()!
+  let unavailable = false
+  f.get.mockImplementation(path => unavailable && path === '/api/whoami'
+    ? Promise.reject(Object.assign(new Error('private identity error'), { status: outcome.endsWith('503') ? 503 : 0 }))
+    : get(path))
+  f.post.mockImplementationOnce(async () => {
+    unavailable = true
+
+    if (outcome.startsWith('failure')) { throw Object.assign(new Error('private old result'), { status: 409 }) }
+
+    return { principal: { principal_id: 'a', status: 'disabled' } }
+  })
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openSeatStatus()
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  expect((await dialog.findByRole('alert')).textContent).toBe('暂时无法确认当前连接状态，请检查连接后再操作。')
+  expect(dialog.getByRole('button', { name: '确定' }).hasAttribute('disabled')).toBe(false)
+  expect(f.post).toHaveBeenCalledOnce()
+  unavailable = false
+  fireEvent.click(dialog.getByRole('button', { name: '取消' }))
+  fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+  await screen.findByText('agent-a')
+  expect(f.post).toHaveBeenCalledOnce()
+})
+
+it.each(['tenant', 'actor', 'role'])('seat status checks %s again before POST', async mode => {
+  const f = statusFixture()
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openSeatStatus()
+
+  if (mode === 'tenant') { f.store.identity.tenant_id = 't2' }
+
+  if (mode === 'actor') { f.store.identity.principal_id = 'other-admin' }
+
+  if (mode === 'role') { f.store.identity.role = 'operator' }
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  await act(async () => {})
+  expect(f.post).not.toHaveBeenCalled()
+})
+
+it('seat status restricts self, peer admins, other roles, revoked and unknown values', async () => {
+  const f = statusFixture()
+  f.store.members.push(
+    { principal_id: 'admin', name: 'Self', role: 'operator', status: 'active' },
+    { principal_id: 'peer', name: 'Peer', role: 'tenant_admin', status: 'active' },
+    { principal_id: 'other', name: 'Other', role: 'viewer', status: 'active' },
+    { principal_id: 'revoked', name: 'Revoked', role: 'operator', status: 'revoked' }
+  )
+  const view = render(<NativeAgentsPanel runtime={f.runtime} />)
+
+  for (const name of ['Self', 'Peer', 'Other', 'Revoked', '停用员工']) {
+    const row = (await screen.findByText(name)).closest('tr')!
+    const action = within(row).getByRole('button', { name: /停用|受限/ })
+    expect(action.hasAttribute('disabled')).toBe(true)
+    fireEvent.click(action)
+  }
+
+  expect(screen.queryByText('外企业员工')).toBeNull()
+  expect(f.post).not.toHaveBeenCalled()
+  view.rerender(<NativeAgentsPanel runtime={fixture('operator').runtime} />)
+  const row = (await screen.findByText('员工甲')).closest('tr')!
+  expect(within(row).getByRole('button', { name: '停用' }).hasAttribute('disabled')).toBe(true)
+})
+
+it('seat status remains unavailable without a POST capability', async () => {
+  const f = statusFixture()
+  f.runtime.post = undefined
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  const row = (await screen.findByText('agent-a')).closest('tr')!
+  expect(within(row).getByRole('button', { name: '停用' }).hasAttribute('disabled')).toBe(true)
+})
+
+it('seat status cancellation during the preflight whoami prevents dispatch', async () => {
+  const f = statusFixture()
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openSeatStatus()
+  let resolve!: (value: unknown) => void
+  f.get.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  fireEvent.click(dialog.getByRole('button', { name: '取消' }))
+  await act(async () => resolve({ ...f.store.identity }))
+  expect(f.post).not.toHaveBeenCalled()
+  expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+it('preserves a disabled shared employee and the assignment draft when existing service rules reject saving', async () => {
+  const f = fixture()
+  f.store.members[0].status = 'disabled'
+  const original = structuredClone(f.store.profiles)
+  render(<ShopSharedAssignment onSaved={() => {}} profileId="p1" runtime={f.runtime} />)
+  const disabled = await screen.findByRole('checkbox', { name: '员工甲 · 停用' }) as HTMLInputElement
+  expect(disabled.checked).toBe(true)
+  fireEvent.click(screen.getByRole('checkbox', { name: '员工乙' }))
+  fireEvent.click(screen.getByRole('button', { name: '保存' }))
+  await screen.findByRole('alert')
+  expect(disabled.checked).toBe(true)
+  expect((screen.getByRole('checkbox', { name: '员工乙' }) as HTMLInputElement).checked).toBe(false)
+  expect(f.post).not.toHaveBeenCalled()
+  expect(f.store.profiles).toEqual(original)
 })

@@ -90,6 +90,23 @@ export function nativeBusinessAdminApi(runtime: EnterpriseClientRuntime) {
   }
 
   return {
+    async setSeatStatus(principalId: string, status: 'active' | 'disabled') {
+      if (typeof principalId !== 'string' || !/\S/.test(principalId) || !['active', 'disabled'].includes(status)) {
+        throw new Error('SHOP_SEAT_STATUS_REJECTED')
+      }
+
+      const result = await post<{ principal?: { principal_id?: unknown; status?: unknown } }>(
+        '/api/principals-status', { principal_id: principalId, status }
+      )
+
+      if (
+        !result || Object.keys(result).length !== 1 ||
+        !result.principal || Object.keys(result.principal).length !== 2 ||
+        result.principal.principal_id !== principalId || result.principal.status !== status
+      ) {
+        throw new Error('SHOP_SEAT_STATUS_RESPONSE_INVALID')
+      }
+    },
     async resetSeatPassword(principalId: string, password: string) {
       if (!principalId || Array.from(password).length < 6 || Array.from(password).length > 256) {
         throw new Error('SHOP_PASSWORD_RESET_REJECTED')
