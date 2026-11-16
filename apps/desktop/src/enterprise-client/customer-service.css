@@ -1135,6 +1135,14 @@ html[data-hermes-mode='dark'] .cs-native .cs-sidebar nav button[data-active='tru
 }
 .cs-service-toolbar .cs-browser-runtime {
   margin-inline-start: auto;
+  margin-block: 0;
+  flex-wrap: nowrap;
+}
+.cs-service-toolbar .cs-browser-runtime > .cs-muted {
+  display: none;
+}
+.cs-service-toolbar:has(.cs-browser-runtime) > button:first-of-type {
+  margin-inline-start: 0;
 }
 .cs-shop-search > select {
   width: 90px;

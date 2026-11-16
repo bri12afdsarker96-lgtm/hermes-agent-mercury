@@ -96,7 +96,7 @@ export function ShopBrowserRuntimeSettings({
   }
 
   return (
-    <div className="cs-browser-runtime">
+    <div className="cs-browser-runtime" title={copy.browserOnly}>
       <label htmlFor={inputId}>{copy.limit}</label>
       <Input
         disabled={busy || !snapshot}
