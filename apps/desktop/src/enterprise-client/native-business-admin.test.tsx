@@ -538,15 +538,21 @@ it.each(['shop', 'seat'])('does not start an assignment after the %s editor unmo
   expect(f.post).not.toHaveBeenCalled()
 })
 
-it('keeps original seat reset unavailable without posting credentials', async () => {
+it('resets an eligible seat using the exact password and validates the response', async () => {
   const f = fixture()
+  f.post.mockResolvedValueOnce({ principal: { principal_id: 'a', must_change_password: true } })
   render(<NativeAgentsPanel runtime={f.runtime} />)
   const name = await screen.findByText('agent-a')
   fireEvent.click(within(name.closest('tr')!).getByRole('button', { name: '重置密码' }))
   const dialog = within(screen.getByRole('dialog'))
-  fireEvent.change(dialog.getByLabelText('密码'), { target: { value: 'draft' } })
-  expect(dialog.getByRole('button', { name: '确定' }).hasAttribute('disabled')).toBe(true)
-  expect(f.post).not.toHaveBeenCalled()
+  const password = dialog.getByLabelText('密码')
+  expect(password.getAttribute('type')).toBe('password')
+  fireEvent.change(password, { target: { value: ' 12345 ' } })
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  await waitFor(() => expect(f.post).toHaveBeenCalledExactlyOnceWith('/api/principals-password-reset', {
+    principal_id: 'a', new_password: ' 12345 '
+  }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
 })
 
 it('retries only unfinished shop assignments after a partial conflict', async () => {
@@ -657,4 +663,165 @@ it('rejects a subaccount save receipt whose enabled state differs from the submi
   await expect(nativeBusinessAdminApi(f.runtime).saveSubAccount({
     id: '1', profileId: 'p1', subAccount: 'one@example.com', enabled: false, expectedRevision: 1
   })).rejects.toThrow('RESPONSE_INVALID')
+})
+
+async function openReset(f: ReturnType<typeof fixture>, name = 'agent-a') {
+  const row = (await screen.findByText(name)).closest('tr')!
+  fireEvent.click(within(row).getByRole('button', { name: '重置密码' }))
+
+  return within(screen.getByRole('dialog'))
+}
+
+it.each([6, 256])('accepts a password of %i characters', async length => {
+  const f = fixture()
+  f.post.mockResolvedValueOnce({ principal: { principal_id: 'a', must_change_password: true } })
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openReset(f)
+  fireEvent.change(dialog.getByLabelText('密码'), { target: { value: 'x'.repeat(length) } })
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  await waitFor(() => expect(f.post).toHaveBeenCalledOnce())
+  expect(f.post.mock.calls[0][1]).toEqual({ principal_id: 'a', new_password: 'x'.repeat(length) })
+})
+
+it.each([0, 5])('rejects password length %i without posting', async length => {
+  const f = fixture()
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openReset(f)
+  fireEvent.change(dialog.getByLabelText('密码'), { target: { value: 'x'.repeat(length) } })
+  expect(dialog.getByRole('button', { name: '确定' }).hasAttribute('disabled')).toBe(true)
+  expect(f.post).not.toHaveBeenCalled()
+})
+
+it('rejects an oversized password at the API boundary', async () => {
+  const f = fixture()
+  await expect(nativeBusinessAdminApi(f.runtime).resetSeatPassword('a', 'x'.repeat(257))).rejects.toThrow()
+  expect(f.post).not.toHaveBeenCalled()
+})
+
+it.each([404, 500, 401])('shows a failure and clears the secret for HTTP %i', async status => {
+  const f = fixture()
+  f.post.mockRejectedValueOnce(Object.assign(new Error('failure'), { status }))
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openReset(f)
+  fireEvent.change(dialog.getByLabelText('密码'), { target: { value: '123456' } })
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  await dialog.findByRole('alert')
+  expect((dialog.getByLabelText('密码') as HTMLInputElement).value).toBe('')
+  expect(f.post).toHaveBeenCalledOnce()
+})
+
+it.each([null, {}, { principal: { principal_id: 'b', must_change_password: true } },
+  { principal: { principal_id: 'a', must_change_password: false } }])('rejects malformed or mismatched acknowledgements', async result => {
+  const f = fixture()
+  f.post.mockResolvedValueOnce(result)
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openReset(f)
+  fireEvent.change(dialog.getByLabelText('密码'), { target: { value: '123456' } })
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  await dialog.findByRole('alert')
+  expect(screen.getByRole('dialog')).toBeTruthy()
+  expect((dialog.getByLabelText('密码') as HTMLInputElement).value).toBe('')
+})
+
+it('submits at most once while the request is pending', async () => {
+  const f = fixture()
+  let resolve!: (value: unknown) => void
+  f.post.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openReset(f)
+  fireEvent.change(dialog.getByLabelText('密码'), { target: { value: '123456' } })
+  const button = dialog.getByRole('button', { name: '确定' })
+  fireEvent.click(button)
+  fireEvent.click(button)
+  await waitFor(() => expect(f.post).toHaveBeenCalledOnce())
+  await act(async () => resolve({ principal: { principal_id: 'a', must_change_password: true } }))
+})
+
+it.each(['close', 'target', 'runtime', 'tenant', 'principal', 'unmount'])('ignores a delayed reset response after %s', async mode => {
+  const f = fixture()
+  let resolve!: (value: unknown) => void
+  f.post.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  const view = render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openReset(f)
+  fireEvent.change(dialog.getByLabelText('密码'), { target: { value: '123456' } })
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  await waitFor(() => expect(f.post).toHaveBeenCalledOnce())
+
+  if (mode === 'close' || mode === 'target') {
+    fireEvent.click(dialog.getByRole('button', { name: '取消' }))
+
+    if (mode === 'target') { await openReset(f, 'agent-b') }
+  } else if (mode === 'runtime') {
+    view.rerender(<NativeAgentsPanel runtime={fixture().runtime} />)
+  } else if (mode === 'unmount') {
+    view.unmount()
+  } else if (mode === 'tenant') {
+    f.store.identity.tenant_id = 't2'
+  } else {
+    f.store.identity.principal_id = 'another-admin'
+  }
+
+  await act(async () => resolve({ principal: { principal_id: 'a', must_change_password: true } }))
+
+  if (mode === 'target') { expect(screen.getByRole('dialog').textContent).toContain('agent-b') }
+
+  if (mode === 'tenant' || mode === 'principal') { expect(screen.getByRole('dialog')).toBeTruthy() }
+  expect(f.post).toHaveBeenCalledOnce()
+})
+
+it('does not enable reset for non-admin, inactive or admin targets', async () => {
+  const f = fixture()
+  f.store.members.push({ principal_id: 'other-admin', name: 'Admin Other', role: 'tenant_admin', status: 'active' })
+  const view = render(<NativeAgentsPanel runtime={f.runtime} />)
+
+  for (const name of ['停用员工', 'Admin Other']) {
+    const row = (await screen.findByText(name)).closest('tr')!
+    expect(within(row).getByRole('button', { name: '重置密码' }).hasAttribute('disabled')).toBe(true)
+  }
+
+  const employee = fixture('operator')
+  view.rerender(<NativeAgentsPanel runtime={employee.runtime} />)
+  const row = (await screen.findByText('员工甲')).closest('tr')!
+  expect(within(row).getByRole('button', { name: '重置密码' }).hasAttribute('disabled')).toBe(true)
+})
+
+it('keeps a 257-character password from being submitted', async () => {
+  const f = fixture()
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openReset(f)
+  fireEvent.change(dialog.getByLabelText('密码'), { target: { value: 'x'.repeat(257) } })
+  expect(dialog.getByRole('button', { name: '确定' }).hasAttribute('disabled')).toBe(true)
+  expect(f.post).not.toHaveBeenCalled()
+})
+
+it('suppresses a delayed failure after identity changes', async () => {
+  const f = fixture()
+  let reject!: (error: unknown) => void
+  f.post.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail }))
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openReset(f)
+  fireEvent.change(dialog.getByLabelText('密码'), { target: { value: '123456' } })
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  await waitFor(() => expect(f.post).toHaveBeenCalledOnce())
+  f.store.identity.tenant_id = 't2'
+  await act(async () => reject(Object.assign(new Error('old context'), { status: 500 })))
+  expect(dialog.queryByRole('alert')).toBeNull()
+})
+
+it('does not issue a second request when a pending dialog is closed and reopened', async () => {
+  const f = fixture()
+  let resolve!: (value: unknown) => void
+  f.post.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  let dialog = await openReset(f)
+  fireEvent.change(dialog.getByLabelText('密码'), { target: { value: '123456' } })
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  await waitFor(() => expect(f.post).toHaveBeenCalledOnce())
+  fireEvent.click(dialog.getByRole('button', { name: '取消' }))
+  dialog = await openReset(f, 'agent-b')
+  fireEvent.change(dialog.getByLabelText('密码'), { target: { value: '123456' } })
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  expect(f.post).toHaveBeenCalledOnce()
+  await act(async () => resolve({ principal: { principal_id: 'a', must_change_password: true } }))
+  expect(screen.getByRole('dialog').textContent).toContain('agent-b')
 })

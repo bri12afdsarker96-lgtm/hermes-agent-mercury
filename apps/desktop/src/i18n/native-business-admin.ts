@@ -66,7 +66,7 @@ const zh = {
   searchAgents: '搜索用户名',
   noAgents: '当前范围没有坐席',
   noAccounts: '暂无子账号',
-  unsupportedSeat: '当前企业服务尚未提供原生坐席停用或管理员重置密码接口。',
+  unsupportedSeat: '当前企业服务尚未提供坐席启用或停用接口。',
   invalidResponse: '服务响应未通过校验，请刷新后重试。',
   tenantAdminOnly: '收件邮箱由企业管理员管理。',
   assignments: '员工分配',
@@ -150,7 +150,7 @@ const en: Copy = {
   noAgents: 'No seats in the current scope',
   noAccounts: 'No subaccounts',
   unsupportedSeat:
-    'The enterprise service does not yet provide native seat suspension or administrator password reset.',
+    'The enterprise service does not yet provide seat activation or suspension.',
   invalidResponse: 'The service response is invalid. Refresh and retry.',
   tenantAdminOnly: 'Enterprise administrators manage receiving mailboxes.',
   assignments: 'Employee assignments',
@@ -226,7 +226,7 @@ export const nativeBusinessAdminCopy: Record<Locale, Copy> = {
     searchAgents: '搜尋使用者名稱',
     noAgents: '目前範圍沒有坐席',
     noAccounts: '暫無子帳號',
-    unsupportedSeat: '目前企業服務尚未提供原生坐席停用或管理員重設密碼介面。',
+    unsupportedSeat: '目前企業服務尚未提供坐席啟用或停用介面。',
     invalidResponse: '服務回應未通過驗證，請重新整理後重試。',
     tenantAdminOnly: '收件信箱由企業管理員管理。',
     assignments: '員工分配',
@@ -311,7 +311,7 @@ export const nativeBusinessAdminCopy: Record<Locale, Copy> = {
     subAccountEvidence: '企業サービスに保存する店舗サブアカウント設定です。現在の店舗権限に従います。',
     scopeEvidence: '管理者が指定した担当者一覧で店舗を共有します。今後の全店舗への自動アクセスは利用できません。',
     grantEvidence: 'ネイティブ GrantWindow の配置です。企業サービスの担当店舗のみ利用できます。',
-    unsupportedSeat: '現在の企業サービスには担当者の停止や管理者によるパスワード再設定APIがありません。',
+    unsupportedSeat: '現在の企業サービスには担当者の有効化・停止APIがありません。',
     invalidResponse: 'サービスの応答を検証できません。更新して再試行してください。',
     emailTestEvidence: '接続は企業サービスがテストします。元の受信・解析サービスのソース根拠は未取得です。'
   },
@@ -389,7 +389,7 @@ export const nativeBusinessAdminCopy: Record<Locale, Copy> = {
     scopeEvidence: 'تشارك المتاجر وفق قائمة موظفين يحددها المسؤول. الوصول التلقائي للمتاجر المستقبلية غير متاح.',
     grantEvidence:
       'يتبع التخطيط GrantWindow الأصلية. تأتي القائمة من خدمة المؤسسة ويصل الموظف إلى المتاجر الموزعة عليه.',
-    unsupportedSeat: 'لا توفر الخدمة الحالية تعليق الموظف أو إعادة تعيين كلمة مروره بواسطة مسؤول المؤسسة.',
+    unsupportedSeat: 'لا توفر الخدمة الحالية تفعيل الموظف أو إيقافه.',
     invalidResponse: 'تعذر التحقق من استجابة الخدمة. حدّث الصفحة وحاول مجددًا.',
     emailTestEvidence: 'تختبر خدمة المؤسسة الاتصال. لا تتوفر أدلة برمجية على خدمة الاستقبال والتحليل الأصلية.'
   }

@@ -6,7 +6,7 @@ import { useI18n } from '@/i18n/context'
 import { nativeBusinessAdminCopy } from '@/i18n/native-business-admin'
 
 import { NativeAdminDialog } from './native-admin-dialog'
-import { businessAdminErrorKey } from './native-business-admin-api'
+import { businessAdminErrorKey, nativeBusinessAdminApi } from './native-business-admin-api'
 import type { EnterpriseClientRuntime, EnterpriseIdentity } from './runtime'
 import {
   assignedPrincipalIds,
@@ -27,12 +27,14 @@ export function NativeAgentsPanel({ runtime }: { runtime: EnterpriseClientRuntim
   const [search, setSearch] = useState('')
   const [attempt, setAttempt] = useState(0)
   const scope = useMemo(() => ({ runtime, attempt, alive: true }), [runtime, attempt])
+  const resetGate = useMemo(() => ({ runtime, pending: false }), [runtime])
 
   const empty = useMemo(
     () => ({
       scope,
       members: [] as ShopAssignmentMember[],
       profiles: [] as ShopAssignmentRecord[],
+      identity: undefined as EnterpriseIdentity | undefined,
       busy: true,
       error: ''
     }),
@@ -43,14 +45,12 @@ export function NativeAgentsPanel({ runtime }: { runtime: EnterpriseClientRuntim
   const current = state.scope === scope ? state : empty
   const [grants, setGrants] = useState<ShopAssignmentMember>()
   const [reset, setReset] = useState<ShopAssignmentMember>()
-  const [password, setPassword] = useState('')
   useEffect(() => {
     let active = true
     scope.alive = true
     setState(empty)
     setGrants(undefined)
     setReset(undefined)
-    setPassword('')
 
     async function load() {
       const identity = await runtime.get<EnterpriseIdentity>('/api/whoami')
@@ -74,7 +74,7 @@ export function NativeAgentsPanel({ runtime }: { runtime: EnterpriseClientRuntim
             ]
 
       if (active) {
-        setState({ ...empty, ...data, members, busy: false })
+        setState({ ...empty, ...data, members, identity, busy: false })
       }
     }
 
@@ -161,9 +161,9 @@ export function NativeAgentsPanel({ runtime }: { runtime: EnterpriseClientRuntim
                         </Button>
                         <Button
                           data-native-tone="amber"
+                          disabled={current.identity?.role !== 'tenant_admin' || member.status !== 'active' || !['operator', 'supervisor'].includes(member.role ?? '') || member.principal_id === current.identity?.principal_id || !runtime.post}
                           onClick={() => {
                             setReset(member)
-                            setPassword('')
                           }}
                           variant="secondary"
                         >
@@ -196,44 +196,130 @@ export function NativeAgentsPanel({ runtime }: { runtime: EnterpriseClientRuntim
           runtime={runtime}
         />
       ) : null}
-      {reset ? (
-        <NativeAdminDialog
-          className="cs-agent-edit-dialog"
-          compact
-          description={copy.unsupportedSeat}
-          onClose={() => {
-            setReset(undefined)
-            setPassword('')
-          }}
-          open
-          title={`${copy.resetPassword} - ${reset.login_name || reset.name}`}
-        >
-          <div className="cs-admin-form">
-            <label>
-              {copy.password}
-              <Input autoComplete="new-password" onChange={event => setPassword(event.target.value)} value={password} />
-            </label>
-            <p className="cs-error" role="status">
-              {copy.unsupportedSeat}
-            </p>
-          </div>
-          <footer className="cs-admin-footer">
-            <Button
-              onClick={() => {
-                setReset(undefined)
-                setPassword('')
-              }}
-              variant="secondary"
-            >
-              {copy.cancel}
-            </Button>
-            <Button aria-describedby="cs-native-seat-actions-unavailable" disabled>
-              {copy.confirm}
-            </Button>
-          </footer>
-        </NativeAdminDialog>
+      {reset && current.identity ? (
+        <NativeSeatPasswordReset
+          gate={resetGate}
+          identity={current.identity}
+          key={reset.principal_id}
+          member={reset}
+          onClose={() => setReset(undefined)}
+          onSaved={() => { setReset(undefined); setAttempt(value => value + 1) }}
+          parentScope={scope}
+          runtime={runtime}
+        />
       ) : null}
     </section>
+  )
+}
+
+function NativeSeatPasswordReset({ runtime, identity, member, gate, parentScope, onClose, onSaved }: {
+  runtime: EnterpriseClientRuntime
+  identity: EnterpriseIdentity
+  member: ShopAssignmentMember
+  parentScope: { alive: boolean }
+  gate: { pending: boolean }
+  onClose(): void
+  onSaved(): void
+}) {
+  const { locale } = useI18n()
+  const copy = nativeBusinessAdminCopy[locale]
+
+  const scope = useMemo(() => ({ alive: true, pending: false, runtime, tenantId: identity.tenant_id,
+    principalId: identity.principal_id, targetId: member.principal_id }), [runtime, identity.tenant_id, identity.principal_id, member.principal_id])
+
+  const [password, setPassword] = useState('')
+  const passwordLength = Array.from(password).length
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    scope.alive = true
+
+    return () => { scope.alive = false }
+  }, [scope])
+
+  async function save() {
+    if (scope.pending || gate.pending || !parentScope.alive || passwordLength < 6 || passwordLength > 256 || identity.role !== 'tenant_admin' ||
+      member.status !== 'active' || !['operator', 'supervisor'].includes(member.role ?? '') ||
+      member.principal_id === identity.principal_id) { return }
+
+    scope.pending = true
+    gate.pending = true
+    setBusy(true)
+    setError('')
+    const value = password
+    setPassword('')
+    let dispatched = false
+
+    try {
+      const current = await runtime.get<EnterpriseIdentity>('/api/whoami')
+
+      if (!scope.alive || !parentScope.alive) { return }
+
+      if (current.tenant_id !== identity.tenant_id || current.principal_id !== identity.principal_id || current.role !== 'tenant_admin') {
+        scope.alive = false
+
+        return
+      }
+
+      dispatched = true
+      await nativeBusinessAdminApi(runtime).resetSeatPassword(member.principal_id, value)
+
+      if (!scope.alive || !parentScope.alive) { return }
+      const after = await runtime.get<EnterpriseIdentity>('/api/whoami')
+
+      if (!scope.alive || !parentScope.alive) { return }
+
+      if (after.tenant_id !== identity.tenant_id || after.principal_id !== identity.principal_id || after.role !== 'tenant_admin') {
+        scope.alive = false
+
+        return
+      }
+
+      onSaved()
+    } catch (reason) {
+      if (scope.alive && parentScope.alive && dispatched) {
+        try {
+          const current = await runtime.get<EnterpriseIdentity>('/api/whoami')
+
+          if (!scope.alive || !parentScope.alive) { return }
+
+          if (current.tenant_id !== identity.tenant_id || current.principal_id !== identity.principal_id || current.role !== 'tenant_admin') {
+            scope.alive = false
+
+            return
+          }
+        } catch {
+          if (!scope.alive || !parentScope.alive) { return }
+
+          // A failed identity read cannot establish that this is still the
+          // same enterprise session; do not publish an old request's result.
+          scope.alive = false
+
+          return
+        }
+      }
+
+      if (scope.alive && parentScope.alive) { setError(copy[businessAdminErrorKey(reason)]) }
+    } finally {
+      scope.pending = false
+      gate.pending = false
+
+      if (scope.alive && parentScope.alive) { setBusy(false) }
+    }
+  }
+
+  return (
+    <NativeAdminDialog className="cs-agent-edit-dialog" compact description={copy.resetPassword} onClose={onClose} open
+      title={`${copy.resetPassword} - ${member.login_name || member.name}`}>
+      <div className="cs-admin-form"><label>{copy.password}
+        <Input autoComplete="new-password" disabled={busy} onChange={event => setPassword(event.target.value)} type="password" value={password} />
+      </label>
+      {error ? <p className="cs-error" role="alert">{error}</p> : null}</div>
+      <footer className="cs-admin-footer">
+        <Button onClick={onClose} variant="secondary">{copy.cancel}</Button>
+        <Button disabled={busy || passwordLength < 6 || passwordLength > 256} onClick={() => void save()}>{copy.confirm}</Button>
+      </footer>
+    </NativeAdminDialog>
   )
 }
 

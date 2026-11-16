@@ -90,6 +90,19 @@ export function nativeBusinessAdminApi(runtime: EnterpriseClientRuntime) {
   }
 
   return {
+    async resetSeatPassword(principalId: string, password: string) {
+      if (!principalId || Array.from(password).length < 6 || Array.from(password).length > 256) {
+        throw new Error('SHOP_PASSWORD_RESET_REJECTED')
+      }
+
+      const result = await post<{ principal?: { principal_id?: unknown; must_change_password?: unknown } }>(
+        '/api/principals-password-reset', { principal_id: principalId, new_password: password }
+      )
+
+      if (result?.principal?.principal_id !== principalId || result.principal.must_change_password !== true) {
+        throw new Error('SHOP_PASSWORD_RESET_RESPONSE_INVALID')
+      }
+    },
     async getMailbox() {
       const result = await runtime.get<{ mailbox: ShopMailbox }>('/api/shop-mailbox')
 
