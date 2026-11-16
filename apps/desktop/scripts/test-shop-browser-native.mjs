@@ -77,6 +77,8 @@ try {
   assert.equal(restored.enterpriseCookieExcluded, true)
   assert.deepEqual(restored.cookieNames, ['hermes_storage_test'])
   assert.equal(restored.localStorageRestored, true)
+  assert.equal(restored.platformPageLoadsDuringImport, 1)
+  assert.equal(restored.runtimeStateRecomputed, true)
   assert.deepEqual(restored.exportedOrigins, ['https://fxg.jinritemai.com'])
   record('cloud-portable-cookie-and-localstorage-restore', restored)
   await call({ action: 'close' })

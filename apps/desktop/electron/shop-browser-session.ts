@@ -145,8 +145,18 @@ export async function importShopBrowserSession(
         contents.debugger.attach('1.3')
         await contents.debugger.sendCommand('Page.enable')
         stage = 'origin-script'
-        const source = `if(location.origin===${JSON.stringify(entry.origin)}){for(const [key,value] of ${JSON.stringify(entry.localStorage)})localStorage.setItem(key,value)}`
-        const script = await contents.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source })
+        const worldName = 'hermes-cloud-restore'
+        // Verify the complete write before page startup scripts legitimately update runtime values.
+        const source = `
+          if (location.origin === ${JSON.stringify(entry.origin)}) {
+            const entries = ${JSON.stringify(entry.localStorage)}
+            for (const [key, value] of entries) localStorage.setItem(key, value)
+            globalThis.hermesCloudRestoreVerified = entries.every(
+              ([key, value]) => localStorage.getItem(key) === value
+            )
+          }
+        `
+        const script = await contents.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source, worldName })
         stage = 'origin-navigation'
         await contents.loadURL(entry.origin + '/')
         assertCurrent()
@@ -159,16 +169,19 @@ export async function importShopBrowserSession(
           identifier: script.identifier
         })
         stage = 'origin-storage-read'
-        await contents.debugger.sendCommand('DOMStorage.enable')
-
-        const restored = await contents.debugger.sendCommand('DOMStorage.getDOMStorageItems', {
-          storageId: { securityOrigin: entry.origin, isLocalStorage: true }
+        const tree = await contents.debugger.sendCommand('Page.getFrameTree')
+        const world = await contents.debugger.sendCommand('Page.createIsolatedWorld', {
+          frameId: tree.frameTree.frame.id,
+          worldName
         })
-
-        const items = new Map<string, string>(restored.entries)
+        const restored = await contents.debugger.sendCommand('Runtime.evaluate', {
+          contextId: world.executionContextId,
+          expression: 'globalThis.hermesCloudRestoreVerified === true',
+          returnByValue: true
+        })
         stage = 'origin-storage-values'
 
-        if (entry.localStorage.some(([key, value]) => items.get(key) !== value)) {
+        if (restored.exceptionDetails || restored.result?.value !== true) {
           throw new Error('SHOP_CLOUD_RESTORE_FAILED')
         }
       } finally {
