@@ -332,8 +332,8 @@ export function ShopBrowserProfilesPanel({
       }
     })
 
-  const confirmRowRelogin = (profile: ShopBrowserProfile) => {
-    setConfirmation({ action: 'relogin', profile })
+  const confirmRowAction = (action: 'relogin' | 'delete', profile: ShopBrowserProfile) => {
+    setConfirmation({ action, profile })
     setSelected(profile.id)
     onSelectedProfile?.(profile.id)
   }
@@ -361,7 +361,7 @@ export function ShopBrowserProfilesPanel({
         throw new Error('SHOP_PROFILE_IDENTITY_CHANGED')
       }
 
-      if (result.profile) {
+      if (result.profile && (pending.action !== 'delete' || selection.current === pending.profile.id)) {
         const id = pending.action === 'delete' ? '' : result.profile.id
         setSelected(id)
         onSelectedProfile?.(id)
@@ -557,8 +557,11 @@ export function ShopBrowserProfilesPanel({
                         >
                           {browserRuntime.offline}
                         </Button>
-                        <Button disabled={busy || !!opened} onClick={() => confirmRowRelogin(profile)} variant="secondary">
+                        <Button disabled={busy || !!opened} onClick={() => confirmRowAction('relogin', profile)} variant="secondary">
                           {copy.relogin}
+                        </Button>
+                        <Button disabled={busy || !!opened} onClick={() => confirmRowAction('delete', profile)} variant="secondary">
+                          {copy.remove}
                         </Button>
                         <ShopSubAccountsButton disabled={busy || !!opened} profile={profile} runtime={runtime} />
                         <ShopPayoutSettingsButton
