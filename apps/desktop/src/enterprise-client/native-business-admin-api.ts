@@ -102,7 +102,12 @@ export function nativeBusinessAdminApi(runtime: EnterpriseClientRuntime) {
     async saveMailbox(draft: { providerKey: 'qq' | '126'; user: string; password?: string; expectedRevision: number }) {
       const result = await post<{ mailbox: ShopMailbox }>('/api/shop-mailbox', draft)
 
-      if (!validShopMailbox(result.mailbox) || result.mailbox.revision <= draft.expectedRevision) {
+      if (
+        !validShopMailbox(result.mailbox) ||
+        result.mailbox.revision <= draft.expectedRevision ||
+        result.mailbox.user !== draft.user ||
+        result.mailbox.providerKey !== draft.providerKey
+      ) {
         throw new Error('SHOP_MAILBOX_RESPONSE_INVALID')
       }
 
@@ -132,7 +137,9 @@ export function nativeBusinessAdminApi(runtime: EnterpriseClientRuntime) {
       if (
         !validShopSubAccount(result.subAccount, draft.profileId) ||
         (draft.id && result.subAccount.id !== draft.id) ||
-        result.subAccount.revision <= draft.expectedRevision
+        result.subAccount.revision <= draft.expectedRevision ||
+        result.subAccount.subAccount !== draft.subAccount ||
+        result.subAccount.enabled !== draft.enabled
       ) {
         throw new Error('SHOP_SUBACCOUNTS_RESPONSE_INVALID')
       }

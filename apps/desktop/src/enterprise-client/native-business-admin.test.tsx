@@ -439,3 +439,19 @@ it('confirms an acknowledged mailbox write after readback failure without reusin
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   expect(f.post).toHaveBeenCalledTimes(1)
 })
+
+it('rejects a mailbox save receipt whose account differs from the submitted draft', async () => {
+  const f = fixture()
+  f.post.mockResolvedValueOnce({ mailbox: { ...f.store.mailbox, user: 'other@qq.com', revision: 4 } })
+  await expect(nativeBusinessAdminApi(f.runtime).saveMailbox({
+    providerKey: 'qq', user: 'test@qq.com', expectedRevision: 3
+  })).rejects.toThrow('RESPONSE_INVALID')
+})
+
+it('rejects a subaccount save receipt whose enabled state differs from the submitted draft', async () => {
+  const f = fixture()
+  f.post.mockResolvedValueOnce({ subAccount: { ...f.store.accounts[0], revision: 2 } })
+  await expect(nativeBusinessAdminApi(f.runtime).saveSubAccount({
+    id: '1', profileId: 'p1', subAccount: 'one@example.com', enabled: false, expectedRevision: 1
+  })).rejects.toThrow('RESPONSE_INVALID')
+})
