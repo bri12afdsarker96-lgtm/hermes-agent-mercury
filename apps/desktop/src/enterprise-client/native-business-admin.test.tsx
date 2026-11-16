@@ -404,6 +404,7 @@ it.each(['shop', 'seat'])('does not start an assignment after the %s editor unmo
 
     return originalGet(path)
   })
+
   const view = render(
     entry === 'shop' ? (
       <ShopSharedAssignment onSaved={() => {}} profileId="p1" runtime={f.runtime} />

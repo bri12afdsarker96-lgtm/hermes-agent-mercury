@@ -262,8 +262,10 @@ function NativeShopGrants({
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
+
   const canManage =
     identity?.role === 'tenant_admin' && (member.role === 'operator' || member.role === 'supervisor')
+
   useEffect(() => {
     let active = true
     scope.alive = true

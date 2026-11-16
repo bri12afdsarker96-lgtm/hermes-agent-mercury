@@ -110,6 +110,7 @@ export async function readShopAssignments(runtime: EnterpriseClientRuntime, iden
     identity.principal_id,
     ...members.filter(member => member.role === 'tenant_admin').map(member => member.principal_id)
   ])
+
   const employeeProfiles = profiles.map(record => {
     const ids = assignedPrincipalIds(record).filter(id => !administrators.has(id))
 
