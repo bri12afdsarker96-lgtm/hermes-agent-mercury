@@ -825,3 +825,27 @@ it('does not issue a second request when a pending dialog is closed and reopened
   await act(async () => resolve({ principal: { principal_id: 'a', must_change_password: true } }))
   expect(screen.getByRole('dialog').textContent).toContain('agent-b')
 })
+
+it.each(['success', 'failure'])('shows neutral recoverable feedback when identity cannot be checked after %s', async outcome => {
+  const f = fixture()
+  const get = f.get.getMockImplementation()!
+  let unavailable = false
+  f.get.mockImplementation(path => unavailable && path === '/api/whoami'
+    ? Promise.reject(Object.assign(new Error('offline'), { status: 503 }))
+    : get(path))
+  f.post.mockImplementationOnce(async () => {
+    unavailable = true
+
+    if (outcome === 'failure') { throw Object.assign(new Error('failed'), { status: 404 }) }
+
+    return { principal: { principal_id: 'a', must_change_password: true } }
+  })
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  const dialog = await openReset(f)
+  fireEvent.change(dialog.getByLabelText('密码'), { target: { value: '123456' } })
+  fireEvent.click(dialog.getByRole('button', { name: '确定' }))
+  expect((await dialog.findByRole('alert')).textContent).toBe('暂时无法确认当前连接状态，请检查连接后再操作。')
+  expect((dialog.getByLabelText('密码') as HTMLInputElement).disabled).toBe(false)
+  expect((dialog.getByLabelText('密码') as HTMLInputElement).value).toBe('')
+  expect(f.post).toHaveBeenCalledOnce()
+})

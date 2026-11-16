@@ -249,6 +249,7 @@ function NativeSeatPasswordReset({ runtime, identity, member, gate, parentScope,
     const value = password
     setPassword('')
     let dispatched = false
+    let verifying = false
 
     try {
       const current = await runtime.get<EnterpriseIdentity>('/api/whoami')
@@ -265,7 +266,9 @@ function NativeSeatPasswordReset({ runtime, identity, member, gate, parentScope,
       await nativeBusinessAdminApi(runtime).resetSeatPassword(member.principal_id, value)
 
       if (!scope.alive || !parentScope.alive) { return }
+      verifying = true
       const after = await runtime.get<EnterpriseIdentity>('/api/whoami')
+      verifying = false
 
       if (!scope.alive || !parentScope.alive) { return }
 
@@ -277,6 +280,12 @@ function NativeSeatPasswordReset({ runtime, identity, member, gate, parentScope,
 
       onSaved()
     } catch (reason) {
+      if (scope.alive && parentScope.alive && verifying) {
+        setError(copy.identityUncertain)
+
+        return
+      }
+
       if (scope.alive && parentScope.alive && dispatched) {
         try {
           const current = await runtime.get<EnterpriseIdentity>('/api/whoami')
@@ -291,9 +300,8 @@ function NativeSeatPasswordReset({ runtime, identity, member, gate, parentScope,
         } catch {
           if (!scope.alive || !parentScope.alive) { return }
 
-          // A failed identity read cannot establish that this is still the
-          // same enterprise session; do not publish an old request's result.
-          scope.alive = false
+          // Do not disclose the old request's outcome when identity cannot be checked.
+          setError(copy.identityUncertain)
 
           return
         }
