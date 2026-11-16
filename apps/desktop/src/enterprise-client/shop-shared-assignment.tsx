@@ -106,19 +106,68 @@ export async function readShopAssignments(runtime: EnterpriseClientRuntime, iden
       last_login: row.last_login
     }))
 
-  return { profiles, members }
+  const administrators = new Set([
+    identity.principal_id,
+    ...members.filter(member => member.role === 'tenant_admin').map(member => member.principal_id)
+  ])
+  const employeeProfiles = profiles.map(record => {
+    const ids = assignedPrincipalIds(record).filter(id => !administrators.has(id))
+
+    if (
+      ids.some(
+        id =>
+          !members.some(
+            member =>
+              member.principal_id === id && (member.role === 'operator' || member.role === 'supervisor')
+          )
+      )
+    ) {
+      throw new Error('SHOP_ASSIGNMENT_MEMBERS_UNVERIFIED')
+    }
+
+    return { ...record, servicing_principal_ids: ids }
+  })
+
+  return { profiles: employeeProfiles, members }
 }
 
-export async function assignShopMembers(runtime: EnterpriseClientRuntime, record: ShopAssignmentRecord, ids: string[]) {
+export async function assignShopMembers(
+  runtime: EnterpriseClientRuntime,
+  record: ShopAssignmentRecord,
+  ids: string[],
+  members: ShopAssignmentMember[]
+) {
   if (!runtime.post) {
     throw new Error('SHOP_ASSIGNMENT_UNAVAILABLE')
   }
 
-  const result = await runtime.post<{ profile: ShopAssignmentRecord }>('/api/shop-login-profiles-assign', {
-    profile_id: record.profile_id,
-    principal_ids: ids,
-    expected_revision: record.revision
-  })
+  if (
+    ids.some(
+      id =>
+        !members.some(
+          member =>
+            member.principal_id === id &&
+            member.status === 'active' &&
+            (member.role === 'operator' || member.role === 'supervisor')
+        )
+    )
+  ) {
+    throw new Error('SHOP_ASSIGNMENT_MEMBERS_UNVERIFIED')
+  }
+
+  const result = await runtime
+    .post<{ profile: ShopAssignmentRecord }>('/api/shop-login-profiles-assign', {
+      profile_id: record.profile_id,
+      principal_ids: ids,
+      expected_revision: record.revision
+    })
+    .catch(reason => {
+      if ([400, 404, 422].includes((reason as { status?: number })?.status ?? 0)) {
+        throw new Error('SHOP_ASSIGNMENT_REJECTED')
+      }
+
+      throw reason
+    })
 
   if (
     result.profile?.profile_id !== record.profile_id ||
@@ -228,7 +277,13 @@ export function ShopSharedAssignment({
     setState(previous => ({ ...previous, busy: true, error: '', saved: false }))
 
     try {
-      const saved = await assignShopMembers(runtime, current.record, current.selected)
+      const roster = await readShopAssignments(runtime, current.identity)
+
+      if (!scope.alive) {
+        return
+      }
+
+      const saved = await assignShopMembers(runtime, current.record, current.selected, roster.members)
 
       if (!scope.alive) {
         return
@@ -279,7 +334,7 @@ export function ShopSharedAssignment({
       <p className="cs-muted">{copy.assignmentEvidence}</p>
       <div className="cs-shared-members">
         {current.members
-          .filter(member => member.role !== 'tenant_admin')
+          .filter(member => member.role === 'operator' || member.role === 'supervisor')
           .map(member => (
             <label key={member.principal_id}>
               <input

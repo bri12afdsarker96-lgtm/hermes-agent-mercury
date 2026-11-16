@@ -160,8 +160,19 @@ export function nativeBusinessAdminApi(runtime: EnterpriseClientRuntime) {
   }
 }
 
-export function businessAdminErrorKey(reason: unknown): 'unavailable' | 'forbidden' | 'conflict' | 'failed' {
+export function businessAdminErrorKey(
+  reason: unknown
+): 'unavailable' | 'forbidden' | 'conflict' | 'failed' | 'rejected' {
   const status = (reason as { status?: number } | undefined)?.status
+
+  if (
+    status === 400 ||
+    status === 422 ||
+    (reason instanceof Error &&
+      ['SHOP_ASSIGNMENT_MEMBERS_UNVERIFIED', 'SHOP_ASSIGNMENT_REJECTED'].includes(reason.message))
+  ) {
+    return 'rejected'
+  }
 
   if (status === 401 || status === 403) {
     return 'forbidden'

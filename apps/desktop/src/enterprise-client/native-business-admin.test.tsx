@@ -335,6 +335,99 @@ it('edits visible shops while preserving other employees and keeps scope-all una
   })
 })
 
+it('omits implicit administrator ownership when assigning a newly created shop from a seat', async () => {
+  const f = fixture()
+  f.store.profiles[1].servicing_principal_ids = ['admin', 'b']
+  render(<NativeAgentsPanel runtime={f.runtime} />)
+  const name = await screen.findByText('agent-a')
+  fireEvent.click(within(name.closest('tr')!).getByRole('button', { name: '可见店铺' }))
+  const dialog = within(await screen.findByRole('dialog'))
+  fireEvent.click(await dialog.findByRole('checkbox', { name: '店铺乙' }))
+  fireEvent.click(dialog.getByRole('button', { name: '保存' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(f.post).toHaveBeenCalledExactlyOnceWith('/api/shop-login-profiles-assign', {
+    profile_id: 'p2',
+    principal_ids: ['b', 'a'],
+    expected_revision: 4
+  })
+})
+
+it('omits implicit administrator ownership in the per-shop employee editor', async () => {
+  const f = fixture()
+  f.store.profiles[0].servicing_principal_ids = ['admin', 'a', 'b']
+  render(<ShopSharedAssignment onSaved={() => {}} profileId="p1" runtime={f.runtime} />)
+  fireEvent.click(await screen.findByRole('checkbox', { name: '员工甲' }))
+  fireEvent.click(screen.getByRole('button', { name: '保存' }))
+  await screen.findByText('已保存')
+  expect(f.post).toHaveBeenCalledExactlyOnceWith('/api/shop-login-profiles-assign', {
+    profile_id: 'p1',
+    principal_ids: ['b'],
+    expected_revision: 7
+  })
+})
+
+it.each(['missing', 'unsupported-role'])('rejects an unverified assigned member when the roster is %s', async mode => {
+  const f = fixture()
+  f.store.profiles[0].servicing_principal_ids = ['a', 'unknown']
+
+  if (mode === 'unsupported-role') {
+    f.store.members.push({ principal_id: 'unknown', name: '未知角色', role: 'observer', status: 'active' })
+  }
+
+  render(<ShopSharedAssignment onSaved={() => {}} profileId="p1" runtime={f.runtime} />)
+  await screen.findByText('配置未通过服务校验，请刷新后检查字段、员工状态与当前授权。')
+  expect(f.post).not.toHaveBeenCalled()
+})
+
+it('reports a rejected assignment target without claiming the service capability is unavailable', async () => {
+  const f = fixture()
+  f.post.mockRejectedValueOnce(Object.assign(new Error(), { status: 404 }))
+  render(<ShopSharedAssignment onSaved={() => {}} profileId="p1" runtime={f.runtime} />)
+  fireEvent.click(await screen.findByRole('checkbox', { name: '员工甲' }))
+  fireEvent.click(screen.getByRole('button', { name: '保存' }))
+  await screen.findByText('配置未通过服务校验，请刷新后检查字段、员工状态与当前授权。')
+  expect(screen.queryByText('当前企业服务尚未提供此能力。')).toBeNull()
+  expect(f.store.profiles[0].servicing_principal_ids).toEqual(['a', 'b'])
+})
+
+it.each(['shop', 'seat'])('does not start an assignment after the %s editor unmounts during roster refresh', async entry => {
+  const f = fixture()
+  const originalGet = f.get.getMockImplementation()!
+  let holdRoster = false
+  let resolveRoster: ((value: unknown) => void) | undefined
+  f.get.mockImplementation(path => {
+    if (holdRoster && path === '/api/principals') {
+      return new Promise(resolve => {
+        resolveRoster = resolve
+      })
+    }
+
+    return originalGet(path)
+  })
+  const view = render(
+    entry === 'shop' ? (
+      <ShopSharedAssignment onSaved={() => {}} profileId="p1" runtime={f.runtime} />
+    ) : (
+      <NativeAgentsPanel runtime={f.runtime} />
+    )
+  )
+
+  if (entry === 'shop') {
+    fireEvent.click(await screen.findByRole('checkbox', { name: '员工甲' }))
+  } else {
+    const name = await screen.findByText('agent-a')
+    fireEvent.click(within(name.closest('tr')!).getByRole('button', { name: '可见店铺' }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: '店铺乙' }))
+  }
+
+  holdRoster = true
+  fireEvent.click(screen.getByRole('button', { name: '保存' }))
+  await waitFor(() => expect(resolveRoster).toBeDefined())
+  view.unmount()
+  await act(async () => resolveRoster!({ principals: f.store.members }))
+  expect(f.post).not.toHaveBeenCalled()
+})
+
 it('keeps original seat reset unavailable without posting credentials', async () => {
   const f = fixture()
   render(<NativeAgentsPanel runtime={f.runtime} />)

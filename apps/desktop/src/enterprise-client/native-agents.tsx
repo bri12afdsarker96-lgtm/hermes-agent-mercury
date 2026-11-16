@@ -262,7 +262,8 @@ function NativeShopGrants({
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
-  const canManage = identity?.role === 'tenant_admin' && member.role !== 'tenant_admin'
+  const canManage =
+    identity?.role === 'tenant_admin' && (member.role === 'operator' || member.role === 'supervisor')
   useEffect(() => {
     let active = true
     scope.alive = true
@@ -286,7 +287,7 @@ function NativeShopGrants({
       const data = await readShopAssignments(runtime, who)
 
       if (who.role === 'tenant_admin' && !data.members.some(row => row.principal_id === member.principal_id)) {
-        throw new Error('SHOP_ASSIGNMENT_RESPONSE_INVALID')
+        throw new Error('SHOP_ASSIGNMENT_MEMBERS_UNVERIFIED')
       }
 
       if (active) {
@@ -326,6 +327,12 @@ function NativeShopGrants({
     try {
       // Each shop is an independent revisioned enterprise asset. Retry only the
       // remaining differences after a partial failure and an authoritative reload.
+      const roster = await readShopAssignments(runtime, identity)
+
+      if (!scope.alive) {
+        return
+      }
+
       for (const record of profiles) {
         const ids = assignedPrincipalIds(record)
         const wanted = selected.includes(record.profile_id)
@@ -335,7 +342,7 @@ function NativeShopGrants({
         }
 
         const next = wanted ? [...ids, member.principal_id] : ids.filter(id => id !== member.principal_id)
-        await assignShopMembers(runtime, record, next)
+        await assignShopMembers(runtime, record, next, roster.members)
 
         if (!scope.alive) {
           return
