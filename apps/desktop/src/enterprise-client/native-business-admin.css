@@ -33,7 +33,7 @@
   line-height: 20px;
   letter-spacing: normal;
 }
-.cs-admin-dialog .cs-admin-close {
+.cs-admin-dialog .cs-admin-close[data-slot='button'] {
   height: 28px;
   min-height: 28px;
   width: 32px;
