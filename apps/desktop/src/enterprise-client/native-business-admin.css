@@ -176,7 +176,11 @@
   margin: 8px 16px 0;
 }
 .cs-subaccount-edit-dialog {
-  width: min(440px, 94vw);
+  width: min(460px, 94vw);
+  min-height: 320px;
+}
+.cs-subaccount-edit-dialog .cs-admin-dialog-body {
+  min-height: 318px;
 }
 .cs-admin-confirm {
   width: min(400px, 94vw);
@@ -209,8 +213,8 @@
   color: #fff;
 }
 .cs-agent-edit-dialog {
-  width: min(360px, 94vw);
-  height: 260px;
+  width: min(460px, 94vw);
+  height: min(320px, 90vh);
 }
 .cs-agent-edit-dialog .cs-admin-dialog-body {
   padding: 22px;
@@ -230,7 +234,7 @@
   font-size: 11px;
 }
 .cs-grants-dialog {
-  width: min(420px, 94vw);
+  width: min(460px, 94vw);
   height: min(560px, 90vh);
 }
 .cs-grants-dialog .cs-admin-dialog-body {

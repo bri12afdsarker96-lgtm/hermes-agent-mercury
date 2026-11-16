@@ -93,8 +93,10 @@ restore the same views when dismissed.
 
 The native business administration dialogs use the recovered XAML geometry in
 `native-business-admin.css`. Mailbox width is 460px, subaccount list is 960x640,
-subaccount editor width is 440px, seat editor is 360x260 and shop visibility is
-420x560. The compact seat dialogs retain the native indigo action color. Server
+subaccount editor is at least 460x320, seat editor is 460x320 and shop visibility is
+460x560. The recovered XAML declares narrower sizes. Runtime inspection of the
+original Wpf.Ui implicit Window style confirms a 460x320 minimum in the offline
+resource host. The compact seat dialogs retain the native indigo action color. Server
 authority controls persistence and employee sharing. Saved credentials are
 represented by `hasPassword` and are never populated back into password inputs.
 The all-future-shops scope and unavailable seat lifecycle endpoints remain visibly
