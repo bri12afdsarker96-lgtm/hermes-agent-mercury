@@ -1125,9 +1125,11 @@ html[data-hermes-mode='dark'] .cs-native .cs-sidebar nav button[data-active='tru
   margin-block: 8px;
   font-size: 12px;
 }
-.cs-browser-runtime input {
+.hesc-root .cs-native .cs-browser-runtime input {
   width: 54px;
+  min-height: 34px;
   height: 34px;
+  padding: 6px 9px;
   text-align: center;
 }
 .cs-browser-runtime > .cs-muted {
