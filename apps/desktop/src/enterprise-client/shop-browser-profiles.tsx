@@ -56,7 +56,7 @@ export function ShopBrowserProfilesPanel({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [cloud, setCloud] = useState<ShopBrowserReply['cloud']>()
-  const [confirmation, setConfirmation] = useState<'relogin' | 'delete' | null>(null)
+  const [confirmation, setConfirmation] = useState<{ action: 'relogin' | 'delete'; profile: ShopBrowserProfile } | null>(null)
   const slot = useRef<HTMLDivElement>(null)
   const initialNavigation = useMemo(() => ({ target: initialTarget, opened: false }), [initialTarget])
   const lifecycle = useMemo(() => ({ runtime, alive: true, busy: false }), [runtime])
@@ -317,6 +317,9 @@ export function ShopBrowserProfilesPanel({
 
   const confirm = (action: 'relogin' | 'delete') =>
     void run(async () => {
+      const profile = selectedProfile
+
+      if (!profile) {return}
       const reply = await runtime.shopBrowser!({ action: 'close' })
 
       if (!reply.ok) {
@@ -325,9 +328,58 @@ export function ShopBrowserProfilesPanel({
 
       if (lifecycle.alive) {
         setOpened(null)
-        setConfirmation(action)
+        setConfirmation({ action, profile })
       }
     })
+
+  const confirmRowRelogin = (profile: ShopBrowserProfile) => {
+    setConfirmation({ action: 'relogin', profile })
+    setSelected(profile.id)
+    onSelectedProfile?.(profile.id)
+  }
+
+  const submitConfirmation = () => {
+    const pending = confirmation
+
+    if (!pending) {return}
+    void run(async () => {
+      if (opened) {throw new Error('SHOP_PROFILE_IN_USE')}
+      const current = profiles.find(profile => profile.id === pending.profile.id)
+
+      if (!current || current.tenantId !== pending.profile.tenantId || current.principalId !== pending.profile.principalId || current.shopId !== pending.profile.shopId) {
+        throw new Error('SHOP_PROFILE_NOT_FOUND')
+      }
+
+      // The runtime performs the final authorization and in-use checks.
+      const result = await runtime.shopBrowser!({ action: pending.action, profileId: pending.profile.id })
+
+      if (!result.ok) {throw new Error(result.error)}
+
+      if (!lifecycle.alive) {return}
+
+      if (result.profile && result.profile.id !== pending.profile.id) {
+        throw new Error('SHOP_PROFILE_IDENTITY_CHANGED')
+      }
+
+      if (result.profile) {
+        const id = pending.action === 'delete' ? '' : result.profile.id
+        setSelected(id)
+        onSelectedProfile?.(id)
+      }
+
+      setConfirmation(null)
+      await refresh()
+
+      if (result.profile && pending.action === 'relogin' && lifecycle.alive) {
+        const opened = await runtime.shopBrowser!({ action: 'open', profileId: result.profile.id, target: 'merchant', bounds: bounds() })
+
+        if (!lifecycle.alive) {return}
+        await refresh()
+
+        if (!opened.ok) {throw new Error(opened.error)}
+      }
+    })
+  }
 
   const openWorkspace = () =>
     void run(async () => {
@@ -438,7 +490,6 @@ export function ShopBrowserProfilesPanel({
                       if (!opened) {
                         setSelected(profile.id)
                         onSelectedProfile?.(profile.id)
-                        setConfirmation(null)
                       }
                     }}
                   >
@@ -506,6 +557,9 @@ export function ShopBrowserProfilesPanel({
                         >
                           {browserRuntime.offline}
                         </Button>
+                        <Button disabled={busy || !!opened} onClick={() => confirmRowRelogin(profile)} variant="secondary">
+                          {copy.relogin}
+                        </Button>
                         <ShopSubAccountsButton disabled={busy || !!opened} profile={profile} runtime={runtime} />
                         <ShopPayoutSettingsButton
                           disabled={busy || !!opened}
@@ -569,10 +623,11 @@ export function ShopBrowserProfilesPanel({
             </div>
             {confirmation ? (
               <div className="cs-confirm" role="alert">
-                <p>{confirmation === 'delete' ? copy.deleteWarning : copy.resetWarning}</p>
+                <p>{confirmation.profile.shopName || confirmation.profile.displayName}</p>
+                <p>{confirmation.action === 'delete' ? copy.deleteWarning : copy.resetWarning}</p>
                 {cloud ? <p>{shopCloudCopy[locale].sharedDelete}</p> : null}
-                <Button disabled={busy} onClick={() => invoke({ action: confirmation, profileId: selected })}>
-                  {confirmation === 'delete' ? copy.confirmDelete : copy.confirmReset}
+                <Button disabled={busy} onClick={submitConfirmation}>
+                  {confirmation.action === 'delete' ? copy.confirmDelete : copy.confirmReset}
                 </Button>
                 <Button disabled={busy} onClick={() => setConfirmation(null)} variant="secondary">
                   {copy.cancel}
@@ -718,10 +773,11 @@ export function ShopBrowserProfilesPanel({
           </div>
           {confirmation ? (
             <div role="alert">
-              <p>{confirmation === 'delete' ? copy.deleteWarning : copy.resetWarning}</p>
+              <p>{confirmation.profile.shopName || confirmation.profile.displayName}</p>
+              <p>{confirmation.action === 'delete' ? copy.deleteWarning : copy.resetWarning}</p>
               {cloud ? <p>{shopCloudCopy[locale].sharedDelete}</p> : null}
-              <Button disabled={busy} onClick={() => invoke({ action: confirmation, profileId: selected })}>
-                {confirmation === 'delete' ? copy.confirmDelete : copy.confirmReset}
+              <Button disabled={busy} onClick={submitConfirmation}>
+                {confirmation.action === 'delete' ? copy.confirmDelete : copy.confirmReset}
               </Button>
               <Button disabled={busy} onClick={() => setConfirmation(null)} variant="secondary">
                 {copy.cancel}
