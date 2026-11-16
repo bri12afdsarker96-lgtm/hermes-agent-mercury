@@ -1,7 +1,8 @@
 
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 
+import { nativeBusinessAdminCopy } from '@/i18n/native-business-admin'
 import { shopBrowserCopy } from '@/i18n/shop-browser'
 
 import type { ShopBrowserProfile, ShopBrowserRequest } from '../../electron/shop-browser-types'
@@ -83,6 +84,279 @@ function twoShops(): ShopBrowserProfile[] {
     checkedAt: null, loginState: 'verified' as const
   }))
 }
+
+it.each(['during-B', 'after-B', 'before-B', 'stale-auth', 'current-auth', 'stale-reject', 'current-reject', 'during-B-auth'] as const)(
+  'does not let assignment refresh overwrite the current switch intent %s', async timing => {
+    const shops = twoShops()
+    const f = fixture(shops)
+    const original = f.send.getMockImplementation()!
+    let holdNextList = false
+    let releaseList!: () => void
+    let releaseOpen!: () => void
+
+    const assignments = shops.map(shop => ({ profile_id: shop.id, revision: 1, deleted: false,
+      servicing_principal_ids: ['staff-b'], profile: { shop_id: shop.shopId, shop_name: shop.shopName } }))
+
+    const staff = [
+      { principal_id: 'employee', tenant_id: 'tenant', role: 'tenant_admin', status: 'active', name: 'Admin' },
+      { principal_id: 'staff-b', tenant_id: 'tenant', role: 'operator', status: 'active', name: 'Staff B' },
+      { principal_id: 'staff-c', tenant_id: 'tenant', role: 'operator', status: 'active', name: 'Staff C' }
+    ]
+
+    Object.assign(f.runtime, {
+      get: async (url: string) => {
+        if (url === '/api/whoami') {return { principal_id: 'employee', tenant_id: 'tenant', role: 'tenant_admin' }}
+
+        if (url === '/api/shop-login-profiles') {return { profiles: assignments }}
+
+        if (url === '/api/principals') {return { principals: staff }}
+        throw new Error('unexpected synthetic get')
+      },
+      post: async (_url: string, body: { profile_id: string; principal_ids: string[] }) => {
+        const item = assignments.find(record => record.profile_id === body.profile_id)!
+        item.revision++
+        item.servicing_principal_ids = [...body.principal_ids]
+
+        return { profile: { ...item } }
+      }
+    })
+    f.send.mockImplementation(async request => {
+      if (request.action === 'list' && holdNextList) {
+        holdNextList = false
+        const reply = await original(request)
+
+        return new Promise((resolve, reject) => { releaseList = () => timing.endsWith('reject')
+          ? reject(new Error('SHOP_PROFILE_FORBIDDEN'))
+          : resolve(timing.endsWith('auth') ? { ok: false, error: 'SHOP_PROFILE_FORBIDDEN' } as never : reply) })
+      }
+
+      if (request.action === 'open' && request.profileId === shops[1].id && (timing === 'during-B' || timing === 'during-B-auth')) {
+        return new Promise(resolve => { releaseOpen = () => { void original(request).then(resolve) } })
+      }
+
+      return original(request)
+    })
+    const onProfilesChange = vi.fn()
+    const onSelectedProfile = vi.fn()
+    render(<ShopBrowserProfilesPanel nativeLayout onProfilesChange={onProfilesChange} onSelectedProfile={onSelectedProfile} runtime={f.runtime} />)
+    fireEvent.click(within((await screen.findByText('店铺A')).closest('tr')!).getByRole('button', { name: /选择/ }))
+    fireEvent.click(await screen.findByText(shopBrowserCopy.zh.merchant))
+    const switcher = await screen.findByRole('combobox', { name: '切换店铺浏览器' }) as HTMLSelectElement
+    await waitFor(() => expect(switcher.disabled).toBe(false))
+    const region = await screen.findByRole('region', { name: nativeBusinessAdminCopy.zh.assignments })
+    const staffC = await within(region).findByRole('checkbox', { name: 'Staff C' })
+    await waitFor(() => expect((staffC as HTMLInputElement).disabled).toBe(false))
+    fireEvent.click(staffC)
+    holdNextList = true
+    fireEvent.click(within(region).getByRole('button', { name: nativeBusinessAdminCopy.zh.save }))
+    await waitFor(() => expect(releaseList).toBeTypeOf('function'))
+
+    if (timing === 'current-auth' || timing === 'current-reject') {
+      await act(async () => { releaseList() })
+      await waitFor(() => expect(onProfilesChange).toHaveBeenLastCalledWith([]))
+      expect(onSelectedProfile).toHaveBeenLastCalledWith('')
+
+      return
+    }
+
+    if (timing === 'before-B') {await act(async () => { releaseList() })}
+    fireEvent.change(switcher, { target: { value: shops[1].id } })
+
+    if (timing === 'during-B' || timing === 'during-B-auth') {
+      await waitFor(() => expect(releaseOpen).toBeTypeOf('function'))
+      await act(async () => { releaseList() })
+
+      if (timing === 'during-B-auth') {
+        await waitFor(() => expect(onProfilesChange).toHaveBeenLastCalledWith([]))
+        await act(async () => { releaseOpen() })
+        expect(onSelectedProfile).toHaveBeenLastCalledWith('')
+        expect(screen.queryByText('店铺B')).toBeNull()
+
+        return
+      }
+
+      const before = f.send.mock.calls.filter(([r]) => r.action === 'bounds' && r.profileId === shops[0].id).length
+      fireEvent(window, new Event('resize'))
+      expect(f.send.mock.calls.filter(([r]) => r.action === 'bounds' && r.profileId === shops[0].id)).toHaveLength(before)
+      await act(async () => { releaseOpen() })
+    }
+
+    await waitFor(() => expect((screen.getByRole('combobox', { name: '切换店铺浏览器' }) as HTMLSelectElement).value).toBe(shops[1].id))
+
+    if (timing === 'stale-auth' || timing === 'stale-reject') {
+      await act(async () => { releaseList() })
+      await waitFor(() => expect(onProfilesChange).toHaveBeenLastCalledWith([]))
+      expect(onSelectedProfile).toHaveBeenLastCalledWith('')
+
+      return
+    }
+
+    if (timing === 'after-B') {await act(async () => { releaseList() })}
+    expect((screen.getByRole('combobox', { name: '切换店铺浏览器' }) as HTMLSelectElement).value).toBe(shops[1].id)
+    expect(screen.queryByText(/SHOP_PROFILE_NOT_OPEN/)).toBeNull()
+  }
+)
+
+it.each(['failure', 'rejection', 'success'] as const)('ignores obsolete A bounds %s after switching to B', async outcome => {
+  const shops = twoShops()
+  const f = fixture(shops)
+  const original = f.send.getMockImplementation()!
+  let release!: (value: Awaited<ReturnType<typeof original>>) => void
+  let reject!: (error: Error) => void
+  let captured = false
+  f.send.mockImplementation(request => {
+    if (request.action === 'bounds' && request.profileId === shops[0].id && !captured) {
+      captured = true
+
+      return new Promise((resolve, fail) => { release = resolve; reject = fail })
+    }
+
+    return original(request)
+  })
+  render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)
+  const rowA = (await screen.findByText('店铺A')).closest('tr')!
+  fireEvent.click(within(rowA).getByRole('button', { name: /选择/ }))
+  fireEvent.click(await screen.findByText(shopBrowserCopy.zh.merchant))
+  const switcher = await screen.findByRole('combobox', { name: '切换店铺浏览器' })
+  await waitFor(() => expect(captured).toBe(true))
+  fireEvent.change(switcher, { target: { value: shops[1].id } })
+  await waitFor(() => expect((screen.getByRole('combobox', { name: '切换店铺浏览器' }) as HTMLSelectElement).value).toBe(shops[1].id))
+  await act(async () => {
+    if (outcome === 'failure') {release({ ok: false, error: 'SHOP_PROFILE_NOT_OPEN' } as never)}
+    else if (outcome === 'rejection') {reject(new Error('synthetic stale failure'))}
+    else {release({ ok: true } as never)}
+  })
+  expect((screen.getByRole('combobox', { name: '切换店铺浏览器' }) as HTMLSelectElement).value).toBe(shops[1].id)
+  expect(screen.queryByText(/SHOP_PROFILE_NOT_OPEN/)).toBeNull()
+})
+
+it('immediately reapplies A bounds when a recoverable B open fails', async () => {
+  const shops = twoShops()
+  const f = fixture(shops)
+  const original = f.send.getMockImplementation()!
+  f.send.mockImplementation(request => request.action === 'open' && request.profileId === shops[1].id
+    ? Promise.resolve({ ok: false, error: 'SHOP_PROFILE_PAGE_NOT_READY' } as never) : original(request))
+  render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)
+  fireEvent.click(within((await screen.findByText('店铺A')).closest('tr')!).getByRole('button', { name: /选择/ }))
+  fireEvent.click(await screen.findByText(shopBrowserCopy.zh.merchant))
+  const switcher = await screen.findByRole('combobox', { name: '切换店铺浏览器' }) as HTMLSelectElement
+  await waitFor(() => expect(switcher.disabled).toBe(false))
+  const initial = f.send.mock.calls.filter(([request]) => request.action === 'bounds' && request.profileId === shops[0].id).length
+  fireEvent.change(switcher, { target: { value: shops[1].id } })
+  expect((await screen.findAllByText(/SHOP_PROFILE_PAGE_NOT_READY/)).length).toBeGreaterThan(0)
+  expect(switcher.value).toBe(shops[0].id)
+  expect(f.send.mock.calls.filter(([request]) => request.action === 'bounds' && request.profileId === shops[0].id).length).toBeGreaterThan(initial)
+})
+
+it('ignores old bounds while the requested B switch is still pending', async () => {
+  const shops = twoShops()
+  const f = fixture(shops)
+  const original = f.send.getMockImplementation()!
+  let releaseBounds!: (value: Awaited<ReturnType<typeof original>>) => void
+  let releaseOpen!: () => void
+  let captured = false
+  f.send.mockImplementation(request => {
+    if (request.action === 'bounds' && request.profileId === shops[0].id && !captured) {
+      captured = true
+
+      return new Promise(resolve => { releaseBounds = resolve })
+    }
+
+    if (request.action === 'open' && request.profileId === shops[1].id) {
+      return new Promise(resolve => { releaseOpen = () => { void original(request).then(resolve) } })
+    }
+
+    return original(request)
+  })
+  render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)
+  fireEvent.click(within((await screen.findByText('店铺A')).closest('tr')!).getByRole('button', { name: /选择/ }))
+  fireEvent.click(await screen.findByText(shopBrowserCopy.zh.merchant))
+  const switcher = await screen.findByRole('combobox', { name: '切换店铺浏览器' })
+  await waitFor(() => expect(captured).toBe(true))
+  fireEvent.change(switcher, { target: { value: shops[1].id } })
+  await waitFor(() => expect(releaseOpen).toBeTypeOf('function'))
+  await act(async () => { releaseBounds({ ok: false, error: 'SHOP_PROFILE_NOT_OPEN' } as never) })
+  expect(screen.queryByText(/SHOP_PROFILE_NOT_OPEN/)).toBeNull()
+  expect(screen.getByRole('combobox', { name: '切换店铺浏览器' })).toBeTruthy()
+  await act(async () => { releaseOpen() })
+  await waitFor(() => expect((screen.getByRole('combobox', { name: '切换店铺浏览器' }) as HTMLSelectElement).value).toBe(shops[1].id))
+})
+
+it('ignores an old A response after switching A to B and back to A', async () => {
+  const shops = twoShops()
+  const f = fixture(shops)
+  const original = f.send.getMockImplementation()!
+  let release!: (value: Awaited<ReturnType<typeof original>>) => void
+  let captured = false
+  f.send.mockImplementation(request => {
+    if (request.action === 'bounds' && request.profileId === shops[0].id && !captured) {
+      captured = true
+
+      return new Promise(resolve => { release = resolve })
+    }
+
+    return original(request)
+  })
+  render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)
+  fireEvent.click(within((await screen.findByText('店铺A')).closest('tr')!).getByRole('button', { name: /选择/ }))
+  fireEvent.click(await screen.findByText(shopBrowserCopy.zh.merchant))
+  await screen.findByRole('combobox', { name: '切换店铺浏览器' })
+  await waitFor(() => expect(captured).toBe(true))
+  fireEvent.change(screen.getByRole('combobox', { name: '切换店铺浏览器' }), { target: { value: shops[1].id } })
+  await waitFor(() => expect((screen.getByRole('combobox', { name: '切换店铺浏览器' }) as HTMLSelectElement).value).toBe(shops[1].id))
+  await waitFor(() => expect((screen.getByRole('combobox', { name: '切换店铺浏览器' }) as HTMLSelectElement).disabled).toBe(false))
+  fireEvent.change(screen.getByRole('combobox', { name: '切换店铺浏览器' }), { target: { value: shops[0].id } })
+  await waitFor(() => expect((screen.getByRole('combobox', { name: '切换店铺浏览器' }) as HTMLSelectElement).value).toBe(shops[0].id))
+  await act(async () => { release({ ok: false, error: 'SHOP_PROFILE_NOT_OPEN' } as never) })
+  expect((screen.getByRole('combobox', { name: '切换店铺浏览器' }) as HTMLSelectElement).value).toBe(shops[0].id)
+  expect(screen.queryByText(/SHOP_PROFILE_NOT_OPEN/)).toBeNull()
+})
+
+it.each(['SHOP_PROFILE_NOT_OPEN', 'SHOP_PROFILE_FORBIDDEN', 'SHOP_PROFILE_ACCESS_UNAVAILABLE', 'SHOP_PROFILE_OWNER_CHANGED'])(
+  'keeps current B bounds failure %s visible and applies authorization invalidation', async failure => {
+    const shops = twoShops()
+    const f = fixture(shops)
+    const original = f.send.getMockImplementation()!
+    let release!: (value: Awaited<ReturnType<typeof original>>) => void
+    let captured = false
+    f.send.mockImplementation(request => {
+      if (request.action === 'bounds' && request.profileId === shops[1].id && !captured) {
+        captured = true
+
+        return new Promise(resolve => { release = resolve })
+      }
+
+      return original(request)
+    })
+    render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)
+    fireEvent.click(within((await screen.findByText('店铺A')).closest('tr')!).getByRole('button', { name: /选择/ }))
+    fireEvent.click(await screen.findByText(shopBrowserCopy.zh.merchant))
+    fireEvent.change(await screen.findByRole('combobox', { name: '切换店铺浏览器' }), { target: { value: shops[1].id } })
+    await waitFor(() => expect(captured).toBe(true))
+    await act(async () => { release({ ok: false, error: failure } as never) })
+    await waitFor(() => expect(screen.getAllByRole('alert').some(alert => alert.textContent?.includes(failure))).toBe(true))
+
+    if (/FORBIDDEN|ACCESS_UNAVAILABLE|OWNER_CHANGED/.test(failure)) {
+      expect(screen.queryByText('店铺A')).toBeNull()
+      expect(screen.queryByText('店铺B')).toBeNull()
+    }
+  })
+
+it('does not apply a bounds response after component unmount', async () => {
+  const shops = twoShops()
+  const f = fixture(shops)
+  const original = f.send.getMockImplementation()!
+  let release!: (value: Awaited<ReturnType<typeof original>>) => void
+  f.send.mockImplementation(request => request.action === 'bounds'
+    ? new Promise(resolve => { release = resolve }) : original(request))
+  const view = render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)
+  fireEvent.click(within((await screen.findByText('店铺A')).closest('tr')!).getByRole('button', { name: /选择/ }))
+  fireEvent.click(await screen.findByText(shopBrowserCopy.zh.merchant))
+  await waitFor(() => expect(release).toBeTypeOf('function'))
+  view.unmount()
+  await act(async () => { release({ ok: false, error: 'SHOP_PROFILE_NOT_OPEN' } as never) })
+  expect(screen.queryByText(/SHOP_PROFILE_NOT_OPEN/)).toBeNull()
+})
 
 it('removes the originally confirmed row while preserving the newly selected shop', async () => {
   const shops = twoShops()

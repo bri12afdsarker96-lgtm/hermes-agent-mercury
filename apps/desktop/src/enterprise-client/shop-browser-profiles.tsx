@@ -59,17 +59,62 @@ export function ShopBrowserProfilesPanel({
   const [confirmation, setConfirmation] = useState<{ action: 'relogin' | 'delete'; profile: ShopBrowserProfile } | null>(null)
   const slot = useRef<HTMLDivElement>(null)
   const initialNavigation = useMemo(() => ({ target: initialTarget, opened: false }), [initialTarget])
-  const lifecycle = useMemo(() => ({ runtime, alive: true, busy: false }), [runtime])
+
+  const lifecycle = useMemo(() => ({ runtime, alive: true, busy: false, boundsEpoch: 0, boundsTarget: null as string | null,
+    openIntent: 0, refreshSequence: 0, resizeBounds: null as (() => void) | null }), [runtime])
+
   const selectedProfile = profiles.find(profile => profile.id === selected)
 
   const refresh = useCallback(async () => {
-    const reply = await lifecycle.runtime.shopBrowser!({ action: 'list' })
+    const sequence = ++lifecycle.refreshSequence
+    const intent = lifecycle.openIntent
+    let reply: ShopBrowserReply
+
+    try {
+      reply = await lifecycle.runtime.shopBrowser!({ action: 'list' })
+    } catch (reason) {
+      if (!lifecycle.alive) {return}
+      const code = reason instanceof Error ? reason.message : ''
+
+      if (/OWNER_CHANGED|ACCESS_UNAVAILABLE|FORBIDDEN/.test(code)) {
+        lifecycle.openIntent++
+        lifecycle.refreshSequence++
+        lifecycle.boundsEpoch++
+        lifecycle.boundsTarget = null
+        setOpened(null)
+        setLoaded(false)
+        setCloud(undefined)
+        setProfiles([])
+        setSelected('')
+        setConfirmation(null)
+        onProfilesChange?.([])
+        onSelectedProfile?.('')
+        throw reason
+      }
+
+      if (sequence !== lifecycle.refreshSequence || intent !== lifecycle.openIntent) {return}
+      throw reason
+    }
 
     if (!lifecycle.alive) {
       return
     }
 
+    const authorityFailure = !reply.ok && /OWNER_CHANGED|ACCESS_UNAVAILABLE|FORBIDDEN/.test(reply.error ?? '')
+
+    if (!authorityFailure && (sequence !== lifecycle.refreshSequence || intent !== lifecycle.openIntent)) {
+      return
+    }
+
     if (!reply.ok) {
+      if (authorityFailure) {
+        lifecycle.openIntent++
+        lifecycle.refreshSequence++
+        lifecycle.boundsEpoch++
+        lifecycle.boundsTarget = null
+        setConfirmation(null)
+      }
+
       setLoaded(false)
       setCloud(undefined)
       setOpened(null)
@@ -90,9 +135,16 @@ export function ShopBrowserProfilesPanel({
       onSelectedProfile?.('')
     }
 
+    const nextOpened = reply.openProfileId ?? null
+
+    if (lifecycle.boundsTarget !== nextOpened) {
+      lifecycle.boundsEpoch++
+      lifecycle.boundsTarget = nextOpened
+    }
+
     setCloud(reply.cloud)
     onProfilesChange?.(reply.profiles ?? [])
-    setOpened(reply.openProfileId ?? null)
+    setOpened(nextOpened)
   }, [lifecycle, onProfilesChange, onSelectedProfile])
 
   const run = useCallback(
@@ -117,6 +169,10 @@ export function ShopBrowserProfilesPanel({
           }
 
           if (/OWNER_CHANGED|ACCESS_UNAVAILABLE|FORBIDDEN/.test(code)) {
+            lifecycle.openIntent++
+            lifecycle.refreshSequence++
+            lifecycle.boundsEpoch++
+            lifecycle.boundsTarget = null
             setCloud(undefined)
             setProfiles([])
             setSelected('')
@@ -201,20 +257,41 @@ export function ShopBrowserProfilesPanel({
       return
     }
 
+    let active = true
+
+    const handleFailure = (code: string | undefined, epoch: number) => {
+      if (!lifecycle.alive) {return}
+      const authorityFailure = /OWNER_CHANGED|ACCESS_UNAVAILABLE|FORBIDDEN/.test(code ?? '')
+
+      if (!authorityFailure && (!active || epoch !== lifecycle.boundsEpoch || lifecycle.boundsTarget !== opened)) {return}
+      setOpened(null)
+      setError(code ?? 'SHOP_PROFILE_FAILED')
+
+      if (authorityFailure) {
+        lifecycle.openIntent++
+        lifecycle.refreshSequence++
+        lifecycle.boundsEpoch++
+        lifecycle.boundsTarget = null
+        setCloud(undefined)
+        setProfiles([])
+        setSelected('')
+        setConfirmation(null)
+        onProfilesChange?.([])
+        onSelectedProfile?.('')
+      }
+    }
+
     const resize = () => {
+      if (!active || lifecycle.boundsTarget !== opened) {return}
+      const epoch = lifecycle.boundsEpoch
       void runtime.shopBrowser!({ action: 'bounds', profileId: opened, bounds: bounds() })
         .then(reply => {
-          if (!reply.ok && lifecycle.alive) {
-            setOpened(null)
-            setError(reply.error ?? 'SHOP_PROFILE_FAILED')
-          }
+          if (!reply.ok) {handleFailure(reply.error, epoch)}
         })
-        .catch(() => {
-          if (lifecycle.alive) {
-            setOpened(null)
-          }
-        })
+        .catch(reason => handleFailure(reason instanceof Error ? reason.message : undefined, epoch))
     }
+
+    lifecycle.resizeBounds = resize
 
     const observer = new ResizeObserver(resize)
     observer.observe(slot.current)
@@ -223,20 +300,44 @@ export function ShopBrowserProfilesPanel({
     resize()
 
     return () => {
+      active = false
+      lifecycle.boundsEpoch++
+
+      if (lifecycle.resizeBounds === resize) {lifecycle.resizeBounds = null}
       observer.disconnect()
       window.removeEventListener('resize', resize)
       window.removeEventListener('scroll', resize, true)
     }
-  }, [opened, runtime, lifecycle, bounds])
+  }, [opened, runtime, lifecycle, bounds, onProfilesChange, onSelectedProfile])
 
   const invoke = useCallback(
     (request: Omit<ShopBrowserRequest, 'sessionId'>) =>
       void run(async () => {
+        let intent: number | undefined
+
+        if (request.action === 'open') {
+          intent = ++lifecycle.openIntent
+          lifecycle.boundsEpoch++
+          lifecycle.boundsTarget = request.profileId ?? null
+        }
+
         const reply = await runtime.shopBrowser!(request)
 
+        if (!lifecycle.alive || (intent !== undefined && intent !== lifecycle.openIntent &&
+          (reply.ok || !/OWNER_CHANGED|ACCESS_UNAVAILABLE|FORBIDDEN/.test(reply.error ?? '')))) {
+          return
+        }
+
         if (!reply.ok) {
+          if (/OWNER_CHANGED|ACCESS_UNAVAILABLE|FORBIDDEN/.test(reply.error ?? '')) {
+            throw new Error(reply.error)
+          }
+
           if (request.action === 'open') {
             await refresh()
+
+            if (intent !== lifecycle.openIntent || !lifecycle.alive) {return}
+            lifecycle.resizeBounds?.()
           }
 
           throw new Error(reply.error)
