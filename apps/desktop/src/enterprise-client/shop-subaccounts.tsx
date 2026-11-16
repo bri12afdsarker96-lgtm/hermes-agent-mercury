@@ -258,7 +258,15 @@ function SubAccountsList({
               return
             }
 
-            if (!fresh.some(row => row.id === saved.id && row.revision >= saved.revision)) {
+            if (
+              !fresh.some(
+                row =>
+                  row.id === saved.id &&
+                  row.revision >= saved.revision &&
+                  row.subAccount === saved.subAccount &&
+                  row.enabled === saved.enabled
+              )
+            ) {
               throw new Error('SHOP_SUBACCOUNT_READBACK_INVALID')
             }
 
@@ -310,6 +318,7 @@ function SubAccountEditor({
   const { locale } = useI18n()
   const copy = nativeBusinessAdminCopy[locale]
   const scope = useMemo(() => ({ runtime, profileId, alive: true, pending: false }), [runtime, profileId])
+  const [acknowledged, setAcknowledged] = useState<ShopSubAccount>()
   const [account, setAccount] = useState(row?.subAccount ?? '')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
@@ -329,13 +338,13 @@ function SubAccountEditor({
 
     const subAccount = account.trim()
 
-    if (!nativeSubAccountEmail.test(subAccount)) {
+    if (!acknowledged && !nativeSubAccountEmail.test(subAccount)) {
       setError(copy.invalidEmail)
 
       return
     }
 
-    if (!row && !password.trim()) {
+    if (!acknowledged && !row && !password.trim()) {
       setError(copy.passwordRequired)
 
       return
@@ -346,16 +355,20 @@ function SubAccountEditor({
     setError('')
 
     try {
-      const saved = await nativeBusinessAdminApi(runtime).saveSubAccount({
-        id: row?.id,
-        profileId,
-        subAccount,
-        password: password.trim() || undefined,
-        enabled: row?.enabled ?? true,
-        expectedRevision: row?.revision ?? 0
-      })
+      const saved =
+        acknowledged ??
+        (await nativeBusinessAdminApi(runtime).saveSubAccount({
+          id: row?.id,
+          profileId,
+          subAccount,
+          password: password.trim() || undefined,
+          enabled: row?.enabled ?? true,
+          expectedRevision: row?.revision ?? 0
+        }))
 
       if (scope.alive) {
+        setAcknowledged(saved)
+        setPassword('')
         await onSaved(saved)
       }
     } catch (reason) {
@@ -385,7 +398,7 @@ function SubAccountEditor({
           {copy.subAccounts}
           <Input
             autoComplete="off"
-            disabled={busy}
+            disabled={busy || !!acknowledged}
             onChange={event => setAccount(event.target.value)}
             placeholder={copy.accountHint}
             value={account}
@@ -394,13 +407,14 @@ function SubAccountEditor({
         <label>
           {copy.password}
           <NativeAdminPassword
-            disabled={busy}
+            disabled={busy || !!acknowledged}
             label={copy.password}
             onChange={setPassword}
             saved={row?.hasPassword}
             value={password}
           />
         </label>
+        {acknowledged ? <p role="status">{copy.readbackPending}</p> : null}
         {error ? (
           <p className="cs-error" role="alert">
             {error}
@@ -412,7 +426,7 @@ function SubAccountEditor({
           {copy.cancel}
         </Button>
         <Button disabled={busy || !runtime.post} onClick={() => void save()}>
-          {copy.save}
+          {acknowledged ? copy.refresh : copy.save}
         </Button>
       </footer>
     </NativeAdminDialog>

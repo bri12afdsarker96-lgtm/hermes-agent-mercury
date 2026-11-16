@@ -30,6 +30,7 @@ function MailboxEditor({ runtime, onClose }: { runtime: EnterpriseClientRuntime;
   const api = useMemo(() => nativeBusinessAdminApi(runtime), [runtime])
   const scope = useMemo(() => ({ runtime, alive: true, pending: false }), [runtime])
   const [original, setOriginal] = useState<ShopMailbox>()
+  const [acknowledged, setAcknowledged] = useState<ShopMailbox>()
   const [providerKey, setProviderKey] = useState<'qq' | '126'>('qq')
   const [user, setUser] = useState('')
   const [password, setPassword] = useState('')
@@ -79,13 +80,13 @@ function MailboxEditor({ runtime, onClose }: { runtime: EnterpriseClientRuntime;
     const account = user.trim()
     const changed = account !== original.user || providerKey !== original.providerKey
 
-    if (!account || (!password && !original.hasPassword)) {
+    if (!acknowledged && (!account || (!password && !original.hasPassword))) {
       setError(copy.mailboxRequired)
 
       return
     }
 
-    if (changed && !password) {
+    if (!acknowledged && changed && !password) {
       setError(copy.changedMailboxPassword)
 
       return
@@ -105,12 +106,14 @@ function MailboxEditor({ runtime, onClose }: { runtime: EnterpriseClientRuntime;
           setNotice(copy.tested)
         }
       } else {
-        const saved = await api.saveMailbox(draft)
+        const saved = acknowledged ?? (await api.saveMailbox(draft))
 
         if (!scope.alive) {
           return
         }
 
+        setAcknowledged(saved)
+        setPassword('')
         const confirmed = await api.getMailbox()
 
         if (!scope.alive) {
@@ -119,8 +122,8 @@ function MailboxEditor({ runtime, onClose }: { runtime: EnterpriseClientRuntime;
 
         if (
           confirmed.revision < saved.revision ||
-          confirmed.user !== account ||
-          confirmed.providerKey !== providerKey
+          confirmed.user !== saved.user ||
+          confirmed.providerKey !== saved.providerKey
         ) {
           throw new Error('SHOP_MAILBOX_READBACK_INVALID')
         }
@@ -155,7 +158,7 @@ function MailboxEditor({ runtime, onClose }: { runtime: EnterpriseClientRuntime;
         <label>
           {copy.provider}
           <select
-            disabled={busy || !original}
+            disabled={busy || !original || !!acknowledged}
             onChange={event => setProviderKey(event.target.value as 'qq' | '126')}
             value={providerKey}
           >
@@ -167,7 +170,7 @@ function MailboxEditor({ runtime, onClose }: { runtime: EnterpriseClientRuntime;
           {copy.address}
           <Input
             autoComplete="off"
-            disabled={busy || !original}
+            disabled={busy || !original || !!acknowledged}
             onChange={event => setUser(event.target.value)}
             placeholder={copy.addressHint}
             value={user}
@@ -176,7 +179,7 @@ function MailboxEditor({ runtime, onClose }: { runtime: EnterpriseClientRuntime;
         <label>
           {copy.credential}
           <NativeAdminPassword
-            disabled={busy || !original}
+            disabled={busy || !original || !!acknowledged}
             label={copy.credential}
             onChange={setPassword}
             saved={original?.hasPassword}
@@ -194,14 +197,19 @@ function MailboxEditor({ runtime, onClose }: { runtime: EnterpriseClientRuntime;
             {copy.refresh}
           </Button>
         ) : null}
+        {acknowledged ? <p role="status">{copy.readbackPending}</p> : null}
         {notice ? <p role="status">{notice}</p> : null}
       </div>
       <footer className="cs-admin-footer">
-        <Button disabled={busy || !original || !runtime.post} onClick={() => void execute(true)} variant="secondary">
+        <Button
+          disabled={busy || !original || !runtime.post || !!acknowledged}
+          onClick={() => void execute(true)}
+          variant="secondary"
+        >
           {copy.test}
         </Button>
         <Button disabled={busy || !original || !runtime.post} onClick={() => void execute(false)}>
-          {copy.save}
+          {acknowledged ? copy.refresh : copy.save}
         </Button>
       </footer>
     </NativeAdminDialog>

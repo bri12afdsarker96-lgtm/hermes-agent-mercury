@@ -383,3 +383,59 @@ it('projects public mailbox and subaccount metadata even if a server includes ex
   f.get.mockResolvedValueOnce({ subAccounts: [{ ...f.store.accounts[0], subPassword: 'must-not-enter-state' }] })
   expect((await nativeBusinessAdminApi(f.runtime).listSubAccounts('p1'))[0]).not.toHaveProperty('subPassword')
 })
+
+it.each(['new', 'edit'])('confirms an acknowledged %s subaccount write after readback failure without another POST', async mode => {
+  const f = fixture()
+  const originalGet = f.get.getMockImplementation()!
+  let failReadback = true
+  f.get.mockImplementation(async path => {
+    if (path.startsWith('/api/shop-subaccounts?') && f.post.mock.calls.length && failReadback) {
+      failReadback = false
+      throw new Error('Readback interrupted')
+    }
+
+    return originalGet(path)
+  })
+  render(<ShopSubAccountsButton profile={profile} runtime={f.runtime} />)
+  fireEvent.click(screen.getByRole('button', { name: '子账号' }))
+  await screen.findByText('one@example.com')
+  fireEvent.click(screen.getByRole('button', { name: mode === 'new' ? '新增账号' : '编辑' }))
+  const editor = within(screen.getByRole('dialog', { name: mode === 'new' ? '新增账号' : '编辑账号' }))
+  fireEvent.change(editor.getByLabelText('子账号'), { target: { value: 'confirmed@example.com' } })
+  fireEvent.change(editor.getByLabelText('密码'), { target: { value: 'secret' } })
+  fireEvent.click(editor.getByRole('button', { name: '保存' }))
+  await editor.findByRole('alert')
+  expect(f.post).toHaveBeenCalledTimes(1)
+  expect(editor.getByLabelText('子账号').hasAttribute('disabled')).toBe(true)
+  expect((editor.getByLabelText('密码') as HTMLInputElement).value).toBe('')
+  fireEvent.click(editor.getByRole('button', { name: '刷新' }))
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: mode === 'new' ? '新增账号' : '编辑账号' })).toBeNull())
+  await screen.findByText('confirmed@example.com')
+  expect(f.post).toHaveBeenCalledTimes(1)
+})
+
+it('confirms an acknowledged mailbox write after readback failure without reusing the old revision', async () => {
+  const f = fixture()
+  const originalGet = f.get.getMockImplementation()!
+  let failReadback = true
+  f.get.mockImplementation(async path => {
+    if (path === '/api/shop-mailbox' && f.post.mock.calls.length && failReadback) {
+      failReadback = false
+      throw new Error('Readback interrupted')
+    }
+
+    return originalGet(path)
+  })
+  render(<ShopMailboxButton runtime={f.runtime} />)
+  fireEvent.click(screen.getByRole('button', { name: '收件邮箱' }))
+  await screen.findByDisplayValue('test@qq.com')
+  fireEvent.change(screen.getByLabelText('授权码 / 密码'), { target: { value: 'secret' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存' }))
+  await screen.findByRole('alert')
+  expect(f.post).toHaveBeenCalledTimes(1)
+  expect(screen.getByLabelText('邮箱地址').hasAttribute('disabled')).toBe(true)
+  expect((screen.getByLabelText('授权码 / 密码') as HTMLInputElement).value).toBe('')
+  fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(f.post).toHaveBeenCalledTimes(1)
+})
