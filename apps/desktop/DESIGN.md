@@ -96,8 +96,11 @@ The native business administration dialogs use the recovered XAML geometry in
 subaccount editor is at least 460x320, seat editor is 460x320 and shop visibility is
 460x560. The recovered XAML declares narrower sizes. Runtime inspection of the
 original Wpf.Ui implicit Window style confirms a 460x320 minimum in the offline
-resource host. The compact seat dialogs retain the native indigo action color. Server
-authority controls persistence and employee sharing. Saved credentials are
+resource host. The compact seat dialogs retain the native indigo action color.
+Subaccount editor rows use natural content height, leaving the native bottom gap.
+Shop visibility radio rows are 32px high with 20px circles. Final Electron captures
+retain a measured four-CSS-pixel footer offset from the offline native resource host.
+Server authority controls persistence and employee sharing. Saved credentials are
 represented by `hasPassword` and are never populated back into password inputs.
 The all-future-shops scope and unavailable seat lifecycle endpoints remain visibly
 disabled. The enterprise shell and light-mode skin retain their theme tokens.
