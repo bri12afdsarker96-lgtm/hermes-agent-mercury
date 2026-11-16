@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -24,10 +24,14 @@ const sha256 = data => createHash('sha256').update(data).digest('hex')
 const options = new Map()
 for (let i = 2; i < process.argv.length; i += 2) {
   const key = process.argv[i]
-  if (!['--td-source', '--output-root'].includes(key) || !process.argv[i + 1]) {
-    throw new Error('Usage: node scripts/payment-controls-e2e.mjs [--td-source <TD project>] [--output-root <results>]')
+  if (!['--td-source', '--output-root', '--amount'].includes(key) || !process.argv[i + 1]) {
+    throw new Error('Usage: node scripts/payment-controls-e2e.mjs [--td-source <TD project>] [--output-root <results>] [--amount <yuan>]')
   }
-  options.set(key, path.resolve(process.argv[i + 1]))
+  options.set(key, key === '--amount' ? process.argv[i + 1] : path.resolve(process.argv[i + 1]))
+}
+const amountOverride = options.get('--amount')
+if (amountOverride !== undefined && (!/^\d+(?:\.\d{1,2})?$/.test(amountOverride) || !Number.isFinite(Number(amountOverride)) || Number(amountOverride) <= 0)) {
+  throw new Error('--amount must be a positive yuan amount with at most two decimal places')
 }
 if (process.platform !== 'win32') throw new Error('This smoke test requires Windows and .NET Framework')
 const td = options.get('--td-source') ?? path.join(verifyRoot, 'td-feige-search-wait-20261115',
@@ -50,13 +54,15 @@ const info = {
   tdHead: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: td, encoding: 'utf8' }).trim(),
   level: 'real Electron test-main + production renderer/preload/Controller + real TD host/PaymentWorkflow.Cdp; synthetic auth, Excel and Chrome I/O; production page adapter in jsdom',
   cdpBoundary: 'PaymentCdpChromeStub replaces ChromeBrowserSession external I/O; no live Chrome or store connection',
+  profileBoundary: 'Synthetic Chrome I/O has no embedded browser profile. Its capability reply advertises embeddedBrowser=0. Saved profile selection is covered by the packaged desktop acceptance.',
   productionMainCovered: false,
   productionMainLimitation: 'Production main has no fixture injection; localForeground pins a production EXE hash. Existing synthetic-shell test entry is used without changing production code.',
   syntheticOnly: true, realStoreAccess: false, realPayments: false, sourceHashes: {}, fixtureOverlay: []
 }
 const priorPaid = '已打款｜原有合成记录'
 const searchedOrders = ['444444444444444444', '555555555555555555', '777777777777777777', '888888888888888888', '999999999999999999']
-const scenarioAmounts = { '01-resume': '3.25', '03-stop': '7.50', '05-restart': '7.50' }
+const scenarioAmounts = { '01-resume': amountOverride ?? '3.25', '03-stop': amountOverride ?? '7.50', '05-restart': amountOverride ?? '7.50' }
+info.scenarioAmounts = scenarioAmounts
 function log(message, data = {}) {
   const entry = { at: new Date().toISOString(), message, ...data }
   entries.push(entry)
@@ -92,6 +98,9 @@ async function buildFixture() {
     'PaymentWorkflow.cs', 'PaymentWorkflow.Cdp.cs', 'WorkbookResume.cs', 'PaymentRuleEvaluator.cs',
     'PaymentFormEvaluator.cs', 'PaymentFinalResultEvaluator.cs'
   ]
+  if ((await readdir(path.join(td, 'DoudianAutomationTool'))).includes('PaymentSubmissionLedger.cs')) {
+    sourceFiles.push('PaymentSubmissionLedger.cs')
+  }
   await mkdir(path.join(source, 'DoudianAutomationTool'), { recursive: true })
   await mkdir(path.join(source, 'tests'), { recursive: true })
   for (const name of sourceFiles.map(name => `DoudianAutomationTool/${name}`).concat([
@@ -122,19 +131,25 @@ async function buildFixture() {
         'public void OpenOrActivateFeigeWindow() { Fixture.Events.Add("fake-window"); }',
         'public void OpenOrActivateFeigeWindow() { throw new Exception("Desktop transport is forbidden in this CDP fixture"); }',
         'Reject accidental screen transport at the synthetic I/O boundary')
+      const fields = text.match(/internal static string WorkbookPath, StatePath(?:, LedgerDirectory)?;/)?.[0]
+      assert.ok(fields, 'Missing existing payment fixture paths')
       text = replaceOnce(text,
-        'internal static string WorkbookPath, StatePath;',
-        'internal static void Trace(string kind, object data) { File.AppendAllText(Path.Combine(Path.GetDirectoryName(StatePath), "io-events.jsonl"), new JavaScriptSerializer().Serialize(new { at = DateTime.UtcNow.ToString("o"), kind = kind, data = data }) + "\\n"); }\n        internal static string WorkbookPath, StatePath;',
+        fields,
+        'internal static void Trace(string kind, object data) { File.AppendAllText(Path.Combine(Path.GetDirectoryName(StatePath), "io-events.jsonl"), new JavaScriptSerializer().Serialize(new { at = DateTime.UtcNow.ToString("o"), kind = kind, data = data }) + "\\n"); }\n        ' + fields,
         'Append test I/O evidence without altering the production record format')
       bytes = Buffer.from(text)
     }
     if (name === 'tests/PaymentHostEngineTests.cs') {
       let text = bytes.toString('utf8')
-      const before = 'Scan = (config, log, cancel) => new WorkbookResumeSummary { Pending = 1 }'
-      assert.ok(text.includes(before), 'Missing existing preflight fixture seam')
+      const before = [
+        'Scan = (config, log, cancel) => new WorkbookResumeSummary { Pending = 1 }',
+        'Scan = (config, log, cancel) => { config.PaymentLedgerDirectory = PaymentFixture.LedgerDirectory; return new WorkbookResumeSummary { Pending = 1 }; }'
+      ].find(candidate => text.includes(candidate))
+      assert.ok(before, 'Missing existing preflight fixture seam')
+      const after = before.replace('new WorkbookResumeSummary { Pending = 1 }', 'WorkbookResumeInspector.Scan(config, true, log, cancel)')
       info.fixtureOverlay.push({ label: 'Replace synthetic preflight summary with the production WorkbookResumeInspector', before,
-        after: 'Scan = (config, log, cancel) => WorkbookResumeInspector.Scan(config, true, log, cancel)' })
-      text = text.replaceAll(before, 'Scan = (config, log, cancel) => WorkbookResumeInspector.Scan(config, true, log, cancel)')
+        after })
+      text = text.replaceAll(before, after)
       text = replaceOnce(text, 'HermesReviewHost.Run();', 'PaymentControlsCdpFixture.Start(); HermesReviewHost.Run();',
         'Install the upstream synthetic Chrome boundary before the real host pipe starts')
       bytes = Buffer.from(text)
@@ -243,7 +258,12 @@ const controller = new DoudianController({ platform: process.platform, root: mod
     const host = new DoudianHost(executable, launch)
     return { async request(method, params, dispatch) {
       trace({ channel: 'host', method, params, foreground: dispatch?.foreground })
-      try { const result = await host.request(method, params, dispatch); trace({ channel: 'host-result', method, result }); return result }
+      try {
+        const reply = await host.request(method, params, dispatch)
+        const result = method === 'capabilities' ? { ...reply, embeddedBrowser: 0 } : reply
+        trace({ channel: 'host-result', method, result })
+        return result
+      }
       catch (error) { trace({ channel: 'host-error', method, error: error.message }); throw error }
     }, close() { host.close() } }
   }
@@ -455,7 +475,7 @@ try {
   await activePage.getByText('任务已完成。', { exact: true }).waitFor({ timeout: 20000 })
   check((await state(resumeRoot, 'completed')).result.task.taskId === resumeTask, 'resume completes the same CDP task ID')
   check(await activePage.getByLabel('金额', { exact: true }).inputValue() === activeAmount,
-    'same-task resume preserves the manually entered 3.25 amount')
+    `same-task resume preserves the manually entered ${activeAmount} amount`)
   saved = await disk(resumeRoot, 'persisted.json')
   check(saved['2']?.startsWith('已打款') && saved['3']?.startsWith('已打款') && saved['4'] === priorPaid,
     'resume persists two synthetic CDP success results and preserves prior paid D4')
@@ -492,7 +512,7 @@ try {
   await activePage.getByRole('button', { name: '继续', exact: true }).click()
   await activePage.getByText('任务已完成。', { exact: true }).waitFor({ timeout: 20000 })
   check(await activePage.getByLabel('金额', { exact: true }).inputValue() === activeAmount,
-    'D-column restart and resume preserve the manually entered 7.50 amount')
+    `D-column restart and resume preserve the manually entered ${activeAmount} amount`)
   saved = await disk(stopRoot, 'persisted.json')
   check(saved['2'] === unresolved && saved['3']?.startsWith('已打款') && saved['4'] === priorPaid,
     'restart preserves unresolved D2 and paid D4 byte-for-byte and completes pending D3')
@@ -517,13 +537,13 @@ try {
   const prepares = all.filter(entry => entry.channel === 'ui-request' && entry.request.action === 'preparePayment')
   check(prepares.length === 4 && prepares.every(entry => entry.request.transport === 'cdp' &&
     entry.request.amount === scenarioAmounts[entry.runId] && entry.request.mode === 'standard'),
-  'all UI prepare requests retain manually entered 3.25/7.50 amounts and standard mode')
+  'all UI prepare requests retain their configured manual amounts and standard mode')
   const dispatches = all.filter(entry => entry.channel === 'host' && ['startPayment', 'resumePayment'].includes(entry.method))
   check(dispatches.length === 5 && dispatches.every(entry => entry.foreground === false),
     'real Controller forwards CDP start/resume without foreground grants')
   info.cdpEvidence = []
   for (const [name, root] of [['resume', resumeRoot], ['restart', stopRoot]]) {
-    const configuredAmount = name === 'resume' ? 3.25 : 7.5
+    const configuredAmount = Number(scenarioAmounts[name === 'resume' ? '01-resume' : '05-restart'])
     const events = await cdpEvents(root)
     const methods = events.filter(entry => entry.kind === 'method').map(entry => entry.data)
     assert.deepEqual(methods.filter(entry => entry.method === 'prepareSearch').map(entry => entry.order), searchedOrders)
