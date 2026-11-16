@@ -14,18 +14,13 @@ import { LayoutDashboard, MessageSquareText, NotebookTabs, Users } from '@/lib/i
 import type { ShopBrowserProfile } from '../../electron/shop-browser-types'
 
 import { CustomerServicePreviewPanel } from './customer-service-preview'
+import { NativeAgentsPanel } from './native-agents'
 import type { EnterpriseClientRuntime } from './runtime'
 import { ShopBrowserProfilesPanel } from './shop-browser-profiles'
 
 type Page = 'shops' | 'rules' | 'workbench' | 'authorization'
 
-export function CustomerServicePage({
-  runtime,
-  employeeId
-}: {
-  runtime?: EnterpriseClientRuntime | null
-  employeeId?: string
-}) {
+export function CustomerServicePage({ runtime }: { runtime?: EnterpriseClientRuntime | null; employeeId?: string }) {
   const { locale } = useI18n()
   const copy = customerServiceCopy[locale]
   const layout = customerServiceLayoutCopy[locale]
@@ -228,34 +223,7 @@ export function CustomerServicePage({
                 ) : null}
               </>
             ) : null}
-            {page === 'authorization' ? (
-              <section className="cs-native-page">
-                <h2>{layout.authorization}</h2>
-                <p className="cs-scope-note">{layout.authorizationEvidence}</p>
-                <div className="cs-table-wrap">
-                  <table className="cs-table">
-                    <thead>
-                      <tr>
-                        <th>{layout.employee}</th>
-                        <th>{layout.shopName}</th>
-                        <th>{layout.shopId}</th>
-                        <th>{layout.profileScope}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {profiles.map(profile => (
-                        <tr key={profile.id}>
-                          <td>{employeeId ?? profile.principalId}</td>
-                          <td>{profile.shopName || profile.displayName}</td>
-                          <td>{profile.shopId ?? '—'}</td>
-                          <td>{layout.profileScope}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            ) : null}
+            {page === 'authorization' ? <NativeAgentsPanel runtime={runtime} /> : null}
           </>
         )}
       </main>

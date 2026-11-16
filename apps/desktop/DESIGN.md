@@ -91,6 +91,15 @@ scoped to the active gateway profile. Native Windows controls follow the selecte
 theme. Open DOM dialogs temporarily suspend embedded shop WebContentsViews and
 restore the same views when dismissed.
 
+The native business administration dialogs use the recovered XAML geometry in
+`native-business-admin.css`. Mailbox width is 460px, subaccount list is 960x640,
+subaccount editor width is 440px, seat editor is 360x260 and shop visibility is
+420x560. The compact seat dialogs retain the native indigo action color. Server
+authority controls persistence and employee sharing. Saved credentials are
+represented by `hasPassword` and are never populated back into password inputs.
+The all-future-shops scope and unavailable seat lifecycle endpoints remain visibly
+disabled. The enterprise shell and light-mode skin retain their theme tokens.
+
 Enterprise reading scale is owned by `enterprise-design-tokens.css`: body
 14px/24px, answer text 16px/1.75, labels 13px/22px, secondary metadata
 12px/20px, section titles 17px/26px and page titles 24px/38px. Legacy small

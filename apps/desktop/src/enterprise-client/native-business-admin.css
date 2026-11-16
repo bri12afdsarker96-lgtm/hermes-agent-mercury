@@ -1,0 +1,396 @@
+.cs-admin-dialog {
+  font-family: 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+  border: 1px solid var(--ui-stroke-secondary);
+  border-radius: 10px;
+  background: var(--ui-bg-surface);
+  width: min(460px, 94vw);
+  max-width: 94vw;
+  padding: 0;
+  overflow: hidden;
+}
+.cs-admin-dialog .cs-admin-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+  max-height: 90vh;
+  padding: 0;
+  overflow: auto;
+}
+.cs-admin-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 52px;
+  padding: 12px 16px;
+  background: var(--cs-dialog-header-bg);
+}
+.cs-admin-header h2 {
+  margin: 0;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  letter-spacing: normal;
+}
+.cs-admin-dialog .cs-admin-close {
+  height: 28px;
+  min-height: 28px;
+  width: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-tertiary);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.cs-admin-dialog .cs-admin-close:hover {
+  background: #e81123;
+  color: white;
+}
+.cs-admin-form {
+  margin: 18px 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.cs-admin-dialog .cs-admin-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ui-text-secondary);
+}
+.cs-admin-dialog .cs-admin-form input,
+.cs-admin-dialog .cs-admin-form select {
+  width: 100%;
+  height: 40px;
+  min-height: 40px;
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 14px;
+  border-radius: 8px;
+  color: var(--ui-text-primary);
+}
+.cs-admin-dialog .cs-admin-form select {
+  height: 36px;
+  min-height: 36px;
+  padding: 6px 9px;
+}
+.cs-admin-password {
+  position: relative;
+}
+.cs-admin-dialog .cs-admin-password input {
+  padding-inline-end: 64px;
+}
+.cs-admin-dialog .cs-admin-password button {
+  position: absolute;
+  inset-inline-end: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 52px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+}
+.cs-admin-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  margin-top: auto;
+  background: var(--cs-dialog-header-bg);
+}
+.cs-admin-footer > span {
+  margin-inline-end: auto;
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+}
+.cs-admin-dialog .cs-admin-footer button {
+  height: 36px;
+  min-height: 36px;
+  padding: 8px 16px;
+  font-size: 13px;
+}
+.cs-subaccounts-dialog {
+  width: min(960px, 94vw);
+  height: min(640px, 90vh);
+}
+.cs-subaccounts-dialog .cs-admin-dialog-body {
+  height: 100%;
+}
+.cs-admin-list-toolbar {
+  margin: 14px 16px 0;
+  display: flex;
+  gap: 8px;
+}
+.cs-admin-list-table {
+  margin: 12px 16px 0;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--ui-stroke-secondary);
+  border-radius: 10px;
+}
+.cs-subaccounts-dialog .cs-admin-footer {
+  margin-top: 12px;
+}
+.cs-subaccounts-table {
+  width: 100%;
+  min-width: 800px;
+  table-layout: fixed;
+}
+.cs-subaccounts-table col:nth-child(1) {
+  width: 70px;
+}
+.cs-subaccounts-table col:nth-child(3) {
+  width: 70px;
+}
+.cs-subaccounts-table col:nth-child(4) {
+  width: 160px;
+}
+.cs-subaccounts-table col:nth-child(5) {
+  width: 230px;
+}
+.cs-admin-dialog .cs-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cs-admin-dialog .cs-table .cs-actions {
+  gap: 4px;
+}
+.cs-admin-dialog .cs-table button {
+  font-size: 11px;
+  padding: 4px 10px;
+  height: 28px;
+  min-height: 28px;
+}
+.cs-admin-list-status {
+  margin: 8px 16px 0;
+}
+.cs-subaccount-edit-dialog {
+  width: min(440px, 94vw);
+}
+.cs-admin-confirm {
+  width: min(400px, 94vw);
+}
+.cs-admin-compact {
+  background: var(--ui-bg-elevated);
+}
+.cs-admin-compact .cs-admin-header {
+  background: transparent;
+  padding: 0;
+  min-height: 0;
+}
+.cs-admin-compact .cs-admin-header h2 {
+  font-size: 17px;
+  line-height: 23px;
+}
+.cs-admin-compact .cs-admin-footer {
+  padding: 0;
+  gap: 10px;
+  background: transparent;
+}
+.cs-admin-compact .cs-admin-footer button {
+  width: 80px;
+  height: 34px;
+  min-height: 34px;
+  border-radius: 0;
+}
+.cs-admin-compact .cs-admin-footer button:last-child {
+  background: #6366f1;
+  color: #fff;
+}
+.cs-agent-edit-dialog {
+  width: min(360px, 94vw);
+  height: 260px;
+}
+.cs-agent-edit-dialog .cs-admin-dialog-body {
+  padding: 22px;
+  height: 100%;
+}
+.cs-agent-edit-dialog .cs-admin-form {
+  margin: 16px 0 0;
+  gap: 8px;
+}
+.cs-agent-edit-dialog .cs-admin-form input {
+  height: 34px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: 0;
+}
+.cs-agent-edit-dialog .cs-admin-form p {
+  font-size: 11px;
+}
+.cs-grants-dialog {
+  width: min(420px, 94vw);
+  height: min(560px, 90vh);
+}
+.cs-grants-dialog .cs-admin-dialog-body {
+  height: 100%;
+  padding: 20px;
+}
+.cs-grants-scope {
+  display: grid;
+  gap: 4px;
+  margin: 4px 0 12px;
+}
+.cs-grants-scope > span {
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+.cs-admin-dialog .cs-grants-scope label,
+.cs-admin-dialog .cs-grants-list label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+}
+.cs-admin-dialog .cs-grants-scope input {
+  width: 13px;
+  height: 13px;
+  min-height: 13px;
+  margin: 0;
+  padding: 0;
+}
+.cs-grants-list {
+  flex: 1;
+  min-height: 50px;
+  overflow: auto;
+  padding: 6px;
+  background: var(--ui-bg-secondary);
+  border-radius: 8px;
+}
+.cs-admin-dialog .cs-grants-list label {
+  margin: 5px 6px;
+}
+.cs-admin-dialog .cs-grants-list input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+}
+.cs-admin-boundary {
+  font-size: 11px;
+  color: var(--ui-text-secondary);
+  margin: 8px 0;
+}
+.cs-grants-dialog .cs-admin-footer {
+  margin-top: 14px;
+}
+.cs-agents-page {
+  display: flex;
+  flex-direction: column;
+}
+.cs-agents-toolbar {
+  margin-top: 16px;
+}
+.cs-agents-page .cs-agents-toolbar > input {
+  width: 220px;
+  margin-inline-start: 0;
+}
+.cs-agents-toolbar button {
+  width: 100px;
+  margin-inline-start: 0;
+}
+.cs-agents-page > .cs-table-wrap {
+  margin-top: 12px;
+  flex: 1;
+}
+.cs-agents-table {
+  width: 100%;
+  min-width: 900px;
+  table-layout: fixed;
+}
+.cs-agents-table col:nth-child(1) {
+  width: 60px;
+}
+.cs-agents-table col:nth-child(2) {
+  width: 180px;
+}
+.cs-agents-table col:nth-child(3) {
+  width: 90px;
+}
+.cs-agents-table col:nth-child(4) {
+  width: 130px;
+}
+.cs-agents-table col:nth-child(5) {
+  width: 170px;
+}
+.cs-agents-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cs-agents-table td:first-child {
+  color: var(--ui-text-tertiary);
+  text-align: center;
+}
+.cs-agents-table .cs-actions {
+  gap: 4px;
+}
+.cs-agents-table button {
+  font-size: 11px;
+  padding: 4px 10px;
+  min-height: 28px;
+  height: 28px;
+}
+.cs-agent-status {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: #6b728026;
+  color: var(--ui-text-secondary);
+  font-size: 11px;
+}
+.cs-agent-status[data-enabled='true'] {
+  color: #10b981;
+  background: #10b98126;
+}
+.cs-shared-assignment {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--ui-stroke-secondary);
+  border-radius: 8px;
+}
+.cs-shared-members {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.cs-shared-members label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cs-shared-members input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+.cs-admin-dialog button[data-native-tone='info'] {
+  background: var(--cs-info-bg);
+  color: var(--cs-info-fg);
+  border-color: var(--cs-info-border);
+}
+.cs-admin-dialog button[data-native-tone='danger'] {
+  background: var(--status-danger-bg);
+  color: var(--status-danger-fg);
+  border-color: var(--status-danger-border);
+}
+html[data-hermes-mode='dark'] .cs-admin-compact {
+  background: #1f1f1f;
+  border-color: #333;
+}
+html[data-hermes-mode='dark'] .cs-grants-list {
+  background: #262626;
+}

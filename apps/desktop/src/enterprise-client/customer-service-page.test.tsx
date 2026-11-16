@@ -40,7 +40,29 @@ function fixture() {
     action === 'list' ? new Promise<ShopBrowserReply>(resolve => requests.push(resolve)) : Promise.resolve({ ok: true })
   )
 
-  return { requests, send, runtime: { shopBrowser: send } as unknown as EnterpriseClientRuntime }
+  const get = vi.fn(async (path: string) => {
+    if (path === '/api/whoami') {
+      return { role: 'operator', tenant_id: 't', principal_id: 'p', name: '当前员工' }
+    }
+
+    if (path === '/api/shop-login-profiles') {
+      return {
+        profiles: [
+          {
+            profile_id: profile.id,
+            revision: 1,
+            deleted: false,
+            servicing_principal_id: 'p',
+            profile: { shop_name: '已保存店铺' }
+          }
+        ]
+      }
+    }
+
+    throw new Error('Unexpected endpoint')
+  })
+
+  return { requests, send, runtime: { shopBrowser: send, get } as unknown as EnterpriseClientRuntime }
 }
 
 it.each(['话术规则', '坐席工作台', '坐席与授权'])(
@@ -55,7 +77,8 @@ it.each(['话术规则', '坐席工作台', '坐席与授权'])(
     await act(async () => f.requests[1]({ ok: true, profiles: [profile] }))
 
     if (destination === '坐席与授权') {
-      await screen.findByText('已保存店铺')
+      const row = await screen.findByText('当前员工')
+      expect(row.closest('tr')?.textContent).toContain('1 家店铺')
     } else {
       expect((await screen.findByTestId('loaded-workflow')).textContent).toBe(profile.id)
     }

@@ -16,8 +16,11 @@ import { recoverableShopBrowserErrors } from '../../electron/shop-browser-types'
 import type { EnterpriseClientRuntime } from './runtime'
 import { ShopBrowserRuntimeSettings } from './shop-browser-runtime'
 import { ShopBrowserWorkspacePanel } from './shop-browser-workspace'
+import { ShopMailboxButton } from './shop-mailbox'
 import { ShopPayoutSettingsButton } from './shop-payout-settings'
 import { ShopServiceAssignment } from './shop-service-assignment'
+import { ShopSharedAssignment } from './shop-shared-assignment'
+import { ShopSubAccountsButton } from './shop-subaccounts'
 
 export function ShopBrowserProfilesPanel({
   runtime,
@@ -275,7 +278,8 @@ export function ShopBrowserProfilesPanel({
   )
 
   const open = useCallback(
-    (target: 'merchant' | 'feige', profileId = selected) => invoke({ action: 'open', profileId, target, bounds: bounds() }),
+    (target: 'merchant' | 'feige', profileId = selected) =>
+      invoke({ action: 'open', profileId, target, bounds: bounds() }),
     [invoke, selected, bounds]
   )
 
@@ -371,6 +375,7 @@ export function ShopBrowserProfilesPanel({
           >
             {native.export}
           </Button>
+          <ShopMailboxButton disabled={busy || !!opened} runtime={runtime} />
           <select aria-label={native.shopFilter} onChange={event => setFilter(event.target.value)} value={filter}>
             <option value="all">{layout.all}</option>
             <option value="expired">{layout.loginLog}</option>
@@ -485,12 +490,23 @@ export function ShopBrowserProfilesPanel({
                     </td>
                     <td>
                       <div className="cs-actions cs-shop-row-actions">
-                        <Button aria-describedby="shop-reception-service-unavailable" data-native-tone="success" disabled variant="secondary">
+                        <Button
+                          aria-describedby="shop-reception-service-unavailable"
+                          data-native-tone="success"
+                          disabled
+                          variant="secondary"
+                        >
                           {browserRuntime.online}
                         </Button>
-                        <Button aria-describedby="shop-reception-service-unavailable" data-native-tone="danger" disabled variant="secondary">
+                        <Button
+                          aria-describedby="shop-reception-service-unavailable"
+                          data-native-tone="danger"
+                          disabled
+                          variant="secondary"
+                        >
                           {browserRuntime.offline}
                         </Button>
+                        <ShopSubAccountsButton disabled={busy || !!opened} profile={profile} runtime={runtime} />
                         <ShopPayoutSettingsButton
                           disabled={busy || !!opened}
                           onSaved={refresh}
@@ -521,7 +537,7 @@ export function ShopBrowserProfilesPanel({
               {copy[selectedProfile.loginState]} · {selectedProfile.shopName || selectedProfile.displayName}
             </span>
             {selectedProfile.loginState === 'verified' ? <p role="status">{copy.sharedReady}</p> : null}
-            <ShopServiceAssignment onTransferred={refresh} profileId={selectedProfile.id} runtime={runtime} />
+            <ShopSharedAssignment onSaved={refresh} profileId={selectedProfile.id} runtime={runtime} />
             <div className="cs-actions">
               <Button disabled={busy} onClick={() => open('merchant')} variant="secondary">
                 {copy.merchant}
@@ -576,7 +592,9 @@ export function ShopBrowserProfilesPanel({
                 value={opened}
               >
                 {profiles.map(profile => (
-                  <option key={profile.id} value={profile.id}>{profile.shopName || profile.displayName}</option>
+                  <option key={profile.id} value={profile.id}>
+                    {profile.shopName || profile.displayName}
+                  </option>
                 ))}
               </select>
               <div>
