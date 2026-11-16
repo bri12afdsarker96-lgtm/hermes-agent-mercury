@@ -316,6 +316,26 @@ export class ShopBrowserProfiles {
     }
   }
 
+  private async assertCloudProfileAccess(profile: StoredProfile) {
+    try {
+      await this.authority()
+      await this.checkProfileAccess(profile, true)
+    } catch (error) {
+      this.cloudAccess = undefined
+      const closing: Promise<void>[] = []
+
+      if (this.opened?.id === profile.id) {
+        closing.push(this.closeView(false))
+      }
+
+      closing.push(...[...this.executions]
+        .filter(execution => execution.profileId === profile.id)
+        .map(execution => execution.close()))
+      await Promise.allSettled(closing)
+      throw error
+    }
+  }
+
   private applyCloudPayoutSettings(profile: StoredProfile, remote: CloudShopRecord) {
     if (!remote.payout_settings) {
       return false
@@ -713,6 +733,7 @@ export class ShopBrowserProfiles {
 
       const transport = await this.deps.createExecution(this.storage(scope, profile), target)
       let released = false
+      let closing: Promise<void> | undefined
 
       const execution: BoundShopExecution = {
         connectionId: randomUUID().replaceAll('-', ''),
@@ -724,7 +745,7 @@ export class ShopBrowserProfiles {
             fail('SHOP_PROFILE_OWNER_CHANGED')
           }
 
-          await this.checkProfileAccess(profile!)
+          await this.assertCloudProfileAccess(profile!)
 
           if (released) {
             fail('SHOP_PROFILE_OWNER_CHANGED')
@@ -743,7 +764,7 @@ export class ShopBrowserProfiles {
             fail('SHOP_PROFILE_OWNER_CHANGED')
           }
 
-          await this.checkProfileAccess(profile!)
+          await this.assertCloudProfileAccess(profile!)
 
           if (released) {
             fail('SHOP_PROFILE_OWNER_CHANGED')
@@ -762,8 +783,7 @@ export class ShopBrowserProfiles {
             fail('SHOP_PROFILE_OWNER_CHANGED')
           }
 
-          await this.authority()
-          await this.checkProfileAccess(profile!, true)
+          await this.assertCloudProfileAccess(profile!)
 
           if (released) {
             fail('SHOP_PROFILE_OWNER_CHANGED')
@@ -780,32 +800,32 @@ export class ShopBrowserProfiles {
             fail('SHOP_PROFILE_IDENTITY_CHANGED')
           }
         },
-        close: async () => {
-          if (released) {
-            return
-          }
+        close: () => {
+          closing ??= (async () => {
+            released = true
 
-          released = true
+            try {
+              await transport.close()
+            } finally {
+              this.executions.delete(execution)
+            }
 
-          try {
-            await transport.close()
-          } finally {
-            this.executions.delete(execution)
-          }
+            if (!this.invalidated && this.deps.isCurrent() && this.deps.cloud) {
+              const backup = this.tail.then(async () => {
+                const owner = await this.authority()
+                const profiles = await this.read(owner)
+                const profile = profiles.find(profile => profile.id === profileId)
 
-          if (!this.invalidated && this.deps.isCurrent() && this.deps.cloud) {
-            const backup = this.tail.then(async () => {
-              const owner = await this.authority()
-              const profiles = await this.read(owner)
-              const profile = profiles.find(profile => profile.id === profileId)
+                if (profile?.loginState === 'verified' && !this.revokedProfiles.has(profileId)) {
+                  await this.backup(owner, profiles, profile)
+                }
+              })
 
-              if (profile?.loginState === 'verified' && !this.revokedProfiles.has(profileId)) {
-                await this.backup(owner, profiles, profile)
-              }
-            })
+              this.tail = backup.catch(() => {})
+            }
+          })()
 
-            this.tail = backup.catch(() => {})
-          }
+          return closing
         }
       }
 
@@ -942,7 +962,11 @@ export class ShopBrowserProfiles {
       fail('SHOP_PROFILE_NOT_FOUND')
     }
 
-    await this.checkProfileAccess(profile!, request.action !== 'browser')
+    if (request.action === 'browser' && request.browser?.action === 'state') {
+      await this.checkProfileAccess(profile!)
+    } else {
+      await this.assertCloudProfileAccess(profile!)
+    }
 
     if (request.action === 'assign') {
       if (

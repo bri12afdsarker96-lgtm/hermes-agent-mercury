@@ -42,6 +42,7 @@ async function fixture(options: { root?: string; authority?: ShopBrowserAuthorit
   let identity = options.identity ?? { shopId: '10001', shopName: 'Synthetic shop A' }
   const identities = new Map<string, typeof identity>()
   const events: string[] = []
+  const browserDispatch = vi.fn()
 
   const views: {
     storage: string
@@ -94,11 +95,12 @@ async function fixture(options: { root?: string; authority?: ShopBrowserAuthorit
                 canGoForward: false
               }),
               navigate: next => {
+                browserDispatch('navigate', next)
                 address = next
               },
-              back() {},
-              forward() {},
-              reload() {},
+              back() { browserDispatch('back') },
+              forward() { browserDispatch('forward') },
+              reload() { browserDispatch('reload') },
               setVisible: visible => {
                 page.visible = visible
               }
@@ -198,6 +200,7 @@ async function fixture(options: { root?: string; authority?: ShopBrowserAuthorit
     views,
     executions,
     events,
+    browserDispatch,
     maxLive: () => maximumLiveViews,
     revoke: () => {
       allowed = false
@@ -237,8 +240,12 @@ describe('local shop browser runtime', () => {
     }
   )
 
-  it('keeps both assigned employees usable and fences removed members, retained views and execution handles', async () => {
+  it.each(['periodic', 'command', 'identify', 'validate', 'browser', 'offline-command', 'offline-browser',
+    'concurrent-command', 'pending-command', 'inflight-command'] as const)(
+    'fences removed members before %s dispatch while keeping the other assigned employee usable', async trigger => {
     let record: CloudShopRecord | undefined
+    let aOffline = false
+    let gateNextARead: (() => Promise<void>) | undefined
     const hidden = new Map<string, Set<string>>()
     const requests: { principal: string; path: string }[] = []
 
@@ -256,6 +263,16 @@ describe('local shop browser runtime', () => {
           }
 
           if (url === '/api/shop-login-profiles' && method === 'GET') {
+            if (principal === 'employee-a' && gateNextARead) {
+              const gate = gateNextARead
+              gateNextARead = undefined
+              await gate()
+            }
+
+            if (principal === 'employee-a' && aOffline) {
+              throw new Error('503')
+            }
+
             return {
               profiles: record && visible() && !hidden.get(principal)?.has(record.profile_id) ? [metadata()] : [],
               hidden_profile_ids: visible() ? [...(hidden.get(principal) ?? [])] : []
@@ -353,6 +370,22 @@ describe('local shop browser runtime', () => {
     await execution.command('root', 'Runtime.evaluate', {})
     expect((await a.open(profile.id)).ok).toBe(true)
     const oldView = a.views[0]
+    let finishInFlight: (() => void) | undefined
+    let inFlight: Promise<unknown> | undefined
+
+    if (trigger === 'inflight-command') {
+      let started!: () => void
+      const dispatched = new Promise<void>(resolve => { started = resolve })
+      a.executions.at(-1)!.command.mockImplementationOnce(async () => {
+        started()
+        await new Promise<void>(resolve => { finishInFlight = resolve })
+
+        return { method: 'Runtime.evaluate' }
+      })
+      inFlight = execution.command('root', 'Runtime.evaluate', {})
+      await dispatched
+    }
+
     const oldCommandCount = a.executions.reduce((sum, item) => sum + item.command.mock.calls.length, 0)
     expect(
       (
@@ -363,26 +396,102 @@ describe('local shop browser runtime', () => {
         })
       ).ok
     ).toBe(true)
-    let release!: () => void
-    let started!: () => void
 
-    const closing = new Promise<void>((resolve) => {
-      started = resolve
-    })
+    if (inFlight) {
+      finishInFlight!()
+      await expect(inFlight).resolves.toEqual({ method: 'Runtime.evaluate' })
+    }
 
-    a.executions.at(-1)!.close.mockImplementationOnce(() => {
-      started()
+    if (trigger === 'periodic') {
+      let release!: () => void
+      let started!: () => void
 
-      return new Promise<void>((resolve) => {
-        release = resolve
+      const closing = new Promise<void>((resolve) => {
+        started = resolve
       })
-    })
-    const checking = a.runtime.revalidate()
-    await closing
-    expect(a.clearStorage).not.toHaveBeenCalled()
-    await expect(execution.command('root', 'Runtime.evaluate', {})).rejects.toThrow('OWNER_CHANGED')
-    release()
-    await checking
+
+      a.executions.at(-1)!.close.mockImplementationOnce(() => {
+        started()
+
+        return new Promise<void>((resolve) => {
+          release = resolve
+        })
+      })
+      const checking = a.runtime.revalidate()
+      await closing
+      expect(a.clearStorage).not.toHaveBeenCalled()
+      await expect(execution.command('root', 'Runtime.evaluate', {})).rejects.toThrow('OWNER_CHANGED')
+      release()
+      await checking
+    } else {
+      const priorReads = requests.filter(item => item.principal === 'employee-a' && item.path === '/api/shop-login-profiles').length
+      const priorIdentify = a.executions.at(-1)!.identify.mock.calls.length
+      aOffline = trigger.startsWith('offline-')
+
+      if (trigger === 'concurrent-command') {
+        let started!: () => void
+        let release!: () => void
+        const entered = new Promise<void>(resolve => { started = resolve })
+
+        gateNextARead = async () => {
+          started()
+          await new Promise<void>(resolve => { release = resolve })
+        }
+
+        const checking = Promise.allSettled([
+          execution.command('root', 'Runtime.evaluate', {}),
+          execution.command('root', 'Runtime.evaluate', {})
+        ])
+
+        await entered
+        expect(requests.filter(item => item.principal === 'employee-a' && item.path === '/api/shop-login-profiles')).toHaveLength(priorReads + 1)
+        release()
+        const results = await checking
+        expect(results.map(result => result.status)).toEqual(['rejected', 'rejected'])
+        expect(results.every(result => result.status === 'rejected' && result.reason.message === 'SHOP_PROFILE_FORBIDDEN')).toBe(true)
+      } else if (trigger === 'pending-command') {
+        let started!: () => void
+        let release!: () => void
+        const closing = new Promise<void>(resolve => { started = resolve })
+        a.executions.at(-1)!.close.mockImplementationOnce(async () => {
+          started()
+          await new Promise<void>(resolve => { release = resolve })
+        })
+        const rejected = expect(execution.command('root', 'Runtime.evaluate', {})).rejects.toThrow('SHOP_PROFILE_FORBIDDEN')
+        await closing
+        let repeatedCloseFinished = false
+        const repeatedClose = execution.close().then(() => { repeatedCloseFinished = true })
+        const refreshing = a.runtime.revalidate()
+        await new Promise<void>(resolve => { setImmediate(resolve) })
+        expect(repeatedCloseFinished).toBe(false)
+        expect(a.clearStorage).not.toHaveBeenCalled()
+        release()
+        await rejected
+        await repeatedClose
+        await refreshing
+      } else if (trigger.endsWith('browser')) {
+        const reply = await a.call('browser', { profileId: profile.id, browser: { action: 'reload' } })
+        expect(reply).toEqual({ ok: false, error: aOffline ? 'SHOP_PROFILE_ACCESS_UNAVAILABLE' : 'SHOP_PROFILE_FORBIDDEN' })
+      } else {
+        const result = trigger.endsWith('command')
+          ? execution.command('root', 'Runtime.evaluate', {})
+          : execution[trigger as 'identify' | 'validate']()
+
+        await expect(result).rejects.toThrow(aOffline ? 'SHOP_PROFILE_ACCESS_UNAVAILABLE' : 'SHOP_PROFILE_FORBIDDEN')
+      }
+
+      expect(requests.filter(item => item.principal === 'employee-a' && item.path === '/api/shop-login-profiles').length).toBeGreaterThan(priorReads)
+      expect(a.executions.at(-1)!.identify).toHaveBeenCalledTimes(priorIdentify)
+      expect(a.browserDispatch).not.toHaveBeenCalled()
+      expect(a.executions.reduce((sum, item) => sum + item.command.mock.calls.length, 0)).toBe(oldCommandCount)
+      expect(oldView.closed).toBe(true)
+      expect(oldView.pages.every(page => page.closed)).toBe(true)
+      await expect(execution.command('root', 'Runtime.evaluate', {})).rejects.toThrow('OWNER_CHANGED')
+      aOffline = false
+      await a.runtime.revalidate()
+      await a.call('list')
+    }
+
     expect(oldView.closed).toBe(true)
     expect(oldView.pages.every((page) => page.closed)).toBe(true)
     expect(a.clearStorage).toHaveBeenCalledWith(oldView.storage)
