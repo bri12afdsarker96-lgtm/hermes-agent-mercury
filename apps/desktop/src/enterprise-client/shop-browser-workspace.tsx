@@ -69,8 +69,12 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
   const [dragging, setDragging] = useState(false)
   const [externalDialogOpen, setExternalDialogOpen] = useState(false)
   const workspace = useRef<HTMLDivElement>(null)
-  const drag = useRef<{ x: number; width: number; nextWidth: number } | null>(null)
-  const lifecycle = useMemo(() => ({ runtime, profileId, alive: true, busy: false, layoutVersion: 0 }), [runtime, profileId])
+
+  const lifecycle = useMemo(() => ({
+    runtime, profileId, alive: true, busy: false, layoutVersion: 0,
+    drag: null as { x: number; width: number; nextWidth: number } | null
+  }), [runtime, profileId])
+
   const active = snapshot?.tabs.find(tab => tab.id === snapshot.activeTabId)
 
   const overlayOpen =
@@ -99,7 +103,7 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
         setSnapshot(reply.browser)
 
         if (
-          reply.browser.layout && !drag.current && layoutVersion === lifecycle.layoutVersion &&
+          reply.browser.layout && !lifecycle.drag && layoutVersion === lifecycle.layoutVersion &&
           request.action === 'browser' && ['state', 'layout'].includes(request.browser?.action ?? '')
         ) {
           setSideWidth(reply.browser.layout.sideWidth)
@@ -182,10 +186,13 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
   }, [])
 
   useEffect(() => {
-    drag.current = null
     setDragging(false)
     setSideWidth(320)
     setCollapsed(false)
+
+    return () => {
+      lifecycle.drag = null
+    }
   }, [lifecycle])
 
   useEffect(() => {
@@ -220,19 +227,19 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
   }, [overlayOpen, browser, lifecycle])
 
   const finishDrag = useCallback(() => {
-    const completed = drag.current
+    const completed = lifecycle.drag
 
     if (!completed) {
       return
     }
 
-    drag.current = null
+    lifecycle.drag = null
     setDragging(false)
 
     if (completed.nextWidth !== completed.width) {
       saveLayout({ action: 'layout', sideWidth: completed.nextWidth, containerWidth: workspace.current?.clientWidth ?? 0 })
     }
-  }, [saveLayout])
+  }, [lifecycle, saveLayout])
 
   useEffect(() => {
     if (!dragging) {
@@ -240,15 +247,15 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
     }
 
     const move = (event: PointerEvent) => {
-      if (!drag.current || collapsed) {
+      if (!lifecycle.drag || collapsed) {
         return
       }
 
-      const width = drag.current.width + drag.current.x - event.clientX
+      const width = lifecycle.drag.width + lifecycle.drag.x - event.clientX
       const max = Math.max((workspace.current?.clientWidth ?? 0) * 0.6, 320)
 
       if (width >= 260 && width <= max) {
-        drag.current.nextWidth = width
+        lifecycle.drag.nextWidth = width
         setSideWidth(width)
       }
     }
@@ -264,7 +271,7 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
       window.removeEventListener('pointercancel', finishDrag)
       window.removeEventListener('blur', finishDrag)
     }
-  }, [dragging, collapsed, finishDrag])
+  }, [dragging, collapsed, finishDrag, lifecycle])
 
   const bookmarked =
     !!active &&
@@ -522,7 +529,7 @@ export function ShopBrowserWorkspacePanel({ runtime, profileId, shopVerified, vi
               onPointerDown={event => {
                 event.preventDefault()
                 lifecycle.layoutVersion++
-                drag.current = { x: event.clientX, width: sideWidth, nextWidth: sideWidth }
+                lifecycle.drag = { x: event.clientX, width: sideWidth, nextWidth: sideWidth }
                 setDragging(true)
               }}
               role="separator"

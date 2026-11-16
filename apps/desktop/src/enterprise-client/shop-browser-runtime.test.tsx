@@ -1,7 +1,8 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import type {
@@ -9,13 +10,13 @@ import type {
   ShopBrowserRuntimeRequest,
   ShopBrowserRuntimeSnapshot
 } from '../../electron/shop-browser-runtime-types'
-
-import type { EnterpriseClientRuntime } from './runtime'
 import type { ShopBrowserBounds, ShopBrowserReply, ShopBrowserRequest } from '../../electron/shop-browser-types'
 import type { ShopBrowserTabPage, ShopBrowserWorkspace } from '../../electron/shop-browser-workspace-types'
-import { ShopBrowserWorkspacePanel } from './shop-browser-workspace'
+
+import type { EnterpriseClientRuntime } from './runtime'
 import { ShopBrowserProfilesPanel } from './shop-browser-profiles'
 import { ShopBrowserRuntimeSettings } from './shop-browser-runtime'
+import { ShopBrowserWorkspacePanel } from './shop-browser-workspace'
 
 vi.mock('@/i18n/context', () => ({ useI18n: () => ({ locale: 'zh', t: { common: { close: '关闭' } } }) }))
 afterEach(() => vi.unstubAllGlobals())
@@ -229,8 +230,8 @@ async function layoutFixture() {
     expect((await controller.operate({ sessionId: 'synthetic-session', action: 'open', profileId, target: 'merchant',
       bounds: { x: 0, y: 0, width: 1000, height: 700 } })).ok).toBe(true)
   }
-  const panel = (profileId: string) => <ShopBrowserWorkspacePanel key={profileId} runtime={runtime} profileId={profileId}
-    shopVerified viewportRef={{ current: null }} onClosed={() => {}} />
+  const panel = (profileId: string) => <ShopBrowserWorkspacePanel key={profileId} onClosed={() => {}} profileId={profileId}
+    runtime={runtime} shopVerified viewportRef={{ current: null }} />
   return { controller, send, open, create, panel }
 }
 
@@ -284,7 +285,11 @@ it.each(['pointerUp', 'pointerCancel', 'blur'] as const)('paints pointer moves l
   Object.defineProperty(layoutContent(), 'clientWidth', { value: 1000, configurable: true })
   f.send.mockClear()
   fireEvent.pointerDown(screen.getByRole('separator'), { clientX: 800 })
-  for (const x of [790, 760, 720, 660]) fireEvent.pointerMove(window, { clientX: x })
+
+  for (const x of [790, 760, 720, 660]) {
+    fireEvent.pointerMove(window, { clientX: x })
+  }
+
   expect(screen.getByRole('separator').getAttribute('aria-valuenow')).toBe('460')
   expect(f.send.mock.calls.filter(([r]) => (r.browser?.action as string) === 'layout')).toHaveLength(0)
   fireEvent[end](window)
