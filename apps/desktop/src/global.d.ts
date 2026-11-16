@@ -3,6 +3,7 @@ import type { TranslucencyState } from '@hermes/shared/translucency'
 
 import type { DoudianReply, DoudianRequest } from '../electron/doudian-types'
 import type { ShopBrowserReply, ShopBrowserRequest } from '../electron/shop-browser-types'
+import type { ShopBrowserRuntimeReply, ShopBrowserRuntimeRequest } from '../electron/shop-browser-runtime-types'
 import type { CustomerServiceReply, CustomerServiceRequest } from '../electron/customer-service-types'
 import type { EnterprisePackageUpdateState } from '../electron/enterprise-package-updater-types'
 
@@ -191,6 +192,7 @@ declare global {
       enterprise?: {
         doudian?: (payload: DoudianRequest) => Promise<DoudianReply>
         shopBrowser?: (payload: ShopBrowserRequest) => Promise<ShopBrowserReply>
+        shopBrowserRuntime?: (payload: ShopBrowserRuntimeRequest) => Promise<ShopBrowserRuntimeReply>
         customerService?: (payload: CustomerServiceRequest) => Promise<CustomerServiceReply>
         /** Local package updates are available independently of login and role. */
         packageUpdate?: {

@@ -7,12 +7,14 @@ import { customerServiceCopy } from '@/i18n/customer-service'
 import { customerServiceLayoutCopy } from '@/i18n/customer-service-layout'
 import { nativeUiCopy } from '@/i18n/native-ui'
 import { shopBrowserCopy } from '@/i18n/shop-browser'
+import { shopBrowserRuntimeCopy } from '@/i18n/shop-browser-runtime'
 import { shopCloudCopy } from '@/i18n/shop-cloud'
 
 import type { ShopBrowserProfile, ShopBrowserReply, ShopBrowserRequest } from '../../electron/shop-browser-types'
 import { recoverableShopBrowserErrors } from '../../electron/shop-browser-types'
 
 import type { EnterpriseClientRuntime } from './runtime'
+import { ShopBrowserRuntimeSettings } from './shop-browser-runtime'
 import { ShopBrowserWorkspacePanel } from './shop-browser-workspace'
 import { ShopPayoutSettingsButton } from './shop-payout-settings'
 import { ShopServiceAssignment } from './shop-service-assignment'
@@ -38,6 +40,7 @@ export function ShopBrowserProfilesPanel({
   const copy = shopBrowserCopy[locale]
   const layout = customerServiceLayoutCopy[locale]
   const native = nativeUiCopy[locale]
+  const browserRuntime = shopBrowserRuntimeCopy[locale]
   const [profiles, setProfiles] = useState<ShopBrowserProfile[]>([])
   const [loaded, setLoaded] = useState(false)
   const [localSelected, setSelected] = useState('')
@@ -272,7 +275,7 @@ export function ShopBrowserProfilesPanel({
   )
 
   const open = useCallback(
-    (target: 'merchant' | 'feige') => invoke({ action: 'open', profileId: selected, target, bounds: bounds() }),
+    (target: 'merchant' | 'feige', profileId = selected) => invoke({ action: 'open', profileId, target, bounds: bounds() }),
     [invoke, selected, bounds]
   )
 
@@ -380,6 +383,10 @@ export function ShopBrowserProfilesPanel({
           />
           {busy ? <span role="status">{copy.pending}</span> : null}
         </div>
+        {!opened ? <ShopBrowserRuntimeSettings onClosed={browserClosed} runtime={runtime} /> : null}
+        <p className="cs-muted" id="shop-reception-service-unavailable">
+          {browserRuntime.unavailableDetail}
+        </p>
         {error ? (
           <p className="cs-error" role="alert">
             {copy.failed} ({error})
@@ -401,8 +408,10 @@ export function ShopBrowserProfilesPanel({
                 <th>#</th>
                 <th>{layout.shopName}</th>
                 <th>{native.amount}</th>
-                <th>{layout.loginState}</th>
+                <th>{browserRuntime.reception}</th>
                 <th>{layout.checkedAt}</th>
+                <th>{browserRuntime.enabled}</th>
+                <th>{browserRuntime.noRepeat}</th>
                 <th>{layout.operations}</th>
               </tr>
             </thead>
@@ -441,16 +450,47 @@ export function ShopBrowserProfilesPanel({
                       >
                         {profile.shopName || profile.displayName}
                       </button>
+                      <span className="cs-profile-login-state">{copy[profile.loginState]}</span>
                     </td>
                     <td className="cs-amber">{profile.payoutSettings?.remitAmount || '—'}</td>
                     <td>
-                      <span className={`cs-badge ${profile.loginState === 'verified' ? 'is-verified' : ''}`}>
-                        {copy[profile.loginState]}
-                      </span>
+                      <span className="cs-badge">{browserRuntime.unavailable}</span>
                     </td>
                     <td>{profile.checkedAt ? new Date(profile.checkedAt).toLocaleString(locale) : '—'}</td>
                     <td>
+                      <button
+                        aria-checked="mixed"
+                        aria-describedby="shop-reception-service-unavailable"
+                        aria-label={`${browserRuntime.enabled} · ${profile.shopName || profile.displayName}`}
+                        className="cs-unknown-switch"
+                        disabled
+                        role="checkbox"
+                        type="button"
+                      >
+                        —
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        aria-checked="mixed"
+                        aria-describedby="shop-reception-service-unavailable"
+                        aria-label={`${browserRuntime.noRepeat} · ${profile.shopName || profile.displayName}`}
+                        className="cs-unknown-switch"
+                        disabled
+                        role="checkbox"
+                        type="button"
+                      >
+                        —
+                      </button>
+                    </td>
+                    <td>
                       <div className="cs-actions cs-shop-row-actions">
+                        <Button aria-describedby="shop-reception-service-unavailable" data-native-tone="success" disabled variant="secondary">
+                          {browserRuntime.online}
+                        </Button>
+                        <Button aria-describedby="shop-reception-service-unavailable" data-native-tone="danger" disabled variant="secondary">
+                          {browserRuntime.offline}
+                        </Button>
                         <ShopPayoutSettingsButton
                           disabled={busy || !!opened}
                           onSaved={refresh}
@@ -529,6 +569,16 @@ export function ShopBrowserProfilesPanel({
           <div className="cs-browser-section">
             <header>
               <h2>{selectedProfile?.shopName || selectedProfile?.displayName}</h2>
+              <select
+                aria-label={browserRuntime.switchShop}
+                disabled={busy}
+                onChange={event => open('merchant', event.target.value)}
+                value={opened}
+              >
+                {profiles.map(profile => (
+                  <option key={profile.id} value={profile.id}>{profile.shopName || profile.displayName}</option>
+                ))}
+              </select>
               <div>
                 <Button
                   disabled={busy}
@@ -542,6 +592,7 @@ export function ShopBrowserProfilesPanel({
                 </Button>
               </div>
             </header>
+            <ShopBrowserRuntimeSettings onClosed={browserClosed} runtime={runtime} />
             {selectedProfile?.loginState !== 'verified' ? <p>{copy.loginHint}</p> : null}
             {error ? (
               <p className="cs-error" role="alert">

@@ -223,6 +223,7 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     autoConnect: () => ipcRenderer.invoke('hermes:enterprise:auto-connect'),
     doudian: payload => ipcRenderer.invoke('hermes:enterprise:doudian', payload),
     shopBrowser: payload => ipcRenderer.invoke('hermes:enterprise:shop-browser', payload),
+    shopBrowserRuntime: payload => ipcRenderer.invoke('hermes:enterprise:shop-browser-runtime', payload),
     customerService: payload => ipcRenderer.invoke('hermes:enterprise:customer-service-preview', payload),
     disconnect: sessionId => ipcRenderer.invoke('hermes:enterprise:disconnect', { sessionId }),
     request: req => ipcRenderer.invoke('hermes:enterprise:request', req),

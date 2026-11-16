@@ -17,6 +17,7 @@ import type {
 import type { ShopBrowserProfile } from '../../electron/shop-browser-types'
 
 import type { EnterpriseClientRuntime } from './runtime'
+import { ShopBrowserRuntimeSettings } from './shop-browser-runtime'
 
 const emptyDraft = (): CustomerRuleDraft => ({
   name: '',
@@ -295,6 +296,7 @@ export function CustomerServicePreviewPanel({
           <i className="cs-status-dot" />
           <span role="status">{copy.rehearsal}</span>
           <span className="cs-muted">{snapshot?.profile.shopName || snapshot?.profile.displayName}</span>
+          <ShopBrowserRuntimeSettings runtime={runtime} />
           <Button disabled={busy} onClick={() => void run({ action: 'snapshot' })} variant="secondary">
             {copy.refresh}
           </Button>

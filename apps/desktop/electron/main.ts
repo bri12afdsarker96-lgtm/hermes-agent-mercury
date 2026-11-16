@@ -2,7 +2,9 @@ import { execFile, execFileSync, spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import { allowForegroundLocalDoudian, assertDoudianCapability, DoudianController, doudianScope, doudianWorkbookExtensions } from './doudian-host'
 import type { DoudianRequest } from './doudian-types'
-import { ShopBrowserProfiles, validShopBounds } from './shop-browser-profiles'
+import { validShopBounds } from './shop-browser-profiles'
+import { ShopBrowserRuntime } from './shop-browser-runtime'
+import type { ShopBrowserRuntimeRequest } from './shop-browser-runtime-types'
 import { clearShopBrowserStorage, createShopExecutionPage, shopBrowserExecutionTargets } from './shop-browser-electron'
 import { createShopExecutionTransport } from './shop-browser-execution'
 import { createShopBrowserWorkspace } from './shop-browser-workspace'
@@ -13651,7 +13653,7 @@ ipcMain.handle('hermes:api', async (_event, request) => {
 // posture stays intact). Consumed by the independent client's runtime adapter.
 const enterpriseSessions = new EnterpriseSessionStore()
 
-const shopBrowserControllers = new Map<number, { sessionId: string; controller: ShopBrowserProfiles; preview?: CustomerServicePreview; current(): boolean }>()
+const shopBrowserControllers = new Map<number, { sessionId: string; controller: ShopBrowserRuntime; preview?: CustomerServicePreview; current(): boolean }>()
 function invalidateShopBrowser(senderId: number) {
   shopBrowserControllers.get(senderId)?.controller.invalidate()
   shopBrowserControllers.delete(senderId)
@@ -13699,7 +13701,7 @@ function shopBrowserController(event: IpcMainInvokeEvent, sessionId: string) {
         }
       }
     })
-    const controller = new ShopBrowserProfiles({
+    const controller = new ShopBrowserRuntime({
       root: path.join(app.getPath('userData'), 'shop-browser-profiles'),
       isCurrent: current,
       async authorize() {
@@ -13737,6 +13739,11 @@ ipcMain.handle('hermes:enterprise:shop-browser', async (event, payload: ShopBrow
   const zoom = event.sender.getZoomFactor()
   const request = payload?.bounds ? { ...payload, bounds: Object.fromEntries(Object.entries(payload.bounds).map(([key, value]) => [key, Math.round(value * zoom)])) as unknown as ShopBrowserRequest['bounds'] } : payload
   return entry.controller.operate(request)
+})
+ipcMain.handle('hermes:enterprise:shop-browser-runtime', async (event, payload: ShopBrowserRuntimeRequest) => {
+  const entry = shopBrowserController(event, payload?.sessionId)
+  if (!entry) return { ok: false, error: 'SHOP_PROFILE_OWNER_CHANGED' }
+  return entry.controller.configure(payload)
 })
 ipcMain.handle('hermes:enterprise:customer-service-preview', async (event, payload: CustomerServiceRequest) => {
   const entry = shopBrowserController(event, payload?.sessionId)

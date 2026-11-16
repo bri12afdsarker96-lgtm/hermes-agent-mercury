@@ -28,6 +28,17 @@ afterEach(() => {
 })
 
 describe('Enterprise client runtime adapter', () => {
+  it('fences local browser runtime commands to the active session and rejects them after logout', async () => {
+    const bridge = installBridge()
+    const shopBrowserRuntime = vi.fn(async () => ({ ok: true }))
+    Object.assign(bridge, { shopBrowserRuntime })
+    const runtime = await connectEnterpriseClient()
+    await runtime.shopBrowserRuntime!({ action: 'setLimit', maxConcurrentBrowsers: 2 })
+    expect(shopBrowserRuntime).toHaveBeenCalledWith({ action: 'setLimit', maxConcurrentBrowsers: 2, sessionId: 'opaque-session' })
+    await runtime.disconnect()
+    await expect(runtime.shopBrowserRuntime!({ action: 'closeAll' })).resolves.toEqual({ ok: false, error: 'SHOP_PROFILE_OWNER_CHANGED' })
+    expect(shopBrowserRuntime).toHaveBeenCalledOnce()
+  })
   it('fences local customer workflow requests to the session and refuses after logout', async () => {
     const bridge = installBridge()
     const customerService = vi.fn(async () => ({ ok: true }))

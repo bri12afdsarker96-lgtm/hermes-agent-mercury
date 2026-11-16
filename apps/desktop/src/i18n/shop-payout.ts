@@ -19,7 +19,7 @@ const zh = {
   conflict: '配置已在另一页面更新，请关闭并重新打开设置。',
   failed: '店铺配置保存失败',
   evidence:
-    '配置字段依据原生 CompleteShopWindow。配置保存在当前员工的本机店铺档案，模拟返款会记录配置快照。原生返款服务执行细节尚缺代码证据。',
+    '配置字段依据原生 CompleteShopWindow。配置保存到所选店铺，模拟返款会记录配置快照。原生返款服务执行细节尚缺代码证据。',
   useAmount: '载入店铺每单金额',
   unavailable: '当前店铺尚未保存打款配置。',
   refundOnlyHint: '该店配置为仅退款。此页面执行小额打款，请先核对店铺退款渠道。'
@@ -46,7 +46,7 @@ export const shopPayoutCopy: Record<Locale, Record<keyof typeof zh, string>> = {
     conflict: 'Settings changed elsewhere. Close and reopen this dialog.',
     failed: 'Could not save shop settings',
     evidence:
-      'Fields follow the native CompleteShopWindow. Settings stay in this employee’s local shop profile. Simulated claims record a settings snapshot. Native refund-service execution remains unconfirmed.',
+      'Fields follow the native CompleteShopWindow. Saved settings belong to the selected shop. Simulated claims record a settings snapshot. Native refund-service execution remains unconfirmed.',
     useAmount: 'Load shop amount per order',
     unavailable: 'This shop has no saved payment settings.',
     refundOnlyHint: 'This shop uses refund only. Review the configured channel before using this small-payment page.'
@@ -70,7 +70,7 @@ export const shopPayoutCopy: Record<Locale, Record<keyof typeof zh, string>> = {
     conflict: '設定已在其他頁面更新，請關閉後重新開啟。',
     failed: '店鋪設定儲存失敗',
     evidence:
-      '欄位依據原生 CompleteShopWindow。設定儲存在目前員工的本機店鋪檔案，模擬返款會記錄設定快照。原生返款服務執行細節尚缺程式碼證據。',
+      '欄位依據原生 CompleteShopWindow。設定儲存到所選店鋪，模擬返款會記錄設定快照。原生返款服務執行細節尚缺程式碼證據。',
     useAmount: '載入店鋪每單金額',
     unavailable: '目前店鋪尚未儲存打款設定。',
     refundOnlyHint: '此店設定為僅退款。此頁執行小額打款，請先核對退款管道。'
@@ -94,7 +94,7 @@ export const shopPayoutCopy: Record<Locale, Record<keyof typeof zh, string>> = {
     conflict: '設定が他で更新されました。閉じて開き直してください。',
     failed: '店舗設定を保存できません',
     evidence:
-      '項目は原生 CompleteShopWindow に基づきます。設定は現在の従業員のローカル店舗プロファイルに保存され、模擬返金に記録されます。原生返金サービスの実行コードは未確認です。',
+      '項目は原生 CompleteShopWindow に基づきます。設定は選択した店舗に保存され、模擬返金に記録されます。原生返金サービスの実行コードは未確認です。',
     useAmount: '店舗の注文ごとの金額を読み込む',
     unavailable: 'この店舗には支払設定がありません。',
     refundOnlyHint: 'この店舗は返金のみを使用します。少額送金の前に設定を確認してください。'
@@ -118,7 +118,7 @@ export const shopPayoutCopy: Record<Locale, Record<keyof typeof zh, string>> = {
     conflict: 'تغيرت الإعدادات. أغلق النافذة وافتحها مجدداً.',
     failed: 'تعذر حفظ إعدادات المتجر',
     evidence:
-      'الحقول مستمدة من CompleteShopWindow الأصلي. تحفظ في ملف المتجر المحلي للموظف وتسجل في محاكاة الاسترداد. لم يتم التحقق من كود تنفيذ خدمة الاسترداد الأصلية.',
+      'الحقول مستمدة من CompleteShopWindow الأصلي. تحفظ الإعدادات للمتجر المحدد وتسجل في محاكاة الاسترداد. لم يتم التحقق من كود تنفيذ خدمة الاسترداد الأصلية.',
     useAmount: 'تحميل مبلغ المتجر لكل طلب',
     unavailable: 'لم تحفظ إعدادات الدفع لهذا المتجر.',
     refundOnlyHint: 'المتجر يستخدم الاسترداد فقط. راجع القناة قبل استخدام صفحة الدفعات الصغيرة.'
