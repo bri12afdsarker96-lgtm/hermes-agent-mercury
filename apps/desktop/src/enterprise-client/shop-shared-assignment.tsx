@@ -290,13 +290,47 @@ export function ShopSharedAssignment({
     setState(previous => ({ ...previous, busy: true, error: '', saved: false }))
 
     try {
+      const identity = await runtime.get<EnterpriseIdentity>('/api/whoami')
+
+      if (!scope.alive) {
+        return
+      }
+
+      if (
+        identity.role !== 'tenant_admin' ||
+        identity.tenant_id !== current.identity.tenant_id ||
+        identity.principal_id !== current.identity.principal_id
+      ) {
+        throw Object.assign(new Error('SHOP_ASSIGNMENT_IDENTITY_CHANGED'), { status: 403 })
+      }
+
       const roster = await readShopAssignments(runtime, current.identity)
 
       if (!scope.alive) {
         return
       }
 
-      const saved = await assignShopMembers(runtime, current.record, current.selected, roster.members)
+      const latest = roster.profiles.find(row => row.profile_id === profileId)
+
+      if (!latest || !samePrincipalIds(assignedPrincipalIds(latest), assignedPrincipalIds(current.record))) {
+        throw Object.assign(new Error('SHOP_ASSIGNMENT_CONFLICT'), { status: 409 })
+      }
+
+      const verifiedIdentity = await runtime.get<EnterpriseIdentity>('/api/whoami')
+
+      if (!scope.alive) {
+        return
+      }
+
+      if (
+        verifiedIdentity.role !== 'tenant_admin' ||
+        verifiedIdentity.tenant_id !== current.identity.tenant_id ||
+        verifiedIdentity.principal_id !== current.identity.principal_id
+      ) {
+        throw Object.assign(new Error('SHOP_ASSIGNMENT_IDENTITY_CHANGED'), { status: 403 })
+      }
+
+      const saved = await assignShopMembers(runtime, latest, current.selected, roster.members)
 
       if (!scope.alive) {
         return

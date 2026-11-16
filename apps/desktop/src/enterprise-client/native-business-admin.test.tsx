@@ -317,6 +317,64 @@ it('saves multiple employees and then an empty administrator-only list with auth
   ])
 })
 
+it('uses the latest revision when only shop session or settings changed', async () => {
+  const f = fixture()
+  render(<ShopSharedAssignment onSaved={() => {}} profileId="p1" runtime={f.runtime} />)
+  fireEvent.click(await screen.findByRole('checkbox', { name: '员工甲' }))
+  f.store.profiles[0].revision = 8
+  fireEvent.click(screen.getByRole('button', { name: '保存' }))
+  await screen.findByText('已保存')
+  expect(f.post).toHaveBeenCalledExactlyOnceWith('/api/shop-login-profiles-assign', {
+    profile_id: 'p1', principal_ids: ['b'], expected_revision: 8
+  })
+})
+
+it('preserves the draft and refuses to overwrite concurrent assignment changes', async () => {
+  const f = fixture()
+  render(<ShopSharedAssignment onSaved={() => {}} profileId="p1" runtime={f.runtime} />)
+  fireEvent.click(await screen.findByRole('checkbox', { name: '员工甲' }))
+  f.store.profiles[0].revision = 8
+  f.store.profiles[0].servicing_principal_ids = ['a']
+  fireEvent.click(screen.getByRole('button', { name: '保存' }))
+  await screen.findByRole('alert')
+  expect((screen.getByRole('checkbox', { name: '员工甲' }) as HTMLInputElement).checked).toBe(false)
+  expect(f.post).not.toHaveBeenCalled()
+})
+
+it('retains the draft and offers refresh if a 409 occurs after the final read', async () => {
+  const f = fixture()
+  render(<ShopSharedAssignment onSaved={() => {}} profileId="p1" runtime={f.runtime} />)
+  fireEvent.click(await screen.findByRole('checkbox', { name: '员工甲' }))
+  f.post.mockRejectedValueOnce(Object.assign(new Error('conflict'), { status: 409 }))
+  fireEvent.click(screen.getByRole('button', { name: '保存' }))
+  expect((await screen.findByRole('alert')).textContent).toContain('配置已更新')
+  expect((screen.getByRole('checkbox', { name: '员工甲' }) as HTMLInputElement).checked).toBe(false)
+  expect(f.post).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+  await screen.findByRole('checkbox', { name: '员工甲', checked: true })
+  expect(f.post).toHaveBeenCalledTimes(1)
+})
+
+it('does not submit a draft when the authenticated tenant changes before save', async () => {
+  const f = fixture()
+  render(<ShopSharedAssignment onSaved={() => {}} profileId="p1" runtime={f.runtime} />)
+  fireEvent.click(await screen.findByRole('checkbox', { name: '员工甲' }))
+  f.store.identity.tenant_id = 't2'
+  fireEvent.click(screen.getByRole('button', { name: '保存' }))
+  await screen.findByRole('alert')
+  expect(f.post).not.toHaveBeenCalled()
+})
+
+it('rejects a selected employee who becomes inactive before save', async () => {
+  const f = fixture()
+  render(<ShopSharedAssignment onSaved={() => {}} profileId="p1" runtime={f.runtime} />)
+  fireEvent.click(await screen.findByRole('checkbox', { name: '员工甲' }))
+  f.store.members.find(member => member.principal_id === 'b')!.status = 'inactive'
+  fireEvent.click(screen.getByRole('button', { name: '保存' }))
+  await screen.findByRole('alert')
+  expect(f.post).not.toHaveBeenCalled()
+})
+
 it('loads a newly created local shop after its cloud record appears', async () => {
   const f = fixture()
   const originalGet = f.get.getMockImplementation()!
