@@ -179,9 +179,6 @@
   width: min(460px, 94vw);
   min-height: 320px;
 }
-.cs-subaccount-edit-dialog .cs-admin-dialog-body {
-  min-height: 318px;
-}
 .cs-admin-confirm {
   width: min(400px, 94vw);
 }
@@ -259,10 +256,13 @@
   gap: 7px;
   font-size: 13px;
 }
+.cs-admin-dialog .cs-grants-scope label {
+  min-height: 32px;
+}
 .cs-admin-dialog .cs-grants-scope input {
-  width: 13px;
-  height: 13px;
-  min-height: 13px;
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
   margin: 0;
   padding: 0;
 }
