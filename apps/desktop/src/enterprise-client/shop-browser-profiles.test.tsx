@@ -378,6 +378,19 @@ it('opens a focused personal removal dialog for the exact row and cancels on Esc
   expect(globalThis.document.activeElement).toBe(trigger)
 })
 
+it('identifies an unverified shop by its stable profile ID when the shop ID is missing', async () => {
+  const shops = twoShops().map(shop => ({...shop, displayName:'店铺登录', shopName:null, shopId:null, loginState:'unverified' as const}))
+  const f = fixture(shops)
+  const view = render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)
+  await screen.findAllByText('店铺登录')
+  const target = view.container.querySelector(`[data-profile-id="${shops[1].id}"]`) as HTMLElement
+  fireEvent.click(within(target).getByRole('button', {name:shopBrowserCopy.zh.remove}))
+  const dialog = await screen.findByRole('dialog')
+  expect(dialog.textContent).toContain('店铺登录')
+  expect(dialog.textContent).toContain(shops[1].id)
+  expect(dialog.textContent).not.toContain(shops[0].id)
+})
+
 it('contains Tab focus and restores focus on Cancel', async () => {
   const f = fixture(twoShops())
   render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)

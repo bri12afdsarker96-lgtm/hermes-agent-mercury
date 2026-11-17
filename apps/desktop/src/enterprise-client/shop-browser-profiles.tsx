@@ -776,7 +776,7 @@ export function ShopBrowserProfilesPanel({
         {confirmation?.runtime === runtime && confirmation.action === 'delete' ? (
           <EnterpriseModalDialog label={copy.confirmDelete} onClose={closeRemoval}>
             <div className="cs-confirm">
-              <p>{confirmation.profile.shopName || confirmation.profile.displayName}{confirmation.profile.shopId ? ` (${confirmation.profile.shopId})` : ''}</p>
+              <p>{confirmation.profile.shopName || confirmation.profile.displayName} ({confirmation.profile.shopId || confirmation.profile.id})</p>
               <p>{copy.deleteWarning}</p>
               {cloud ? <p>{shopCloudCopy[locale].sharedDelete}</p> : null}
               {error ? <p className="cs-error" role="alert">{copy.failed} ({error})</p> : null}
