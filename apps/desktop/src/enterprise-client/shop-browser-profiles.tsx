@@ -13,6 +13,7 @@ import { shopCloudCopy } from '@/i18n/shop-cloud'
 import type { ShopBrowserProfile, ShopBrowserReply, ShopBrowserRequest } from '../../electron/shop-browser-types'
 import { recoverableShopBrowserErrors } from '../../electron/shop-browser-types'
 
+import { EnterpriseModalDialog } from './enterprise-design-system'
 import type { EnterpriseClientRuntime } from './runtime'
 import { ShopBrowserRuntimeSettings } from './shop-browser-runtime'
 import { ShopBrowserWorkspacePanel } from './shop-browser-workspace'
@@ -56,8 +57,11 @@ export function ShopBrowserProfilesPanel({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [cloud, setCloud] = useState<ShopBrowserReply['cloud']>()
-  const [confirmation, setConfirmation] = useState<{ action: 'relogin' | 'delete'; profile: ShopBrowserProfile } | null>(null)
+  const [confirmation, setConfirmation] = useState<{ action: 'relogin' | 'delete'; profile: ShopBrowserProfile; runtime: EnterpriseClientRuntime } | null>(null)
   const slot = useRef<HTMLDivElement>(null)
+  const section = useRef<HTMLElement>(null)
+  const removalTrigger = useRef<HTMLElement | null>(null)
+  const removalFocusEpoch = useRef(0)
   const initialNavigation = useMemo(() => ({ target: initialTarget, opened: false }), [initialTarget])
 
   const lifecycle = useMemo(() => ({ runtime, alive: true, busy: false, boundsEpoch: 0, boundsTarget: null as string | null,
@@ -429,20 +433,44 @@ export function ShopBrowserProfilesPanel({
 
       if (lifecycle.alive) {
         setOpened(null)
-        setConfirmation({ action, profile })
+        setConfirmation({ action, profile, runtime })
       }
     })
 
-  const confirmRowAction = (action: 'relogin' | 'delete', profile: ShopBrowserProfile) => {
-    setConfirmation({ action, profile })
+  const confirmRowAction = (action: 'relogin' | 'delete', profile: ShopBrowserProfile, trigger: HTMLElement) => {
+    removalFocusEpoch.current++
+
+    if (action === 'delete') {removalTrigger.current = trigger}
+    setConfirmation({ action, profile, runtime })
     setSelected(profile.id)
     onSelectedProfile?.(profile.id)
   }
 
+  const restoreRemovalFocus = useCallback(() => {
+    const trigger = removalTrigger.current
+    const epoch = ++removalFocusEpoch.current
+
+    requestAnimationFrame(() => {
+      if (!lifecycle.alive || removalFocusEpoch.current !== epoch) {return}
+      const active = document.activeElement
+
+      if (active && active !== document.body && active !== trigger && active !== section.current && active.isConnected) {return}
+
+      if (trigger?.isConnected && !trigger.matches(':disabled')) {trigger.focus()}
+      else {section.current?.focus()}
+    })
+  }, [lifecycle])
+
+  const closeRemoval = useCallback(() => {
+    if (lifecycle.busy) {return}
+    setConfirmation(null)
+    restoreRemovalFocus()
+  }, [lifecycle, restoreRemovalFocus])
+
   const submitConfirmation = () => {
     const pending = confirmation
 
-    if (!pending) {return}
+    if (!pending || pending.runtime !== runtime) {return}
     void run(async () => {
       if (opened) {throw new Error('SHOP_PROFILE_IN_USE')}
       const current = profiles.find(profile => profile.id === pending.profile.id)
@@ -469,7 +497,12 @@ export function ShopBrowserProfilesPanel({
       }
 
       setConfirmation(null)
-      await refresh()
+
+      try {
+        await refresh()
+      } finally {
+        if (pending.action === 'delete' && lifecycle.alive) {restoreRemovalFocus()}
+      }
 
       if (result.profile && pending.action === 'relogin' && lifecycle.alive) {
         const opened = await runtime.shopBrowser!({ action: 'open', profileId: result.profile.id, target: 'merchant', bounds: bounds() })
@@ -506,7 +539,7 @@ export function ShopBrowserProfilesPanel({
 
   if (nativeLayout) {
     return (
-      <section aria-label={layout.shops} className="cs-native-page cs-shops" data-browser-open={!!opened}>
+      <section aria-label={layout.shops} className="cs-native-page cs-shops" data-browser-open={!!opened} ref={section} tabIndex={-1}>
         <h2>{layout.shops}</h2>
         {cloud ? (
           <p data-testid="shop-cloud-status" role="status">
@@ -545,7 +578,7 @@ export function ShopBrowserProfilesPanel({
         <p className="cs-muted" id="shop-reception-service-unavailable">
           {browserRuntime.unavailableDetail}
         </p>
-        {error ? (
+        {error && confirmation?.action !== 'delete' ? (
           <p className="cs-error" role="alert">
             {copy.failed} ({error})
           </p>
@@ -658,10 +691,10 @@ export function ShopBrowserProfilesPanel({
                         >
                           {browserRuntime.offline}
                         </Button>
-                        <Button disabled={busy || !!opened} onClick={() => confirmRowAction('relogin', profile)} variant="secondary">
+                        <Button disabled={busy || !!opened} onClick={event => confirmRowAction('relogin', profile, event.currentTarget)} variant="secondary">
                           {copy.relogin}
                         </Button>
-                        <Button disabled={busy || !!opened} onClick={() => confirmRowAction('delete', profile)} variant="secondary">
+                        <Button disabled={busy || !!opened} onClick={event => confirmRowAction('delete', profile, event.currentTarget)} variant="secondary">
                           {copy.remove}
                         </Button>
                         <ShopSubAccountsButton disabled={busy || !!opened} profile={profile} runtime={runtime} />
@@ -716,7 +749,7 @@ export function ShopBrowserProfilesPanel({
               <Button disabled={busy} onClick={() => confirm('relogin')} variant="secondary">
                 {copy.relogin}
               </Button>
-              <Button disabled={busy} onClick={() => confirm('delete')} variant="secondary">
+              <Button disabled={busy} onClick={event => {removalFocusEpoch.current++; removalTrigger.current = event.currentTarget; confirm('delete')}} variant="secondary">
                 {copy.remove}
               </Button>
               {runtime.customerService && onOpenWorkflow ? (
@@ -725,13 +758,13 @@ export function ShopBrowserProfilesPanel({
                 </Button>
               ) : null}
             </div>
-            {confirmation ? (
+            {confirmation?.runtime === runtime && confirmation.action === 'relogin' ? (
               <div className="cs-confirm" role="alert">
                 <p>{confirmation.profile.shopName || confirmation.profile.displayName}</p>
-                <p>{confirmation.action === 'delete' ? copy.deleteWarning : copy.resetWarning}</p>
+                <p>{copy.resetWarning}</p>
                 {cloud ? <p>{shopCloudCopy[locale].sharedDelete}</p> : null}
                 <Button disabled={busy} onClick={submitConfirmation}>
-                  {confirmation.action === 'delete' ? copy.confirmDelete : copy.confirmReset}
+                  {copy.confirmReset}
                 </Button>
                 <Button disabled={busy} onClick={() => setConfirmation(null)} variant="secondary">
                   {copy.cancel}
@@ -739,6 +772,18 @@ export function ShopBrowserProfilesPanel({
               </div>
             ) : null}
           </div>
+        ) : null}
+        {confirmation?.runtime === runtime && confirmation.action === 'delete' ? (
+          <EnterpriseModalDialog label={copy.confirmDelete} onClose={closeRemoval}>
+            <div className="cs-confirm">
+              <p>{confirmation.profile.shopName || confirmation.profile.displayName}{confirmation.profile.shopId ? ` (${confirmation.profile.shopId})` : ''}</p>
+              <p>{copy.deleteWarning}</p>
+              {cloud ? <p>{shopCloudCopy[locale].sharedDelete}</p> : null}
+              {error ? <p className="cs-error" role="alert">{copy.failed} ({error})</p> : null}
+              <Button disabled={busy} onClick={submitConfirmation}>{copy.confirmDelete}</Button>
+              <Button disabled={busy} onClick={closeRemoval} variant="secondary">{copy.cancel}</Button>
+            </div>
+          </EnterpriseModalDialog>
         ) : null}
         {opened ? (
           <div className="cs-browser-section">

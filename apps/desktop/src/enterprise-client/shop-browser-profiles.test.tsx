@@ -358,6 +358,87 @@ it('does not apply a bounds response after component unmount', async () => {
   expect(screen.queryByText(/SHOP_PROFILE_NOT_OPEN/)).toBeNull()
 })
 
+it('opens a focused personal removal dialog for the exact row and cancels on Escape', async () => {
+  const f = fixture(twoShops())
+  render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)
+  const row = (await screen.findByText('店铺A')).closest('tr')!
+  const trigger = within(row).getByRole('button', { name: shopBrowserCopy.zh.remove })
+  trigger.focus()
+  fireEvent.click(trigger)
+  const dialog = await screen.findByRole('dialog')
+  expect(dialog.getAttribute('aria-modal')).toBe('true')
+  expect(dialog.textContent).toContain('店铺A')
+  expect(dialog.textContent).toContain('shop-A')
+  expect(dialog.textContent).toContain(shopBrowserCopy.zh.deleteWarning)
+  await waitFor(() => expect(dialog.contains(globalThis.document.activeElement)).toBe(true))
+  f.send.mockClear()
+  fireEvent.keyDown(globalThis.window, { key: 'Escape' })
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(f.send.mock.calls.some(([request]) => request.action === 'delete' || request.action === 'close')).toBe(false)
+  expect(globalThis.document.activeElement).toBe(trigger)
+})
+
+it('contains Tab focus and restores focus on Cancel', async () => {
+  const f = fixture(twoShops())
+  render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)
+  const row = (await screen.findByText('店铺A')).closest('tr')!
+  const trigger = within(row).getByRole('button', { name: shopBrowserCopy.zh.remove })
+  trigger.focus()
+  fireEvent.click(trigger)
+  const dialog = await screen.findByRole('dialog')
+  const confirm = within(dialog).getByRole('button', {name: shopBrowserCopy.zh.confirmDelete})
+  const cancel = within(dialog).getByRole('button', {name: shopBrowserCopy.zh.cancel})
+  await waitFor(() => expect(globalThis.document.activeElement).toBe(confirm))
+  fireEvent.keyDown(globalThis.window, {key:'Tab', shiftKey:true})
+  expect(globalThis.document.activeElement).toBe(cancel)
+  fireEvent.keyDown(globalThis.window, {key:'Tab'})
+  expect(globalThis.document.activeElement).toBe(confirm)
+  f.send.mockClear()
+  fireEvent.click(cancel)
+  await waitFor(() => expect(globalThis.document.activeElement).toBe(trigger))
+  expect(f.send.mock.calls.some(([request]) => request.action === 'delete' || request.action === 'close')).toBe(false)
+})
+
+it('focuses the shop region if the original row disappears before cancellation', async () => {
+  const f = fixture(twoShops())
+  render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)
+  const row = (await screen.findByText('店铺A')).closest('tr')!
+  const trigger = within(row).getByRole('button', {name:shopBrowserCopy.zh.remove})
+  trigger.focus()
+  fireEvent.click(trigger)
+  const dialog = await screen.findByRole('dialog')
+  fireEvent.change(screen.getByRole('textbox', {name:'搜索店铺名 / 店铺 ID'}), {target:{value:'店铺B'}})
+  expect(trigger.isConnected).toBe(false)
+  f.send.mockClear()
+  fireEvent.click(within(dialog).getByRole('button', {name:shopBrowserCopy.zh.cancel}))
+  await waitFor(() => expect(globalThis.document.activeElement).toBe(screen.getByRole('region', {name:'店铺管理'})))
+  expect(f.send.mock.calls.some(([request]) => request.action === 'delete' || request.action === 'close')).toBe(false)
+})
+
+it('focuses the shop region after a successful removal unmounts its trigger', async () => {
+  const f = fixture(twoShops())
+  render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)
+  const row = (await screen.findByText('店铺A')).closest('tr')!
+  const trigger = within(row).getByRole('button', {name:shopBrowserCopy.zh.remove})
+  trigger.focus()
+  fireEvent.click(trigger)
+  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', {name:shopBrowserCopy.zh.confirmDelete}))
+  await waitFor(() => expect(trigger.isConnected).toBe(false))
+  await waitFor(() => expect(globalThis.document.activeElement).toBe(screen.getByRole('region', {name:'店铺管理'})))
+})
+
+it('closes the old removal dialog synchronously when the runtime changes', async () => {
+  const first = fixture(twoShops())
+  const second = fixture(twoShops().map(shop => ({...shop, tenantId:'other-tenant', principalId:'other-actor'})))
+  const view = render(<ShopBrowserProfilesPanel nativeLayout runtime={first.runtime} />)
+  const row = (await screen.findByText('店铺A')).closest('tr')!
+  fireEvent.click(within(row).getByRole('button', {name:shopBrowserCopy.zh.remove}))
+  await screen.findByRole('dialog')
+  view.rerender(<ShopBrowserProfilesPanel nativeLayout runtime={second.runtime} />)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(second.send.mock.calls.some(([request]) => request.action === 'delete')).toBe(false)
+})
+
 it('removes the originally confirmed row while preserving the newly selected shop', async () => {
   const shops = twoShops()
   const f = fixture(shops)
@@ -419,8 +500,10 @@ it('does not submit the row removal twice while it is pending', async () => {
   fireEvent.click(button)
   fireEvent.click(button)
   await waitFor(() => expect(f.send.mock.calls.filter(([r]) => r.action === 'delete')).toHaveLength(1))
+  fireEvent.keyDown(globalThis.window, {key:'Escape'})
+  expect(screen.getByRole('dialog')).toBeTruthy()
   release({ ok: false, error: 'SHOP_PROFILE_IN_USE' } as never)
-  await screen.findByText(/SHOP_PROFILE_IN_USE/)
+  await waitFor(() => expect(screen.getByRole('dialog').textContent).toContain('SHOP_PROFILE_IN_USE'))
 })
 
 it.each(['ok', '403', '404', '409', 'network', 'forbidden', 'owner', 'in-use'])('preserves shared assets through real runtime and cloud adapter on %s', async outcome => {

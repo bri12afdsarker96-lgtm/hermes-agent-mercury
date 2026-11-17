@@ -64,10 +64,40 @@ function installAuthorityBridge(responses: Record<string, EnterpriseBridgeRespon
 
 afterEach(() => {
   cleanup()
+  vi.unstubAllGlobals()
   delete (window as unknown as { hermesDesktop?: unknown }).hermesDesktop
 })
 
 describe('EnterpriseClientApp authority lifecycle', () => {
+  it('opens the personal removal dialog from the normal App using a synthetic authorized shop fixture', async () => {
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+    const syntheticProfile = {id:'11111111-1111-1111-1111-111111111110', tenantId:'synthetic-tenant', principalId:'synthetic-employee', displayName:'合成店铺A', shopName:'合成店铺A', shopId:'synthetic-shop-A', createdAt:'2026-11-15T00:00:00Z', checkedAt:null, loginState:'verified'}
+
+    const bridge = installAuthorityBridge({
+      '/api/health': {kind:'ok', data:HEALTH},
+      '/api/whoami': {kind:'ok', data:{...IDENTITY, name:'合成员工', tenant_id:'synthetic-tenant', principal_id:'synthetic-employee', role:'operator', product_capabilities:{doudian_review:{enabled:true, status:'LIVE'}}}}
+    })
+
+    const shopBrowser = vi.fn(async (request: {action: string; sessionId?: string}) => request.action === 'list'
+      ? {ok:true, profiles:[syntheticProfile], openProfileId:null}
+      : {ok:true, openProfileId:null})
+
+    Object.assign(bridge, {shopBrowser})
+    render(<EnterpriseClientApp />)
+    fireEvent.click(await screen.findByRole('button', {name:'店铺与客服'}))
+    const row = (await screen.findByText('合成店铺A')).closest('tr')!
+    const trigger = within(row).getByRole('button', {name:'从我的列表移除'})
+    trigger.focus()
+    fireEvent.click(trigger)
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toContain('synthetic-shop-A')
+    expect(dialog.textContent).toContain('企业店铺资产')
+    expect(dialog.contains(globalThis.document.activeElement)).toBe(true)
+    fireEvent.keyDown(globalThis.window, {key:'Escape'})
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(shopBrowser.mock.calls.some(([request]) => request.action === 'delete')).toBe(false)
+    expect(shopBrowser.mock.calls.some(([request]) => request.action === 'list' && request.sessionId === 'opaque-session')).toBe(true)
+  })
   it('clears prior staff secrets, confirmation and draft after foreground identity changes', async () => {
     let identity = {name: '旧管理员', tenant_id: 'tenant-a', principal_id: 'admin-a', role: 'tenant_admin', effective_permissions: ['principal.crud'], desktop_surfaces: {surfaces: {governance: {available: true}}}, product_capabilities: {}}
     const bridge = installAuthorityBridge({})
