@@ -55,11 +55,13 @@ export async function exportShopCsv(locale: ShopCsvLocale, deps: ShopCsvDependen
   let handle: FileHandle | undefined
   let created = false
   let acquired = false
+  let epoch: number | undefined
   let stage: 'authorize' | 'dialog' | 'list' | 'write' = 'authorize'
   const io: ShopCsvIO = deps.io ?? fs
 
   try {
     const initial = await deps.authorize()
+    epoch = deps.epoch()
     key = scopeKey(initial)
     lockKey = JSON.stringify([initial.origin, initial.tenantId, initial.principalId])
 
@@ -73,13 +75,14 @@ export async function exportShopCsv(locale: ShopCsvLocale, deps: ShopCsvDependen
     stage = 'dialog'
     const destination = await deps.choose(defaultName)
 
+    if (!deps.current() || deps.epoch() !== epoch) {return {status:'owner_changed'}}
+
     stage = 'authorize'
     const afterDialog = await deps.authorize()
 
-    if (!deps.current() || scopeKey(afterDialog) !== key) {return {status:'owner_changed'}}
+    if (!deps.current() || deps.epoch() !== epoch || scopeKey(afterDialog) !== key) {return {status:'owner_changed'}}
 
     if (!destination) {return {status:'canceled'}}
-    const epoch = deps.epoch()
     stage = 'list'
     const reply = await deps.list()
 
@@ -120,7 +123,7 @@ export async function exportShopCsv(locale: ShopCsvLocale, deps: ShopCsvDependen
 
     return {status:'saved', count:profiles.length}
   } catch {
-    return {status:!deps.current() ? 'owner_changed' : stage === 'authorize' ? 'authorization_unavailable' : stage === 'list' ? 'cloud_unavailable' : 'write_failed'}
+    return {status:!deps.current() || (epoch !== undefined && deps.epoch() !== epoch) ? 'owner_changed' : stage === 'authorize' ? 'authorization_unavailable' : stage === 'list' ? 'cloud_unavailable' : 'write_failed'}
   } finally {
     if (handle) {await handle.close().catch(() => {})}
 

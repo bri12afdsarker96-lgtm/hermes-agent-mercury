@@ -108,6 +108,37 @@ it('keeps the identity gate active if its role changes while the dialog is open'
   expect(f.deps.choose).toHaveBeenCalledTimes(1)
 })
 
+it.each([true, false])('rejects an observed role round trip while the dialog is open (selected=%s)', async selected => {
+  const f = await fixture()
+  let finish!: (value: string | undefined) => void
+  f.deps.choose = vi.fn(() => new Promise<string | undefined>(resolve => {finish = resolve}))
+  const pending = exportShopCsv('zh', f.deps)
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+  f.scope.role = 'tenant_admin'
+  f.changeEpoch()
+  f.scope.role = 'operator'
+  f.changeEpoch()
+  finish(selected ? f.target : undefined)
+  expect(await pending).toEqual({status:'owner_changed'})
+  expect(f.deps.list).not.toHaveBeenCalled()
+  expect(await fs.readdir(f.root)).toEqual([])
+})
+
+it('rejects an observed epoch change during post-dialog authorization', async () => {
+  const f = await fixture()
+  let calls = 0
+  f.deps.authorize = vi.fn(async () => {
+    calls++
+
+    if (calls === 2) {f.changeEpoch(); f.changeEpoch()}
+
+    return {...f.scope}
+  })
+  expect(await exportShopCsv('zh', f.deps)).toEqual({status:'owner_changed'})
+  expect(f.deps.list).not.toHaveBeenCalled()
+  expect(await fs.readdir(f.root)).toEqual([])
+})
+
 it('rejects identity changes after the dialog and an observed epoch change during listing', async () => {
   const f = await fixture()
   f.deps.choose = vi.fn(async () => {f.scope.principalId = 'person-b';
