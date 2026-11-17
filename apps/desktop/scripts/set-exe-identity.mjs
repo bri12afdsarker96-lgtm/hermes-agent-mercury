@@ -5,8 +5,8 @@
 //
 // WHY THIS EXISTS
 // ---------------
-// apps/desktop/package.json sets build.win.signAndEditExecutable=false. That
-// flag is load-bearing: turning electron-builder's own exe-editing ON also
+// Some Windows build configurations set signAndEditExecutable=false. That
+// flag is load-bearing there: turning electron-builder's own exe-editing ON also
 // re-enables its signtool step, which fetches winCodeSign-2.6.0.7z, whose
 // macOS symlinks crash 7-Zip on non-admin Windows (no Developer Mode = no
 // SeCreateSymbolicLinkPrivilege). That is an unfixable dead end — we do NOT
@@ -36,7 +36,7 @@
 // otherwise-good build (worst case: stock icon, not a broken app).
 
 import { resolve, join } from 'node:path'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 
 import { rcedit } from 'rcedit'
 
@@ -56,11 +56,20 @@ async function stampExeIdentity(exe, desktopRoot = resolve(import.meta.dirname, 
     throw new Error(`icon not found: ${icon}`)
   }
 
+  const version = JSON.parse(readFileSync(join(desktopRoot, 'package.json'), 'utf8')).version
+  const match = typeof version === 'string' && /^(\d+\.\d+\.\d+(?:\.\d+)?)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.exec(version)
+  if (!match || match[1].split('.').some(part => Number(part) > 65535)) {
+    throw new Error(`invalid Windows executable version: ${version}`)
+  }
+  const numericVersion = match[1]
+
   console.log(`[set-exe-identity] stamping ${exe}`)
   console.log(`[set-exe-identity] icon: ${icon}`)
 
   await rcedit(exe, {
     icon,
+    'file-version': numericVersion,
+    'product-version': numericVersion,
     'version-string': {
       ProductName: 'Hermes-企业助手',
       FileDescription: 'Hermes-企业助手',
