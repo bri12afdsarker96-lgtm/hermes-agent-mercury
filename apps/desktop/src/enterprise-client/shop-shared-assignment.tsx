@@ -186,11 +186,13 @@ export async function assignShopMembers(
 export function ShopSharedAssignment({
   runtime,
   profileId,
-  onSaved
+  onSaved,
+  onBusyChange
 }: {
   runtime: EnterpriseClientRuntime
   profileId: string
   onSaved(): void | Promise<void>
+  onBusyChange?(busy: boolean): void
 }) {
   const { locale } = useI18n()
   const copy = nativeBusinessAdminCopy[locale]
@@ -287,6 +289,7 @@ export function ShopSharedAssignment({
     }
 
     scope.pending = true
+    onBusyChange?.(true)
     setState(previous => ({ ...previous, busy: true, error: '', saved: false }))
 
     try {
@@ -360,6 +363,7 @@ export function ShopSharedAssignment({
       }
     } finally {
       scope.pending = false
+      onBusyChange?.(false)
 
       if (scope.alive) {
         setState(previous => ({ ...previous, busy: false }))
@@ -384,6 +388,7 @@ export function ShopSharedAssignment({
     <section aria-label={copy.assignments} className="cs-shared-assignment">
       <h3>{copy.assignments}</h3>
       <p className="cs-muted">{copy.assignmentEvidence}</p>
+      <p className="cs-muted" role="status">{copy.assignmentGroupUnavailable}</p>
       <div className="cs-shared-members">
         {current.members
           .filter(member => member.role === 'operator' || member.role === 'supervisor')

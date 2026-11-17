@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { useI18n } from '@/i18n/context'
 import { customerServiceCopy } from '@/i18n/customer-service'
 import { customerServiceLayoutCopy } from '@/i18n/customer-service-layout'
+import { nativeBusinessAdminCopy } from '@/i18n/native-business-admin'
 import { nativeUiCopy } from '@/i18n/native-ui'
 import { shopBrowserCopy } from '@/i18n/shop-browser'
 import { shopBrowserRuntimeCopy } from '@/i18n/shop-browser-runtime'
@@ -14,6 +15,7 @@ import type { ShopBrowserProfile, ShopBrowserReply, ShopBrowserRequest, ShopCsvE
 import { recoverableShopBrowserErrors } from '../../electron/shop-browser-types'
 
 import { EnterpriseModalDialog } from './enterprise-design-system'
+import { NativeAdminDialog } from './native-admin-dialog'
 import type { EnterpriseClientRuntime } from './runtime'
 import { ShopBrowserRuntimeSettings } from './shop-browser-runtime'
 import { ShopBrowserWorkspacePanel } from './shop-browser-workspace'
@@ -45,6 +47,7 @@ export function ShopBrowserProfilesPanel({
   const layout = customerServiceLayoutCopy[locale]
   const native = nativeUiCopy[locale]
   const browserRuntime = shopBrowserRuntimeCopy[locale]
+  const adminCopy = nativeBusinessAdminCopy[locale]
   const [profiles, setProfiles] = useState<ShopBrowserProfile[]>([])
   const [loaded, setLoaded] = useState(false)
   const [localSelected, setSelected] = useState('')
@@ -60,6 +63,10 @@ export function ShopBrowserProfilesPanel({
   const currentRuntime = useRef(runtime)
   currentRuntime.current = runtime
   const [cloud, setCloud] = useState<ShopBrowserReply['cloud']>()
+  const [assignmentAccess, setAssignmentAccess] = useState<{runtime: EnterpriseClientRuntime; allowed: boolean}>()
+  const [assignmentProfile, setAssignmentProfile] = useState<{profile: ShopBrowserProfile; runtime: EnterpriseClientRuntime; epoch: number} | null>(null)
+  const [assignmentSaving, setAssignmentSaving] = useState(false)
+  const assignmentEpoch = useRef(0)
   const [confirmation, setConfirmation] = useState<{ action: 'relogin' | 'delete'; profile: ShopBrowserProfile; runtime: EnterpriseClientRuntime } | null>(null)
   const confirmationRef = useRef(confirmation)
   confirmationRef.current = confirmation
@@ -73,6 +80,30 @@ export function ShopBrowserProfilesPanel({
     openIntent: 0, refreshSequence: 0, resizeBounds: null as (() => void) | null }), [runtime])
 
   const selectedProfile = profiles.find(profile => profile.id === selected)
+
+  useEffect(() => {
+    let active = true
+    assignmentEpoch.current++
+    setAssignmentProfile(null)
+    setAssignmentSaving(false)
+    setAssignmentAccess(undefined)
+
+    if (typeof runtime.get === 'function') {
+      void runtime.get<{role?: string; tenant_id?: string; principal_id?: string}>('/api/whoami').then(identity => {
+        if (active) {setAssignmentAccess({runtime, allowed: identity.role === 'tenant_admin' && !!identity.tenant_id && !!identity.principal_id})}
+      }).catch(() => { if (active) {setAssignmentAccess({runtime, allowed: false})} })
+    }
+
+    return () => { active = false }
+  }, [runtime])
+
+  useEffect(() => {
+    if (assignmentProfile && loaded && !profiles.some(profile => profile.id === assignmentProfile.profile.id)) {
+      assignmentEpoch.current++
+      setAssignmentProfile(null)
+      setAssignmentSaving(false)
+    }
+  }, [assignmentProfile, loaded, profiles])
 
   const restoreRemovalFocus = useCallback(() => {
     const trigger = removalTrigger.current
@@ -741,6 +772,11 @@ export function ShopBrowserProfilesPanel({
                         >
                           {layout.select}
                         </Button>
+                        {assignmentAccess?.runtime === runtime && assignmentAccess.allowed ? (
+                          <Button disabled={busy} onClick={() => setAssignmentProfile({profile, runtime, epoch: ++assignmentEpoch.current})} variant="secondary">
+                            {adminCopy.assignments}
+                          </Button>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -755,7 +791,6 @@ export function ShopBrowserProfilesPanel({
               {copy[selectedProfile.loginState]} · {selectedProfile.shopName || selectedProfile.displayName}
             </span>
             {selectedProfile.loginState === 'verified' ? <p role="status">{copy.sharedReady}</p> : null}
-            <ShopSharedAssignment onSaved={refresh} profileId={selectedProfile.id} runtime={runtime} />
             <div className="cs-actions">
               <Button disabled={busy} onClick={() => open('merchant')} variant="secondary">
                 {copy.merchant}
@@ -799,6 +834,12 @@ export function ShopBrowserProfilesPanel({
               </div>
             ) : null}
           </div>
+        ) : null}
+        {assignmentProfile?.runtime === runtime ? (
+          <NativeAdminDialog busy={assignmentSaving} description={adminCopy.assignmentEvidence}
+            onClose={() => {assignmentEpoch.current++; setAssignmentProfile(null)}} open title={`${adminCopy.assignments} · ${assignmentProfile.profile.shopName || assignmentProfile.profile.displayName}`}>
+            <ShopSharedAssignment onBusyChange={value => {if (assignmentEpoch.current === assignmentProfile.epoch) {setAssignmentSaving(value)}}} onSaved={refresh} profileId={assignmentProfile.profile.id} runtime={runtime} />
+          </NativeAdminDialog>
         ) : null}
         {confirmation?.runtime === runtime && confirmation.action === 'delete' ? (
           <EnterpriseModalDialog label={copy.confirmDelete} onClose={closeRemoval}>

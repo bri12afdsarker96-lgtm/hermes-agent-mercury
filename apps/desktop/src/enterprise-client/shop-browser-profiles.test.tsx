@@ -85,6 +85,50 @@ function twoShops(): ShopBrowserProfile[] {
   }))
 }
 
+it('opens employee assignments for the selected row in a dialog without changing the selected shop', async () => {
+  const shops = twoShops()
+  const f = fixture(shops)
+  const roster = [{principal_id:'staff', tenant_id:'tenant', role:'operator', status:'active', name:'模拟员工'}]
+
+  const records = shops.map((shop, index) => ({profile_id:shop.id, revision:1, deleted:false,
+    servicing_principal_ids:index ? ['staff'] : [], profile:{shop_name:shop.shopName}}))
+
+  const get = vi.fn(async (url: string) => {
+    if (url === '/api/whoami') {return {role:'tenant_admin', tenant_id:'tenant', principal_id:'admin'}}
+
+    if (url === '/api/shop-login-profiles') {return {profiles:records}}
+
+    if (url === '/api/principals') {return {principals:roster}}
+
+    throw new Error('unexpected endpoint')
+  })
+
+  Object.assign(f.runtime, {get, post:vi.fn()})
+  render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)
+  const rowB = (await screen.findByText('店铺B')).closest('tr')!
+  const button = await within(rowB).findByRole('button', {name:'员工分配'})
+  expect(within(rowB).getByRole('button', {name:'选择'}).compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(screen.queryByRole('region', {name:'员工分配'})).toBeNull()
+  fireEvent.click(button)
+  const dialog = await screen.findByRole('dialog', {name:'员工分配 · 店铺B'})
+  expect((await within(dialog).findByRole('checkbox', {name:'模拟员工'}) as HTMLInputElement).checked).toBe(true)
+  expect(within(dialog).getByText('分组信息尚未提供，以下按员工列表显示。')).toBeTruthy()
+  expect(get.mock.calls.some(([url]) => url === '/api/operations-groups')).toBe(false)
+  fireEvent.click(within(dialog).getByRole('button', {name:'关闭'}))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(f.send.mock.calls.every(([request]) => request.action === 'list')).toBe(true)
+})
+
+it.each(['operator', 'supervisor'])('hides shop assignment entry from %s', async role => {
+  const f = fixture(twoShops())
+  const get = vi.fn(async () => ({role, tenant_id:'tenant', principal_id:'staff'}))
+  Object.assign(f.runtime, {get})
+  render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)
+  await screen.findByText('店铺B')
+  await waitFor(() => expect(get).toHaveBeenCalled())
+  expect(screen.queryByRole('button', {name:'员工分配'})).toBeNull()
+})
+
 it.each(['during-B', 'after-B', 'before-B', 'stale-auth', 'current-auth', 'stale-reject', 'current-reject', 'during-B-auth'] as const)(
   'does not let assignment refresh overwrite the current switch intent %s', async timing => {
     const shops = twoShops()
@@ -139,10 +183,12 @@ it.each(['during-B', 'after-B', 'before-B', 'stale-auth', 'current-auth', 'stale
     const onProfilesChange = vi.fn()
     const onSelectedProfile = vi.fn()
     render(<ShopBrowserProfilesPanel nativeLayout onProfilesChange={onProfilesChange} onSelectedProfile={onSelectedProfile} runtime={f.runtime} />)
-    fireEvent.click(within((await screen.findByText('店铺A')).closest('tr')!).getByRole('button', { name: /选择/ }))
+    const rowA = (await screen.findByText('店铺A')).closest('tr')!
+    fireEvent.click(within(rowA).getByRole('button', { name: /选择/ }))
     fireEvent.click(await screen.findByText(shopBrowserCopy.zh.merchant))
     const switcher = await screen.findByRole('combobox', { name: '切换店铺浏览器' }) as HTMLSelectElement
     await waitFor(() => expect(switcher.disabled).toBe(false))
+    fireEvent.click(within(rowA).getByRole('button', {name:'员工分配'}))
     const region = await screen.findByRole('region', { name: nativeBusinessAdminCopy.zh.assignments })
     const staffC = await within(region).findByRole('checkbox', { name: 'Staff C' })
     await waitFor(() => expect((staffC as HTMLInputElement).disabled).toBe(false))
@@ -181,7 +227,7 @@ it.each(['during-B', 'after-B', 'before-B', 'stale-auth', 'current-auth', 'stale
       await act(async () => { releaseOpen() })
     }
 
-    await waitFor(() => expect((screen.getByRole('combobox', { name: '切换店铺浏览器' }) as HTMLSelectElement).value).toBe(shops[1].id))
+    await waitFor(() => expect(switcher.value).toBe(shops[1].id))
 
     if (timing === 'stale-auth' || timing === 'stale-reject') {
       await act(async () => { releaseList() })
@@ -192,7 +238,7 @@ it.each(['during-B', 'after-B', 'before-B', 'stale-auth', 'current-auth', 'stale
     }
 
     if (timing === 'after-B') {await act(async () => { releaseList() })}
-    expect((screen.getByRole('combobox', { name: '切换店铺浏览器' }) as HTMLSelectElement).value).toBe(shops[1].id)
+    expect(switcher.value).toBe(shops[1].id)
     expect(screen.queryByText(/SHOP_PROFILE_NOT_OPEN/)).toBeNull()
   }
 )
