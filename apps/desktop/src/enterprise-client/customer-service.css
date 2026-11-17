@@ -968,8 +968,50 @@
   .hesc-root .cs-native[data-native-layout='true'] .cs-native-page {
     padding-inline: 20px;
   }
+  .cs-shops .cs-toolbar {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+  .cs-shops .cs-toolbar > select,
+  .cs-shops .cs-toolbar > input {
+    flex: 1 1 140px;
+    width: auto;
+    min-width: 0;
+    max-width: 100%;
+  }
 }
 @media (max-width: 600px) {
+  .hesc-root .cs-native[data-native-layout='true'] {
+    flex-direction: column;
+  }
+  .hesc-root .cs-native[data-native-layout='true'] .cs-sidebar {
+    width: auto;
+    flex: 0 0 auto;
+    border-inline-end: 0;
+    border-bottom: 1px solid var(--ui-stroke-secondary);
+  }
+  .hesc-root .cs-native[data-native-layout='true'] .cs-brand {
+    min-height: 0;
+    padding: 6px 10px;
+  }
+  .hesc-root .cs-native[data-native-layout='true'] .cs-sidebar nav {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  .hesc-root .cs-native[data-native-layout='true'] .cs-sidebar nav button {
+    flex: 1 1 auto;
+    height: 36px;
+    margin: 0 4px;
+    padding: 0 8px;
+    gap: 6px;
+  }
+  .hesc-root .cs-native[data-native-layout='true'] .cs-sidebar-footer {
+    margin: 4px 8px;
+    padding: 6px 8px;
+  }
+  .hesc-root .cs-native[data-native-layout='true'] .cs-native-page {
+    padding-inline: 12px;
+  }
   .cs-payout-field {
     grid-template-columns: 110px minmax(0, 1fr);
   }
