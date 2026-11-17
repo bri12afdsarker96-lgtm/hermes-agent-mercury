@@ -24,12 +24,73 @@ import {
   shopBrowserExecutionTargets,
   shopBrowserTargets
 } from './shop-browser-electron'
+import { createShopBrowserWorkspace } from './shop-browser-workspace'
 
 describe('embedded Chromium shop adapter', () => {
-  it('starts merchant execution at the TD identity homepage while retaining visible navigation', () => {
+  it('starts merchant login at the common login page and execution at the TD identity homepage', () => {
     expect(shopBrowserExecutionTargets.merchant).toBe('https://fxg.jinritemai.com/ffa/mshop/homepage/index')
-    expect(shopBrowserTargets.merchant).toBe('https://fxg.jinritemai.com/ffa/morder/order/list')
+    expect(shopBrowserTargets.merchant).toBe('https://fxg.jinritemai.com/login/common')
     expect(shopBrowserExecutionTargets.feige).toBe(shopBrowserTargets.feige)
+  })
+
+  it.each([
+    { name: 'merchant view', target: 'merchant', workspace: false, initialUrl: undefined,
+      expectedUrl: 'https://fxg.jinritemai.com/login/common' },
+    { name: 'merchant workspace', target: 'merchant', workspace: true, initialUrl: undefined,
+      expectedUrl: 'https://fxg.jinritemai.com/login/common' },
+    { name: 'feige workspace', target: 'feige', workspace: true, initialUrl: undefined,
+      expectedUrl: 'https://im.jinritemai.com/pc_seller_v2/main/workspace' },
+    { name: 'explicit order page', target: 'merchant', workspace: false,
+      initialUrl: 'https://fxg.jinritemai.com/ffa/morder/order/list',
+      expectedUrl: 'https://fxg.jinritemai.com/ffa/morder/order/list' },
+    { name: 'explicit review page', target: 'merchant', workspace: false,
+      initialUrl: 'https://fxg.jinritemai.com/ffa/maftersale/comment',
+      expectedUrl: 'https://fxg.jinritemai.com/ffa/maftersale/comment' }
+  ] as const)('loads $name in the existing profile session', async scenario => {
+    const browserSession = Object.assign(new EventEmitter(), {
+      setPermissionRequestHandler: vi.fn(),
+      setPermissionCheckHandler: vi.fn(),
+      clearStorageData: vi.fn(),
+      clearCache: vi.fn(),
+      flushStorageData: vi.fn(),
+      cookies: { flushStore: vi.fn(async () => {}) }
+    })
+    let currentUrl = 'about:blank'
+    const contents = Object.assign(new EventEmitter(), {
+      loadURL: vi.fn(async (url: string) => { currentUrl = url }),
+      getURL: () => currentUrl,
+      getTitle: () => 'Synthetic shop page',
+      isLoading: () => false,
+      isDestroyed: () => false,
+      setWindowOpenHandler: vi.fn(),
+      navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+      close: vi.fn(() => contents.emit('destroyed'))
+    })
+    const view = { webContents: contents, setBounds: vi.fn(), setVisible: vi.fn() }
+    const parent = Object.assign(new EventEmitter(), {
+      isDestroyed: () => false,
+      getContentSize: () => [1000, 800],
+      contentView: { addChildView: vi.fn(), removeChildView: vi.fn() }
+    })
+    const storagePath = 'C:\\isolated\\existing-profile'
+    const bounds = { x: 0, y: 0, width: 800, height: 600 }
+    native.fromPath.mockClear().mockReturnValue(browserSession)
+    native.create.mockReturnValue(view)
+    const browser = scenario.workspace
+      ? await createShopBrowserWorkspace(parent as never, storagePath, scenario.target, bounds, () => true)
+      : await createShopBrowserView(parent as never, storagePath, scenario.target, bounds,
+        scenario.initialUrl ? { initialUrl: scenario.initialUrl, onNewWindow() {} } : undefined)
+
+    try {
+      expect(contents.loadURL).toHaveBeenCalledExactlyOnceWith(scenario.expectedUrl)
+      expect(native.fromPath).toHaveBeenCalledExactlyOnceWith(storagePath)
+    } finally {
+      await browser.close()
+    }
+
+    expect(browserSession.clearStorageData).not.toHaveBeenCalled()
+    expect(browserSession.clearCache).not.toHaveBeenCalled()
+    expect(browserSession.cookies.flushStore).toHaveBeenCalledOnce()
   })
 
   it('accepts platform HTTPS navigation and rejects unrelated or local URLs', () => {

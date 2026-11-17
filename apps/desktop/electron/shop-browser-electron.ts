@@ -11,7 +11,7 @@ import { isBrowserNavigationUrl } from './shop-browser-workspace-types'
 export { isShopBrowserUrl } from './shop-browser-types'
 
 export const shopBrowserTargets = {
-  merchant: 'https://fxg.jinritemai.com/ffa/morder/order/list',
+  merchant: 'https://fxg.jinritemai.com/login/common',
   feige: 'https://im.jinritemai.com/pc_seller_v2/main/workspace'
 }
 export const shopBrowserExecutionTargets = {
