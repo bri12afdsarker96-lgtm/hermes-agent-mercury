@@ -20,6 +20,7 @@ export function makeLocalDeployment(production, requestedOrigin) {
 export function makeLocalBuilderConfig(build, electronDist) {
   if (!electronDist || !Array.isArray(build.extraResources)) throw new Error('Local build requires installed Electron and resource configuration')
   return { ...build, appId: 'com.qiqiaoban.hermes-enterprise-assistant.localprep',
+    executableName: 'HermesEnterpriseAssistantLocalPrep', publish: null,
     productName: 'Hermes-企业助手-本地联调', artifactName: 'Hermes-企业助手-${version}-${arch}-localprep.${ext}',
     protocols: [],
     electronDist, beforePack: 'scripts/before-pack-localprep.mjs',
