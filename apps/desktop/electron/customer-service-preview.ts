@@ -320,8 +320,9 @@ export class CustomerServicePreview {
   private async perform(request: CustomerServiceRequest): Promise<CustomerServiceReply> {
     const fields: Record<string, string[]> = {
       snapshot: [],
-      saveRule: ['expectedRevision', 'rule'],
-      deleteRule: ['expectedRevision', 'ruleId'],
+      rulesSnapshot: [],
+      saveRule: ['expectedRevision', 'rule', 'rulesOnly'],
+      deleteRule: ['expectedRevision', 'ruleId', 'rulesOnly'],
       simulate: ['expectedRevision', 'message'],
       seen: ['expectedRevision', 'taskId'],
       complete: ['expectedRevision', 'taskId'],
@@ -333,6 +334,7 @@ export class CustomerServicePreview {
     if (
       !allowed ||
       !uuid(request.profileId) ||
+      (request.rulesOnly !== undefined && request.rulesOnly !== true) ||
       Object.keys(request).some(key => !['sessionId', 'profileId', 'action', ...allowed].includes(key))
     ) {
       fail('CUSTOMER_REQUEST_INVALID')
@@ -343,7 +345,7 @@ export class CustomerServicePreview {
     const store = await this.read(file)
     let duplicate = false
 
-    if (request.action !== 'snapshot') {
+    if (request.action !== 'snapshot' && request.action !== 'rulesSnapshot') {
       if (request.expectedRevision !== store.revision) {
         fail('CUSTOMER_REVISION_CONFLICT')
       }
@@ -433,6 +435,12 @@ export class CustomerServicePreview {
         store.revision++
         await this.save(file, store, authority)
       }
+    }
+
+    if (request.action === 'rulesSnapshot' || request.rulesOnly === true) {
+      this.assertCurrent()
+
+      return {ok:true, rulesSnapshot:{revision:store.revision, profile:authority.profile, rules:store.rules}}
     }
 
     const snapshot: CustomerServiceSnapshot = {

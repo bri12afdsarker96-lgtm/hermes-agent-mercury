@@ -12,6 +12,7 @@ import type {
   CustomerRule,
   CustomerRuleDraft,
   CustomerServiceRequest,
+  CustomerServiceRulesSnapshot,
   CustomerServiceSnapshot
 } from '../../electron/customer-service-types'
 import type { ShopBrowserProfile } from '../../electron/shop-browser-types'
@@ -64,13 +65,17 @@ type PanelProps = {
 }
 
 export function CustomerServicePreviewPanel(props: PanelProps) {
-  const [testing, setTesting] = useState(false)
-  const {locale} = useI18n()
-  const copy = customerServiceCopy[locale]
-
   if (props.view === 'workbench') {
     return <CustomerServiceWorkbench {...props} profiles={props.profiles ?? []} />
   }
+
+  return <CustomerServiceRulesPanel {...props} />
+}
+
+function CustomerServiceRulesPanel(props: PanelProps) {
+  const [testing, setTesting] = useState(false)
+  const {locale} = useI18n()
+  const copy = customerServiceCopy[locale]
 
   return <>
     <CustomerServiceLocalPanel {...props} />
@@ -95,6 +100,7 @@ function CustomerServiceLocalPanel({
   const native = nativeUiCopy[locale]
   const lifecycle = useMemo(() => ({ runtime, profileId, alive: true, busy: false }), [runtime, profileId])
   const [snapshot, setSnapshot] = useState<CustomerServiceSnapshot>()
+  const [rulesSnapshot, setRulesSnapshot] = useState<CustomerServiceRulesSnapshot>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -133,11 +139,15 @@ function CustomerServiceLocalPanel({
           return undefined
         }
 
-        if (!reply.ok || !reply.snapshot) {
+        if (!reply.ok || (view === 'rules' ? !reply.rulesSnapshot : !reply.snapshot)) {
           throw new Error(reply.error ?? 'CUSTOMER_FAILED')
         }
 
-        setSnapshot(reply.snapshot)
+        if (view === 'rules') {
+          setRulesSnapshot(reply.rulesSnapshot)
+        } else {
+          setSnapshot(reply.snapshot)
+        }
 
         if (reply.duplicate) {
           setNotice(copy.duplicate)
@@ -150,6 +160,7 @@ function CustomerServiceLocalPanel({
 
           if (/^(CUSTOMER_(OWNER_CHANGED|FORBIDDEN|PROFILE_NOT_FOUND)|SHOP_PROFILE_|REVOKED)/.test(code)) {
             setSnapshot(undefined)
+            setRulesSnapshot(undefined)
             setDraft(undefined)
             setConfirmation(undefined)
           }
@@ -166,19 +177,20 @@ function CustomerServiceLocalPanel({
         }
       }
     },
-    [lifecycle, copy.duplicate]
+    [lifecycle, copy.duplicate, view]
   )
 
   useEffect(() => {
     lifecycle.alive = true
     setSnapshot(undefined)
+    setRulesSnapshot(undefined)
     setDraft(undefined)
     setConfirmation(undefined)
-    void run({ action: 'snapshot' })
+    void run({ action: view === 'rules' ? 'rulesSnapshot' : 'snapshot' })
 
     const timer = setInterval(() => {
       if (!lifecycle.busy) {
-        void run({ action: 'snapshot' })
+        void run({ action: view === 'rules' ? 'rulesSnapshot' : 'snapshot' })
       }
     }, 10000)
 
@@ -186,7 +198,7 @@ function CustomerServiceLocalPanel({
       lifecycle.alive = false
       clearInterval(timer)
     }
-  }, [lifecycle, run])
+  }, [lifecycle, run, view])
 
   useEffect(() => {
     if (view !== 'workbench' || !runtime.customerService) {
@@ -228,7 +240,8 @@ function CustomerServiceLocalPanel({
   }
 
   const mutate = (request: Omit<CustomerServiceRequest, 'sessionId' | 'profileId'>) =>
-    run({ ...request, expectedRevision: snapshot?.revision })
+    run({ ...request, expectedRevision: view === 'rules' ? rulesSnapshot?.revision : snapshot?.revision,
+      ...(view === 'rules' ? {rulesOnly:true} : {}) })
 
   const save = async () => {
     if (!draft) {
@@ -347,7 +360,7 @@ function CustomerServiceLocalPanel({
           {notice}
         </p>
       ) : null}
-      {snapshot && view === 'rules' ? (
+      {rulesSnapshot && view === 'rules' ? (
         <div className="cs-native-page cs-rule-page">
           <h2>{copy.rules}</h2>
           <div className="cs-toolbar">
@@ -355,7 +368,7 @@ function CustomerServiceLocalPanel({
               {copy.newRule}
             </Button>
             <span className="cs-muted">{copy.ruleLocal}</span>
-            <Button disabled={busy} onClick={() => void run({ action: 'snapshot' })} variant="secondary">
+            <Button disabled={busy} onClick={() => void run({ action: 'rulesSnapshot' })} variant="secondary">
               {copy.refresh}
             </Button>
           </div>
@@ -373,7 +386,7 @@ function CustomerServiceLocalPanel({
                 </tr>
               </thead>
               <tbody>
-                {snapshot.rules.map((rule, index) => (
+                {rulesSnapshot.rules.map((rule, index) => (
                   <tr key={rule.id}>
                     <td>{index + 1}</td>
                     <td>{rule.IntentName}</td>
@@ -418,7 +431,7 @@ function CustomerServiceLocalPanel({
                 ))}
               </tbody>
             </table>
-            {!snapshot.rules.length ? <p className="cs-empty">{copy.emptyRules}</p> : null}
+            {!rulesSnapshot.rules.length ? <p className="cs-empty">{copy.emptyRules}</p> : null}
           </div>
         </div>
       ) : null}

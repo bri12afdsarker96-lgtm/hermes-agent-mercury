@@ -73,10 +73,17 @@ export interface CustomerServiceSnapshot {
   events: CustomerServiceEvent[]
 }
 
+export interface CustomerServiceRulesSnapshot {
+  revision: number
+  profile: ShopBrowserProfile
+  rules: CustomerRule[]
+}
+
 export interface CustomerServiceRequest {
   sessionId: string
   profileId: string
-  action: 'snapshot' | 'saveRule' | 'deleteRule' | 'simulate' | 'seen' | 'complete' | 'resume'
+  action: 'snapshot' | 'rulesSnapshot' | 'saveRule' | 'deleteRule' | 'simulate' | 'seen' | 'complete' | 'resume'
+  rulesOnly?: boolean
   expectedRevision?: number
   rule?: CustomerRuleDraft
   ruleId?: string
@@ -90,5 +97,6 @@ export interface CustomerServiceReply {
   ok: boolean
   error?: string
   snapshot?: CustomerServiceSnapshot
+  rulesSnapshot?: CustomerServiceRulesSnapshot
   duplicate?: boolean
 }

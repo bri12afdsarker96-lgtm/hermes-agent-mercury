@@ -34,6 +34,53 @@ const shop: ShopBrowserProfile = {
   }
 }
 
+it('unmounts a previously opened rule test when returning from the workbench', async () => {
+  const snapshot: CustomerServiceSnapshot = {revision:2, profile:shop, rules:[], conversations:[], tasks:[], events:[]}
+
+  const send = vi.fn(async (request: {action:string}) => request.action === 'rulesSnapshot'
+    ? {ok:true, rulesSnapshot:{revision:snapshot.revision, profile:snapshot.profile, rules:snapshot.rules}}
+    : {ok:true, snapshot})
+
+  const runtime = {customerService:send} as unknown as EnterpriseClientRuntime
+  const view = render(<CustomerServicePreviewPanel profileId={shop.id} profiles={[shop]} runtime={runtime} view="rules" />)
+  const summary = await screen.findByText('规则测试')
+  fireEvent.click(summary)
+  await waitFor(() => expect(summary.closest('details')?.querySelector('[data-view="workbench"]')).toBeTruthy())
+  view.rerender(<CustomerServicePreviewPanel profileId={shop.id} profiles={[shop]} runtime={runtime} view="workbench" />)
+  view.rerender(<CustomerServicePreviewPanel profileId={shop.id} profiles={[shop]} runtime={runtime} view="rules" />)
+  const details = (await screen.findByText('规则测试')).closest('details')!
+  expect(details.open).toBe(false)
+  expect(details.querySelector('[data-view="workbench"]')).toBeNull()
+  fireEvent.click(screen.getByText('规则测试'))
+  await waitFor(() => expect(details.querySelector('[data-view="workbench"]')).toBeTruthy())
+})
+
+it('loads the editable rule list without requesting test conversations', async () => {
+  const rule = {id:'rule-1', IntentName:'local-rule', SortOrder:1, Keywords:'hi', ReplyText:'hello', Enabled:1 as const,
+    MatchType:'keyword_any' as const, ActionsJson:'[{"type":"send_message","template":"hello"}]', CooldownSeconds:0, StopProcessing:true}
+
+  const send = vi.fn(async (_request: {action:string}) => ({ok:true, rulesSnapshot:{revision:4, profile:shop, rules:[rule]}}))
+  render(<CustomerServicePreviewPanel profileId={shop.id} profiles={[shop]} runtime={{customerService:send} as unknown as EnterpriseClientRuntime} view="rules" />)
+  expect(await screen.findByText('local-rule')).toBeTruthy()
+  expect(send).toHaveBeenCalledWith({action:'rulesSnapshot', profileId:shop.id})
+  expect(send.mock.calls.every(([request]) => request.action !== 'snapshot')).toBe(true)
+})
+
+it('clears the rules and editor when rule access is revoked', async () => {
+  const rule = {id:'rule-1', IntentName:'revoked-rule', SortOrder:1, Keywords:'hi', ReplyText:'hello', Enabled:1 as const,
+    MatchType:'keyword_any' as const, ActionsJson:'[{"type":"send_message","template":"hello"}]', CooldownSeconds:0, StopProcessing:true}
+
+  const send = vi.fn().mockResolvedValueOnce({ok:true, rulesSnapshot:{revision:4, profile:shop, rules:[rule]}})
+    .mockResolvedValueOnce({ok:false, error:'CUSTOMER_FORBIDDEN'})
+
+  render(<CustomerServicePreviewPanel profileId={shop.id} runtime={{customerService:send} as unknown as EnterpriseClientRuntime} view="rules" />)
+  await screen.findByText('revoked-rule')
+  fireEvent.click(screen.getByRole('button', {name:'刷新'}))
+  expect((await screen.findByRole('alert')).textContent).toContain('CUSTOMER_FORBIDDEN')
+  expect(screen.queryByText('revoked-rule')).toBeNull()
+  expect(screen.queryByRole('button', {name:'新增规则'})).toBeNull()
+})
+
 it('keeps local test conversations out of the real reception workbench', async () => {
   const snapshot: CustomerServiceSnapshot = {
     revision: 2, profile: shop, rules: [],
@@ -42,7 +89,10 @@ it('keeps local test conversations out of the real reception workbench', async (
     events: [{id:'event', at:1, conversationId:'local-test-customer', action:'send_message', detail:'local-test-reply'}]
   }
 
-  const send = vi.fn(async () => ({ok:true, snapshot}))
+  const send = vi.fn(async (request: {action:string}) => request.action === 'rulesSnapshot'
+    ? {ok:true, rulesSnapshot:{revision:snapshot.revision, profile:snapshot.profile, rules:snapshot.rules}}
+    : {ok:true, snapshot})
+
   render(<CustomerServicePreviewPanel profileId={shop.id} profiles={[shop]} runtime={{customerService:send} as unknown as EnterpriseClientRuntime} view="workbench" />)
   expect(await screen.findByText('接待服务未接入')).toBeTruthy()
   expect(screen.queryByText('local-test-customer')).toBeNull()
@@ -71,7 +121,10 @@ it('offers local rule testing explicitly with an empty conversation and visible 
     events: [{id:'event', at:1, conversationId:'old-test', action:'send_message', detail:'earlier-test-reply'}]
   }
 
-  const send = vi.fn(async () => ({ok:true, snapshot}))
+  const send = vi.fn(async (request: {action:string}) => request.action === 'rulesSnapshot'
+    ? {ok:true, rulesSnapshot:{revision:snapshot.revision, profile:snapshot.profile, rules:snapshot.rules}}
+    : {ok:true, snapshot})
+
   render(<CustomerServicePreviewPanel profileId={shop.id} profiles={[shop]} runtime={{customerService:send} as unknown as EnterpriseClientRuntime} view="rules" />)
   fireEvent.click(await screen.findByText('规则测试'))
   expect(await screen.findByText('earlier-test-reply')).toBeTruthy()
@@ -87,7 +140,10 @@ it('runs a local rule test with the selected profile and displays its recorded r
     events: [{id:'result', at:1, conversationId:'test-123', action:'send_message', detail:'test-result-only'}]
   }
 
-  const send = vi.fn(async (request: {action:string}) => ({ok:true, snapshot:request.action === 'simulate' ? result : snapshot}))
+  const send = vi.fn(async (request: {action:string}) => request.action === 'rulesSnapshot'
+    ? {ok:true, rulesSnapshot:{revision:snapshot.revision, profile:snapshot.profile, rules:snapshot.rules}}
+    : {ok:true, snapshot:request.action === 'simulate' ? result : snapshot})
+
   render(<CustomerServicePreviewPanel profileId={shop.id} profiles={[shop]} runtime={{customerService:send} as unknown as EnterpriseClientRuntime} view="rules" />)
   fireEvent.click(await screen.findByText('规则测试'))
   fireEvent.click(await screen.findByRole('button', {name:'模拟接收消息'}))
@@ -186,7 +242,10 @@ it('keeps the four native columns, clears only displayed login warnings, and sav
     events: []
   }
 
-  const send = vi.fn(async (_request: { action: string }) => ({ ok: true, snapshot }))
+  const send = vi.fn(async (request: { action: string }) => request.action === 'rulesSnapshot' || request.action === 'saveRule'
+    ? {ok:true, rulesSnapshot:{revision:snapshot.revision, profile:snapshot.profile, rules:snapshot.rules}}
+    : {ok:true, snapshot})
+
   const runtime = { customerService: send } as unknown as EnterpriseClientRuntime
 
   const view = render(
@@ -211,9 +270,10 @@ it('keeps the four native columns, clears only displayed login warnings, and sav
         action: 'saveRule',
         profileId: shop.id,
         expectedRevision: 2,
+        rulesOnly: true,
         rule: expect.objectContaining({ name: '需要人工', priority: 500, reply: '正在为您处理', transferHuman: true })
       })
     )
   )
-  expect(send.mock.calls.every(([request]) => ['snapshot', 'saveRule'].includes(request.action))).toBe(true)
+  expect(send.mock.calls.every(([request]) => ['rulesSnapshot', 'saveRule'].includes(request.action))).toBe(true)
 })
