@@ -7,7 +7,7 @@ import { createWriteStream } from 'node:fs'
 import { isMain } from './utils.mjs'
 import { assertReport, compareFiles, hashFile, inventory, readAssetContract,
   verifyStagedModule, writeReport } from './verify-doudian-package.mjs'
-import { makeLocalBuilderConfig, makeLocalDeployment, validateLocalOrigin } from './local-deployment.mjs'
+import { makeCloudTestBuilderConfig, makeLocalBuilderConfig, makeLocalDeployment, validateLocalOrigin } from './local-deployment.mjs'
 
 const desktopRoot = path.resolve(import.meta.dirname, '..')
 const repoRoot = path.resolve(desktopRoot, '../..')
@@ -23,8 +23,11 @@ export function assertAssetPolicy(assetContract, localprep, candidate = false) {
 }
 
 export function makeBuildInfo({ version, commit, branch, electron, node, artifact, bytes,
-  sha512, assetContract, verified, enterpriseOrigin, localprep = false, candidate = false, builtAt = new Date().toISOString() }) {
-  assertAssetPolicy(assetContract, localprep, candidate)
+  sha512, assetContract, verified, enterpriseOrigin, localprep = false, candidate = false, cloudTest = false, builtAt = new Date().toISOString() }) {
+  assertAssetPolicy(assetContract, localprep, candidate || cloudTest)
+  if (cloudTest && (localprep || candidate || !artifact.endsWith('-localtest.exe') || !/^https:\/\//.test(enterpriseOrigin || ''))) {
+    throw new Error('Cloud test requires a distinct artifact and production HTTPS origin')
+  }
   if (localprep && (!artifact.endsWith('-localprep.exe') || validateLocalOrigin(enterpriseOrigin) !== enterpriseOrigin)) {
     throw new Error('Local verification requires a localprep artifact and canonical loopback origin')
   }
@@ -39,7 +42,7 @@ export function makeBuildInfo({ version, commit, branch, electron, node, artifac
   }
   return { version, commit, branch, built_at: builtAt, built_by: { electron, node },
     artifact, bytes, sha512, sha512_encoding: 'hex', local_verification_only: localprep,
-    published: false, publication_allowed: false, ...(candidate ? { candidate_build: true } : {}), ...(enterpriseOrigin ? { enterprise_origin: enterpriseOrigin } : {}), doudian: { source_commit: assetContract.source_commit,
+    published: false, publication_allowed: false, ...(cloudTest ? { test_only: true, cloud_test_build: true, cloud_data_isolated: false } : {}), ...(candidate ? { candidate_build: true } : {}), ...(enterpriseOrigin ? { enterprise_origin: enterpriseOrigin } : {}), doudian: { source_commit: assetContract.source_commit,
       asset_approval: assetContract.asset_approval, ...(assetContract.candidate_status ? { candidate_status: assetContract.candidate_status } : {}),
       assets_manifest_sha256: assetContract.manifest_sha256, profile: 'hermes-module',
       files: verified.matched_count, bytes: verified.total_bytes } }
@@ -62,12 +65,14 @@ async function main() {
     'seven-zip': { type: 'string' }, 'npm-cli': { type: 'string' },
     'localprep': { type: 'boolean', default: false }, 'local-origin': { type: 'string' },
     'candidate': { type: 'boolean', default: false },
+    'cloud-test': { type: 'boolean', default: false },
     'nsis-dir': { type: 'string' }, 'nsis-resources-dir': { type: 'string' },
   } })
   if (values['local-origin']) validateLocalOrigin(values['local-origin'])
   if (values.localprep || values['local-origin']) {
     throw new Error('Local verification packaging is unavailable until the 0.20.12 runtime isolation is integrated and verified')
   }
+  if (values['cloud-test'] && values.candidate) throw new Error('Cloud test and candidate are separate build modes')
   if (!values['assets-manifest'] || !values.output || !values['seven-zip']) {
     throw new Error('Usage: npm run dist:win:doudian-local -- --assets-manifest <TD/docs/payment-assets-manifest.json> --output <new-directory> --seven-zip <7z.exe>')
   }
@@ -75,10 +80,10 @@ async function main() {
     throw new Error('--localprep requires --local-origin and vice versa')
   }
   const requestedOrigin = values.localprep ? validateLocalOrigin(values['local-origin']) : undefined
-  if (values.localprep && (!values['nsis-dir'] || !values['nsis-resources-dir'])) {
+  if ((values.localprep || values['cloud-test']) && (!values['nsis-dir'] || !values['nsis-resources-dir'])) {
     throw new Error('Local builds require existing --nsis-dir and --nsis-resources-dir; no downloads are attempted')
   }
-  if (values.localprep) {
+  if (values.localprep || values['cloud-test']) {
     for (const dir of [values['nsis-dir'], values['nsis-resources-dir']]) {
       if (!(await stat(path.resolve(dir))).isDirectory()) throw new Error('NSIS tool path must be an existing directory')
     }
@@ -97,7 +102,7 @@ async function main() {
     const destination = createWriteStream(path.join(output, log), { flags: 'wx' })
     const child = spawn(command, args, { cwd: desktopRoot, windowsHide: true, shell: false,
       env: { ...process.env, PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH}`,
-        CSC_IDENTITY_AUTO_DISCOVERY: 'false', ...(values.localprep ? {
+        CSC_IDENTITY_AUTO_DISCOVERY: 'false', ...(values.localprep || values['cloud-test'] ? {
           ELECTRON_BUILDER_OFFLINE: 'true', ELECTRON_BUILDER_NSIS_DIR: path.resolve(values['nsis-dir']),
           ELECTRON_BUILDER_NSIS_RESOURCES_DIR: path.resolve(values['nsis-resources-dir']),
           ELECTRON_BUILDER_7ZIP_PATH: path.resolve(values['seven-zip'])
@@ -131,7 +136,7 @@ async function main() {
     throw new Error('Commit desktop sources/packaging scripts before building an attributable verification package')
   }
   const contract = await readAssetContract(path.resolve(values['assets-manifest']))
-  assertAssetPolicy(contract, values.localprep, values.candidate)
+  assertAssetPolicy(contract, values.localprep, values.candidate || values['cloud-test'])
   const staged = await verifyStagedModule(path.join(desktopRoot, 'build', 'doudian'))
   const stageReport = compareFiles(contract.files, staged)
   await writeReport(path.join(output, 'staged-assets'), stageReport)
@@ -154,16 +159,18 @@ async function main() {
   const electronVersion = (await readFile(path.join(path.dirname(electronPackage), 'dist', 'version'), 'utf8')).trim()
   if (electronVersion !== pkg.build.electronVersion) throw new Error('Installed Electron does not match packaging version')
   let localBuilderConfig
-  if (localFile) {
+  if (localFile || values['cloud-test']) {
     const electronDist = path.join(path.dirname(electronPackage), 'dist')
     if (!(await stat(path.join(electronDist, 'electron.exe'))).isFile()) throw new Error('Local Electron binary is missing')
-    localBuilderConfig = path.join(path.dirname(localFile), 'builder-config.json')
-    await writeFile(localBuilderConfig, JSON.stringify(makeLocalBuilderConfig(pkg.build, electronDist), null, 2) + '\n', { flag: 'wx' })
+    localBuilderConfig = path.join(localFile ? path.dirname(localFile) : output, 'builder-config.json')
+    const config = localFile ? makeLocalBuilderConfig(pkg.build, electronDist) : makeCloudTestBuilderConfig(pkg.build, electronDist)
+    await writeFile(localBuilderConfig, JSON.stringify(config, null, 2) + '\n', { flag: 'wx' })
   }
   await run('build', process.execPath, [npm, 'run', 'build'])
   if (localFile) {
     await run('local-bundle', process.execPath, ['scripts/bundle-electron-main.mjs', '--local-deployment', localFile])
   }
+  if (values['cloud-test']) await run('cloud-test-bundle', process.execPath, ['scripts/bundle-electron-main.mjs', '--cloud-test-build'])
   const localOptions = localBuilderConfig ? ['--config', localBuilderConfig] : []
   const candidateOptions = values.candidate ? ['-c.artifactName=Hermes-企业助手-${version}-${arch}-candidate.${ext}'] : []
   await run('nsis', process.execPath, ['scripts/run-electron-builder.mjs', '--win', 'nsis', '--x64',
@@ -172,6 +179,7 @@ async function main() {
   if (installers.length !== 1) throw new Error(`Expected one NSIS installer, found ${installers.length}`)
   const installer = path.join(output, installers[0])
   if (localFile && !installers[0].endsWith('-localprep.exe')) throw new Error('Local installer name must end with -localprep.exe')
+  if (values['cloud-test'] && !installers[0].endsWith('-localtest.exe')) throw new Error('Cloud test installer name must end with -localtest.exe')
   await run('nsis-listing', values['seven-zip'], ['l', '-slt', '-sccUTF-8', installer])
   const outer = path.join(output, 'extracted-installer')
   await run('nsis-extract', values['seven-zip'], ['x', '-y', '-sccUTF-8', installer, `-o${outer}`])
@@ -196,6 +204,20 @@ async function main() {
   const appAsar = path.join(unpacked, 'resources', 'app.asar')
   const packedPackage = JSON.parse(asar.extractFile(appAsar, 'package.json').toString())
   if (packedPackage.version !== pkg.version) throw new Error('Packaged version mismatch')
+  if (values['cloud-test']) {
+    if (packedPackage.name !== 'hermes-enterprise-localtest' || packedPackage.productName !== 'Hermes-企业助手-测试版') {
+      throw new Error('Cloud test package metadata identity mismatch')
+    }
+    const localMain = await readFile(path.join(desktopRoot, 'dist', 'electron-main.mjs'))
+    const productionOrigin = JSON.parse(await readFile(path.join(desktopRoot, 'assets', 'enterprise-deployment.json'), 'utf8')).enterprise_api_origin
+    if (!localMain.equals(asar.extractFile(appAsar, 'dist/electron-main.mjs')) ||
+        !localMain.includes(Buffer.from('var CLOUD_TEST_BUILD = true;')) || !localMain.includes(Buffer.from(productionOrigin))) {
+      throw new Error('Cloud test main marker or production origin mismatch')
+    }
+    if (!(await stat(path.join(unpacked, 'HermesEnterpriseAssistantLocalTest.exe'))).isFile()) {
+      throw new Error('Cloud test executable identity mismatch')
+    }
+  }
   if (localFile) {
     const localMain = await readFile(path.join(desktopRoot, 'dist', 'electron-main.mjs'))
     const packedMain = asar.extractFile(appAsar, 'dist/electron-main.mjs')
@@ -210,7 +232,7 @@ async function main() {
   const buildInfo = makeBuildInfo({ version: pkg.version, commit, branch,
     electron: electronVersion, node: process.version, artifact: installers[0],
     bytes: (await stat(installer)).size, sha512: await hashFile(installer, 'sha512'),
-    assetContract: contract, verified: report, localprep: values.localprep, candidate: values.candidate,
+    assetContract: contract, verified: report, localprep: values.localprep, candidate: values.candidate, cloudTest: values['cloud-test'],
     enterpriseOrigin: localDeployment?.enterprise_api_origin || productionDeployment.enterprise_api_origin })
   await writeFile(path.join(output, 'BUILD_INFO.json'), JSON.stringify(buildInfo, null, 2) + '\n', { flag: 'wx' })
   console.log(JSON.stringify(buildInfo, null, 2))

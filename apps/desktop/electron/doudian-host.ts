@@ -164,12 +164,14 @@ export class DoudianHost {
   private closed = false
   private browserPending = new Set<string>()
   constructor(private readonly executable: string, spawnHost: typeof spawn = spawn, private readonly spawnForeground: typeof spawn = spawn,
-    private readonly browserCommand?: (command: DoudianBrowserCommand) => Promise<unknown>) {
+    private readonly browserCommand?: (command: DoudianBrowserCommand) => Promise<unknown>,
+    private readonly hostEnvironment?: NodeJS.ProcessEnv) {
     this.child = spawnHost(executable, ['--hermes-review-host'], {
       shell: false,
       // The host creates the original WinForms windows in this process.
       windowsHide: false,
       cwd: path.dirname(executable),
+      env: this.hostEnvironment,
       stdio: 'pipe'
     }) as ChildProcessWithoutNullStreams
     this.child.stderr.resume()
@@ -293,7 +295,7 @@ export class DoudianHost {
     if (!pid || this.closed) return Promise.reject(new Error('DOUDIAN_HOST_LOST'))
     return new Promise((resolve, reject) => {
       const helper = this.spawnForeground(this.executable, ['--hermes-grant-foreground', String(pid)], {
-        shell: false, windowsHide: true, cwd: path.dirname(this.executable), stdio: 'ignore'
+        shell: false, windowsHide: true, cwd: path.dirname(this.executable), env: this.hostEnvironment, stdio: 'ignore'
       })
       const timer = setTimeout(() => {
         helper.kill()
@@ -329,6 +331,8 @@ export interface DoudianDependencies {
   root: string
   localVerification?: boolean
   localForeground?: boolean
+  cloudTestBuild?: boolean
+  hostEnvironment?: NodeJS.ProcessEnv
   verifyForegroundHost?(executable: string): Promise<boolean>
   authorize(action: DoudianRequest['action']): Promise<string>
   isCurrent(): boolean
@@ -382,6 +386,12 @@ export class DoudianController {
   async operate(request: DoudianRequest): Promise<DoudianReply> {
     let acquiredExecution: BoundShopExecution | undefined
     try {
+      if (this.deps.cloudTestBuild && request?.action === 'openPayment') return bad('DOUDIAN_TEST_LEGACY_PAYMENT_DISABLED')
+      if (this.deps.cloudTestBuild && ['openReview', 'openFeige', 'manageShops'].includes(request?.action)) return bad('DOUDIAN_TEST_LEGACY_WINDOW_DISABLED')
+      if (this.deps.cloudTestBuild && ((request?.action === 'prepare' && !request.browserProfileId) ||
+          (request?.action === 'preparePayment' && (!request.browserProfileId || request.transport !== 'cdp')))) {
+        return bad('DOUDIAN_TEST_EMBEDDED_BROWSER_REQUIRED')
+      }
       // Foreground developer testing is explicit; packaged local builds remain blocked.
       if (this.deps.localVerification && !this.deps.localForeground) return bad('DOUDIAN_LOCAL_ISOLATION_UNAVAILABLE')
       this.current()
@@ -494,7 +504,7 @@ export class DoudianController {
           }
 
           this.host = this.deps.createHost?.(executable) ?? new DoudianHost(executable, spawn, spawn,
-            command => this.browserCommand(command))
+            command => this.browserCommand(command), this.deps.hostEnvironment)
 
           const init = (await this.host.request('initialize', { scope: this.owner! })) as {
             protocol?: number
@@ -502,6 +512,8 @@ export class DoudianController {
             version?: string
             taskIsolation?: string
             authorizationMode?: string
+            localTestIsolation?: string
+            localTestRoot?: string
           }
 
           if (init.protocol !== 1 || init.integration !== 'hermes-review-v1' || init.version !== '1.0.54') {
@@ -512,6 +524,14 @@ export class DoudianController {
           if (init.taskIsolation !== isolationCapability || init.authorizationMode !== 'enterprise-session-v1') {
             this.close()
             return bad('DOUDIAN_MODULE_INCOMPATIBLE')
+          }
+          const expectedTestRoot = this.deps.hostEnvironment?.HERMES_TD_LOCAL_TEST_ROOT
+          const normalizedTestRoot = (value: string) => path.win32.normalize(value).replace(/[\\/]+$/, '').toLowerCase()
+          if (this.deps.cloudTestBuild && (init.localTestIsolation !== 'profile-isolated-coordination-shared-v1' ||
+              typeof expectedTestRoot !== 'string' || !path.win32.isAbsolute(expectedTestRoot) ||
+              typeof init.localTestRoot !== 'string' || normalizedTestRoot(init.localTestRoot) !== normalizedTestRoot(expectedTestRoot))) {
+            this.close()
+            return bad('DOUDIAN_TEST_HOST_ISOLATION_UNVERIFIED')
           }
         }
 

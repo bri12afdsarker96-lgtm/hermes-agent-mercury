@@ -47,7 +47,7 @@ import nodePty from 'node-pty'
 
 import enterpriseDeployment from '../assets/enterprise-deployment.json'
 import openVpnConnectManifest from '../assets/openvpn-connect-manifest.json'
-import { registerDesktopProtocol } from '../scripts/local-deployment.mjs'
+import { applyCloudTestStartup, registerDesktopProtocol, tdHostEnvironment } from '../scripts/local-deployment.mjs'
 import { applyEnterpriseWindowIdentity, ENTERPRISE_APP_ID, repairEnterpriseShortcuts } from './enterprise-windows-identity'
 
 import { classifyActiveRuntime } from './active-runtime-state'
@@ -422,6 +422,9 @@ import { isPackagedInstallPath as isPackagedInstallPathUnderRoots } from './work
 import { readWslWindowsClipboardImage } from './wsl-clipboard-image'
 import { resolvePickerDefaultPath } from './wsl-path-bridge'
 
+declare const __HERMES_CLOUD_TEST_BUILD__: boolean
+const CLOUD_TEST_BUILD = typeof __HERMES_CLOUD_TEST_BUILD__ !== 'undefined' && __HERMES_CLOUD_TEST_BUILD__
+
 const enterpriseOriginSelection = (() => {
   try {
     const selection = selectEnterpriseOrigin({
@@ -438,7 +441,26 @@ const enterpriseOriginSelection = (() => {
   }
 })()
 
-const USER_DATA_OVERRIDE = process.env.HERMES_DESKTOP_USER_DATA_DIR
+function canonicalExistingParent(target: string): string {
+  let current = path.resolve(target)
+  const missing: string[] = []
+  while (!fs.existsSync(current)) {
+    const parent = path.dirname(current)
+    if (parent === current) throw new Error('Test data root has no existing parent')
+    missing.unshift(path.basename(current))
+    current = parent
+  }
+  return path.join(fs.realpathSync.native(current), ...missing)
+}
+
+const cloudTestPaths = applyCloudTestStartup({ enabled: CLOUD_TEST_BUILD, app, platform: process.platform,
+  appData: app.getPath('appData'), argv: process.argv,
+  protectedPaths: [app.getPath('userData'), path.join(app.getPath('appData'), 'hermes_Agent'),
+    path.join(app.getPath('appData'), 'Hermes-企业助手'),
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'hermes'),
+    process.env.HERMES_HOME], canonicalize: canonicalExistingParent,
+  mkdir: dir => fs.mkdirSync(dir, { recursive: true }) })
+const USER_DATA_OVERRIDE = CLOUD_TEST_BUILD ? undefined : process.env.HERMES_DESKTOP_USER_DATA_DIR
 
 if (USER_DATA_OVERRIDE) {
   const resolvedUserData = path.resolve(USER_DATA_OVERRIDE)
@@ -452,7 +474,7 @@ if (enterpriseOriginSelection.local) {
   app.setPath('userData', localUserData)
 }
 
-const DEV_SERVER = process.env.HERMES_DESKTOP_DEV_SERVER
+const DEV_SERVER = CLOUD_TEST_BUILD ? undefined : process.env.HERMES_DESKTOP_DEV_SERVER
 const IS_PACKAGED = app.isPackaged || Boolean(process.env.HERMES_DESKTOP_IS_PACKAGED)
 const IS_MAC = process.platform === 'darwin'
 const IS_WINDOWS = process.platform === 'win32'
@@ -562,7 +584,7 @@ let windowsSandboxFallbackReason: SandboxFallbackReason = 'boot-loop'
 let windowsNoSandboxRelaunchAttempted = false
 
 const sandboxFallbackAllowed = allowSandboxFallback(
-  enterpriseOriginSelection.local, process.argv, process.env, app.commandLine.hasSwitch('no-sandbox')
+  enterpriseOriginSelection.local || CLOUD_TEST_BUILD, process.argv, process.env, app.commandLine.hasSwitch('no-sandbox')
 )
 
 if (IS_WINDOWS && sandboxFallbackAllowed) {
@@ -757,6 +779,7 @@ if (INSTALL_STAMP) {
 // HERMES_HOME beneath the throwaway userData dir so a fresh-install run never
 // touches the user's real ~/.hermes / %LOCALAPPDATA%\hermes.
 function resolveHermesHome() {
+  if (cloudTestPaths) return cloudTestPaths.hermesHome
   const isolated = localVerificationHome(enterpriseOriginSelection.local, app.getPath('userData'))
   if (isolated) return isolated
   if (process.env.HERMES_HOME) {
@@ -798,7 +821,7 @@ function resolveHermesHome() {
 }
 
 const HERMES_HOME = resolveHermesHome()
-if (enterpriseOriginSelection.local) process.env.HERMES_HOME = HERMES_HOME
+if (enterpriseOriginSelection.local || CLOUD_TEST_BUILD) process.env.HERMES_HOME = HERMES_HOME
 
 function pathWithHermesManagedNode(...entries) {
   const managed = hermesManagedNodePathEntries(HERMES_HOME).filter(directoryExists)
@@ -892,7 +915,7 @@ const BOOT_FAKE_STEP_MS = (() => {
   return Math.max(120, raw)
 })()
 
-const APP_NAME = enterpriseOriginSelection.local ? 'Hermes-企业助手-本地联调' : (process.env.HERMES_DESKTOP_APP_NAME || 'hermes_Agent')
+const APP_NAME = CLOUD_TEST_BUILD ? 'Hermes-企业助手-测试版（真实云服务）' : enterpriseOriginSelection.local ? 'Hermes-企业助手-本地联调' : (process.env.HERMES_DESKTOP_APP_NAME || 'hermes_Agent')
 const HUD_WINDOW_TITLE = `${APP_NAME} HUD`
 const TITLEBAR_HEIGHT = 34
 const MACOS_TRAFFIC_LIGHTS_HEIGHT = 14
@@ -1268,15 +1291,15 @@ app.setName(APP_NAME)
 // never firing on Windows.)
 const LOCAL_APP_ID = `${ENTERPRISE_APP_ID}.localprep`
 if (IS_WINDOWS) {
-  app.setAppUserModelId(enterpriseOriginSelection.local ? LOCAL_APP_ID : ENTERPRISE_APP_ID)
+  app.setAppUserModelId(CLOUD_TEST_BUILD ? `${ENTERPRISE_APP_ID}.localtest` : enterpriseOriginSelection.local ? LOCAL_APP_ID : ENTERPRISE_APP_ID)
 }
 
 function applyWindowIdentity(window: BrowserWindow, icon: string) {
-  if (enterpriseOriginSelection.local) {
+  if (enterpriseOriginSelection.local || CLOUD_TEST_BUILD) {
     window.setTitle(APP_NAME)
     window.on('page-title-updated', event => { event.preventDefault(); window.setTitle(APP_NAME) })
     window.setAppDetails({
-      appId: LOCAL_APP_ID,
+      appId: CLOUD_TEST_BUILD ? `${ENTERPRISE_APP_ID}.localtest` : LOCAL_APP_ID,
       appIconPath: icon,
       appIconIndex: 0,
       relaunchCommand: `"${app.getPath('exe')}"`,
@@ -2248,7 +2271,7 @@ function unwrapWindowsVenvHermesCommand(command, backendArgs) {
 const _serveSupportCache = new Map()
 
 function backendChildEnv(backend, explicit = {}) {
-  const local = enterpriseOriginSelection.local
+  const local = enterpriseOriginSelection.local || CLOUD_TEST_BUILD
   let pythonPaths = []
   if (local) {
     if (backend.kind !== 'python' || !backend.root || !path.isAbsolute(backend.root)) {
@@ -2294,7 +2317,7 @@ function backendSupportsServe(backend) {
       // runtime through the legacy `dashboard` form. Share the probe budget
       // and its timeout-only retry instead of a thinner local bound.
       execProbeSync(backend.command, [...prefix, 'serve', '--help'], {
-        cwd: enterpriseOriginSelection.local ? HERMES_HOME : backend.root || undefined,
+        cwd: enterpriseOriginSelection.local || CLOUD_TEST_BUILD ? HERMES_HOME : backend.root || undefined,
         env: backendChildEnv(backend),
         timeout: PROBE_TIMEOUT_MS,
         stdio: 'ignore',
@@ -2751,6 +2774,7 @@ function writeZoomState(zoomLevel) {
 // Dev → SOURCE_REPO_ROOT. Packaged/CLI install → ACTIVE_HERMES_ROOT.
 // HERMES_DESKTOP_HERMES_ROOT always wins so devs can pin a worktree.
 function resolveUpdateRoot() {
+  if (CLOUD_TEST_BUILD) return ACTIVE_HERMES_ROOT
   const candidates = [
     process.env.HERMES_DESKTOP_HERMES_ROOT && path.resolve(process.env.HERMES_DESKTOP_HERMES_ROOT),
     !IS_PACKAGED && isHermesSourceRoot(SOURCE_REPO_ROOT) ? SOURCE_REPO_ROOT : null,
@@ -2836,6 +2860,7 @@ async function resolveHealedBranch(updateRoot, branch) {
 }
 
 async function checkUpdates() {
+  if (CLOUD_TEST_BUILD) return { supported: false, reason: 'local-test-build', message: '测试版不检查或安装更新。' }
   const updateRoot = resolveUpdateRoot()
   let { branch } = readDesktopUpdateConfig()
   const gitDir = path.join(updateRoot, '.git')
@@ -3553,6 +3578,7 @@ async function releaseBackendLock(updateRoot, tag) {
 // Detection (checkUpdates / commit changelog / "N behind") stays in the UI;
 // only this apply action changed.
 async function applyUpdates(opts: { stopSafeBlockers?: boolean } = {}) {
+  if (CLOUD_TEST_BUILD) throw new Error('Updates are disabled in the local test build')
   if (updateInFlight) {
     throw new Error('An update is already in progress.')
   }
@@ -3861,6 +3887,7 @@ async function applyUpdates(opts: { stopSafeBlockers?: boolean } = {}) {
 }
 
 async function handOffWindowsBootstrapRecovery(reason) {
+  if (CLOUD_TEST_BUILD) return false
   if (!IS_WINDOWS || !IS_PACKAGED) {
     return false
   }
@@ -4075,6 +4102,7 @@ function preflightStateDb(hermesHome, rememberLog) {
 // its own tiny shim window (or nothing, headless) — this process only needs
 // to leave. Checkouts that predate the script get the manual card once.
 async function applyUpdatesPosixHandoff(opts: any) {
+  if (CLOUD_TEST_BUILD) throw new Error('Updates are disabled in the local test build')
   const updateRoot = resolveUpdateRoot()
   const handoff = resolvePosixScriptHandoff(updateRoot)
 
@@ -4363,7 +4391,7 @@ function isPackagedInstallPath(dir) {
 }
 
 function resolveHermesCwd() {
-  if (enterpriseOriginSelection.local) {
+  if (enterpriseOriginSelection.local || CLOUD_TEST_BUILD) {
     fs.mkdirSync(HERMES_HOME, { recursive: true })
     return HERMES_HOME
   }
@@ -4516,6 +4544,9 @@ function createActiveBackend(backendArgs) {
 }
 
 function resolveHermesBackend(backendArgs) {
+  if (CLOUD_TEST_BUILD) {
+    return createPythonBackend(ACTIVE_HERMES_ROOT, `Hermes test runtime at ${ACTIVE_HERMES_ROOT}`, backendArgs) || createActiveBackend(backendArgs)
+  }
   // 1. Explicit override -- HERMES_DESKTOP_HERMES_ROOT points at a developer
   //    checkout. Honour it as-is (no bootstrap; the user is driving).
   const overrideRoot = process.env.HERMES_DESKTOP_HERMES_ROOT && path.resolve(process.env.HERMES_DESKTOP_HERMES_ROOT)
@@ -4696,7 +4727,7 @@ function resolveHermesBackend(backendArgs) {
 }
 
 async function ensureRuntime(backend) {
-  assertBootstrapAllowed(enterpriseOriginSelection.local, backend.bootstrap === true)
+  assertBootstrapAllowed(enterpriseOriginSelection.local || CLOUD_TEST_BUILD, backend.bootstrap === true)
   if (!backend.bootstrap) {
     await advanceBootProgress('runtime.external', `Using ${backend.label}`, 32)
 
@@ -10841,7 +10872,7 @@ function spawnSecondaryWindow({ sessionId, watch }: { sessionId?: string; watch?
     height: SESSION_WINDOW_MIN_HEIGHT,
     minWidth: SESSION_WINDOW_MIN_WIDTH,
     minHeight: SESSION_WINDOW_MIN_HEIGHT,
-    title: enterpriseOriginSelection.local ? APP_NAME : 'Hermes-企业助手',
+    title: enterpriseOriginSelection.local || CLOUD_TEST_BUILD ? APP_NAME : 'Hermes-企业助手',
     titleBarStyle: 'hidden',
     titleBarOverlay: getTitleBarOverlayOptions(),
     trafficLightPosition: IS_MAC ? WINDOW_BUTTON_POSITION : undefined,
@@ -10946,7 +10977,7 @@ function createInstanceWindow() {
     ...nextInstanceBounds(),
     minWidth: WINDOW_MIN_WIDTH,
     minHeight: WINDOW_MIN_HEIGHT,
-    title: enterpriseOriginSelection.local ? APP_NAME : 'Hermes-企业助手',
+    title: enterpriseOriginSelection.local || CLOUD_TEST_BUILD ? APP_NAME : 'Hermes-企业助手',
     titleBarStyle: 'hidden',
     titleBarOverlay: getTitleBarOverlayOptions(),
     trafficLightPosition: IS_MAC ? WINDOW_BUTTON_POSITION : undefined,
@@ -11805,7 +11836,7 @@ function createWindow() {
     ...computeWindowOptions(savedWindowState, screen.getAllDisplays()),
     minWidth: WINDOW_MIN_WIDTH,
     minHeight: WINDOW_MIN_HEIGHT,
-    title: enterpriseOriginSelection.local ? APP_NAME : 'Hermes-企业助手',
+    title: enterpriseOriginSelection.local || CLOUD_TEST_BUILD ? APP_NAME : 'Hermes-企业助手',
     // Frameless title bar on every platform so the renderer can paint the
     // "hide sidebar" button (and other left-side titlebar tools) flush with
     // the top edge — matching the macOS layout where the traffic lights sit
@@ -13840,6 +13871,8 @@ ipcMain.handle('hermes:enterprise:doudian', async (event, payload: DoudianReques
       platform: process.platform,
       localVerification: enterpriseOriginSelection.local,
       localForeground: localForegroundDoudian,
+      cloudTestBuild: CLOUD_TEST_BUILD,
+      hostEnvironment: tdHostEnvironment({ cloudTest: CLOUD_TEST_BUILD, root: cloudTestPaths?.root }),
       root: app.isPackaged ? path.join(process.resourcesPath, 'doudian') : path.join(app.getAppPath(), 'build', 'doudian'),
       isCurrent: current,
       async authorize(action) {
@@ -14041,7 +14074,7 @@ ipcMain.handle('hermes:enterprise:local-verification', () => enterpriseOriginSel
 // destination. Its small bridge below can ask only for a fixed status, launch,
 // MSI installation, or a native `.ovpn` picker/import. The imported profile
 // belongs to OpenVPN Connect; Hermes retains neither its contents nor a copy.
-const preReleaseAccessEnabled = !enterpriseOriginSelection.local && enterpriseDeployment.pre_release_access?.enabled === true
+const preReleaseAccessEnabled = !enterpriseOriginSelection.local && !CLOUD_TEST_BUILD && enterpriseDeployment.pre_release_access?.enabled === true
 const preReleaseProfileName =
   typeof enterpriseDeployment.pre_release_access?.openvpn_profile_name === 'string'
     ? enterpriseDeployment.pre_release_access.openvpn_profile_name
@@ -15301,6 +15334,7 @@ ipcMain.handle('hermes:quick-entry:settings:get', async () => {
 })
 
 ipcMain.handle('hermes:quick-entry:settings:set', async (_event, patch) => {
+  if (CLOUD_TEST_BUILD) return { enabled: false, registered: false, error: 'local-test-build', shortcut: '' }
   const current = readQuickEntrySettings()
 
   const next = sanitizeQuickEntrySettings({
@@ -16112,6 +16146,7 @@ ipcMain.handle('hermes:updates:apply', async (_event, payload) =>
 ipcMain.handle('hermes:updates:branch:get', async () => readDesktopUpdateConfig())
 
 ipcMain.handle('hermes:updates:branch:set', async (_event, name) => {
+  if (CLOUD_TEST_BUILD) throw new Error('Updates are disabled in the local test build')
   const branch = typeof name === 'string' && name.trim() ? name.trim() : DEFAULT_UPDATE_BRANCH
   writeDesktopUpdateConfig({ branch })
 
@@ -16281,6 +16316,7 @@ async function getUninstallSummary() {
 }
 
 async function runDesktopUninstall(mode) {
+  if (CLOUD_TEST_BUILD) return { ok: false, error: 'local-test-build', message: '测试版不能运行正式版卸载流程。' }
   let uninstallArgs
 
   try {
@@ -16431,7 +16467,7 @@ function _extractDeepLink(argv) {
 }
 
 function handleDeepLink(url) {
-  if (enterpriseOriginSelection.local || !url || typeof url !== 'string') {
+  if (enterpriseOriginSelection.local || CLOUD_TEST_BUILD || !url || typeof url !== 'string') {
     return
   }
 
@@ -16492,7 +16528,7 @@ ipcMain.handle('hermes:deep-link-ready', () => {
 
 function registerDeepLinkProtocol() {
   try {
-    registerDesktopProtocol(app, { local: enterpriseOriginSelection.local, protocol: HERMES_PROTOCOL,
+    registerDesktopProtocol(app, { local: enterpriseOriginSelection.local || CLOUD_TEST_BUILD, protocol: HERMES_PROTOCOL,
       defaultApp: process.defaultApp, argv: process.argv, executable: process.execPath })
   } catch (err) {
     rememberLog(`[deeplink] protocol registration failed: ${err.message}`)
@@ -16583,7 +16619,7 @@ app.whenReady().then(async () => {
   // Quick Entry's global chord — registered on ready so a cold launch restores
   // it without the renderer visiting Settings. A failed registration is logged
   // here and surfaced in Settings via the IPC state (never silent).
-  applyQuickEntrySettings(readQuickEntrySettings())
+  if (!CLOUD_TEST_BUILD) applyQuickEntrySettings(readQuickEntrySettings())
 
   if (IS_MAC) {
     const reposition = () => wakeIndicatorController.reposition()
@@ -16595,7 +16631,7 @@ app.whenReady().then(async () => {
     screen.on('display-removed', reposition)
   }
 
-  if (!enterpriseOriginSelection.local) {
+  if (!enterpriseOriginSelection.local && !CLOUD_TEST_BUILD) {
     enterprisePackageUpdater = createEnterprisePackageUpdater({
       isPackaged: app.isPackaged,
       currentVersion: app.getVersion(),
@@ -16621,7 +16657,7 @@ app.whenReady().then(async () => {
     return
   }
   createWindow()
-  if (!enterpriseOriginSelection.local && IS_WINDOWS && app.isPackaged && !BOOT_FAKE_MODE && fs.existsSync(path.join(process.resourcesPath, 'enterprise-nsis-install.json'))) {
+  if (!enterpriseOriginSelection.local && !CLOUD_TEST_BUILD && IS_WINDOWS && app.isPackaged && !BOOT_FAKE_MODE && fs.existsSync(path.join(process.resourcesPath, 'enterprise-nsis-install.json'))) {
     const icon = getAppIconPath()
     if (icon) {
       const appData = app.getPath('appData')
@@ -16637,7 +16673,7 @@ app.whenReady().then(async () => {
       if (migration.failed.length) console.warn('[enterprise] Shortcut migration unavailable:', migration.failed)
     }
   }
-  if (!enterpriseOriginSelection.local) {
+  if (!enterpriseOriginSelection.local && !CLOUD_TEST_BUILD) {
     const packageUpdateTimer = setTimeout(() => {
       void enterprisePackageUpdater?.check()
     }, 30_000)

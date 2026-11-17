@@ -30,6 +30,8 @@ const external = ['electron', 'node-pty', 'get-windows', 'fs']
 // behaves like a packaged build. Dev bundles (`--dev`) leave the env alone
 // so HERMES_DESKTOP_DEV_SERVER / source-tree resolution keep working.
 const isDev = process.argv.includes('--dev')
+const cloudTestBuild = process.argv.includes('--cloud-test-build')
+if (cloudTestBuild && isDev) throw new Error('Cloud test build cannot be a dev bundle')
 const localIndex = process.argv.indexOf('--local-deployment')
 if (localIndex >= 0) throw new Error('Local verification bundling is unavailable until 0.20.12 runtime isolation is integrated and verified')
 if (localIndex >= 0 && (!process.argv[localIndex + 1] || isDev)) {
@@ -39,8 +41,8 @@ const plugins = localIndex < 0 ? [] : [await localDeploymentPlugin(
   resolve(process.argv[localIndex + 1]), resolve(root, 'assets/enterprise-deployment.json')
 )]
 const define = isDev
-  ? {}
-  : { 'process.env.HERMES_DESKTOP_IS_PACKAGED': JSON.stringify(true) }
+  ? { __HERMES_CLOUD_TEST_BUILD__: 'false' }
+  : { 'process.env.HERMES_DESKTOP_IS_PACKAGED': JSON.stringify(true), __HERMES_CLOUD_TEST_BUILD__: JSON.stringify(cloudTestBuild) }
 
 // Bundle main.ts → dist/electron-main.mjs
 await build({
