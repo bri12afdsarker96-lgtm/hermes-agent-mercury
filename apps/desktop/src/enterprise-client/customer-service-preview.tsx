@@ -16,6 +16,7 @@ import type {
 } from '../../electron/customer-service-types'
 import type { ShopBrowserProfile } from '../../electron/shop-browser-types'
 
+import { CustomerServiceWorkbench } from './customer-service-workbench'
 import type { EnterpriseClientRuntime } from './runtime'
 import { ShopBrowserRuntimeSettings } from './shop-browser-runtime'
 
@@ -52,21 +53,42 @@ function editDraft(rule: CustomerRule): CustomerRuleDraft {
   }
 }
 
-export function CustomerServicePreviewPanel({
-  runtime,
-  profileId,
-  view = 'rules',
-  profiles = [],
-  onSelectProfile,
-  onHandle
-}: {
+type PanelProps = {
   runtime: EnterpriseClientRuntime
   profileId: string
   view?: 'rules' | 'workbench'
   profiles?: ShopBrowserProfile[]
   onSelectProfile?: (id: string) => void
   onHandle?: () => void
-}) {
+  onRefresh?: () => void
+}
+
+export function CustomerServicePreviewPanel(props: PanelProps) {
+  const [testing, setTesting] = useState(false)
+  const {locale} = useI18n()
+  const copy = customerServiceCopy[locale]
+
+  if (props.view === 'workbench') {
+    return <CustomerServiceWorkbench {...props} profiles={props.profiles ?? []} />
+  }
+
+  return <>
+    <CustomerServiceLocalPanel {...props} />
+    <details onToggle={event => setTesting(event.currentTarget.open)}>
+      <summary>{copy.ruleTest}</summary>
+      {testing ? <><p>{copy.ruleTestHint}</p><CustomerServiceLocalPanel {...props} onHandle={undefined} view="workbench" /></> : null}
+    </details>
+  </>
+}
+
+function CustomerServiceLocalPanel({
+  runtime,
+  profileId,
+  view = 'rules',
+  profiles = [],
+  onSelectProfile,
+  onHandle
+}: PanelProps) {
   const { locale } = useI18n()
   const copy = customerServiceCopy[locale]
   const layout = customerServiceLayoutCopy[locale]
@@ -80,7 +102,7 @@ export function CustomerServicePreviewPanel({
   const [priority, setPriority] = useState('0')
   const [cooldown, setCooldown] = useState('0')
   const [confirmation, setConfirmation] = useState<{ action: 'complete' | 'deleteRule'; id: string }>()
-  const [conversationId, setConversationId] = useState('conversation-demo')
+  const [conversationId, setConversationId] = useState('')
   const [messageId, setMessageId] = useState(() => `message-${Date.now()}`)
   const [content, setContent] = useState('')
   const [timestamp, setTimestamp] = useState(() => new Date().toISOString())
@@ -332,7 +354,7 @@ export function CustomerServicePreviewPanel({
             <Button disabled={busy} onClick={() => beginEdit()}>
               {copy.newRule}
             </Button>
-            <span className="cs-muted">{copy.rehearsal}</span>
+            <span className="cs-muted">{copy.ruleLocal}</span>
             <Button disabled={busy} onClick={() => void run({ action: 'snapshot' })} variant="secondary">
               {copy.refresh}
             </Button>
@@ -398,15 +420,6 @@ export function CustomerServicePreviewPanel({
             </table>
             {!snapshot.rules.length ? <p className="cs-empty">{copy.emptyRules}</p> : null}
           </div>
-          <details className="cs-evidence">
-            <summary>{copy.evidence}</summary>
-            <p>{copy.nativeEvidence}</p>
-            <code>IntentRuleEditWindow.cs 383–505, 688–791</code>
-            <p>{copy.simulationEvidence}</p>
-            <p>{copy.recoveryEvidence}</p>
-            <code>WorkbenchPage.cs 2931–3295 / GatewayClient.cs 2595</code>
-            <p>{copy.scopeEvidence}</p>
-          </details>
         </div>
       ) : null}
       {snapshot && view === 'workbench' ? (
@@ -499,7 +512,7 @@ export function CustomerServicePreviewPanel({
             <div className="cs-column-head">
               <h4>{layout.chat}</h4>
               <div className="cs-actions">
-                <Button disabled={busy || !selectedTask} onClick={onHandle} variant="secondary">
+                <Button disabled={busy || !selectedTask || !onHandle} onClick={onHandle} variant="secondary">
                   {layout.handle}
                 </Button>
                 <Button
@@ -617,12 +630,6 @@ export function CustomerServicePreviewPanel({
               </li>
             ))}
           </ol>
-          <details className="cs-evidence">
-            <summary>{copy.evidence}</summary>
-            <p>{copy.simulationEvidence}</p>
-            <p>{copy.recoveryEvidence}</p>
-            <p>{copy.scopeEvidence}</p>
-          </details>
         </details>
       ) : null}
       <Dialog
@@ -635,7 +642,7 @@ export function CustomerServicePreviewPanel({
       >
         <DialogContent bodyClassName="cs-dialog-body" className="cs-native-dialog">
           <DialogTitle>{layout.messageDialog}</DialogTitle>
-          <DialogDescription>{copy.rehearsal}</DialogDescription>
+          <DialogDescription>{copy.ruleTestHint}</DialogDescription>
           {error ? (
             <p className="cs-error" role="alert">
               {copy.failed} ({error})
@@ -705,7 +712,7 @@ export function CustomerServicePreviewPanel({
       >
         <DialogContent bodyClassName="cs-dialog-body" className="cs-native-dialog">
           <DialogTitle>{copy.actions}</DialogTitle>
-          <DialogDescription>{copy.nativeEvidence}</DialogDescription>
+          <DialogDescription>{copy.actions}</DialogDescription>
           <pre className="cs-action-json">
             {actionsRule ? JSON.stringify(JSON.parse(actionsRule.ActionsJson), null, 2) : ''}
           </pre>
@@ -725,7 +732,7 @@ export function CustomerServicePreviewPanel({
           showCloseButton={false}
         >
           <DialogTitle>{draft?.id ? native.editRule : copy.newRule}</DialogTitle>
-          <DialogDescription className="sr-only">{copy.nativeEvidence}</DialogDescription>
+          <DialogDescription className="sr-only">{copy.ruleLocal}</DialogDescription>
           {error ? (
             <p role="alert">
               {error === 'CUSTOMER_RULE_INVALID' ? copy.invalid : copy.failed} ({error})

@@ -2,6 +2,9 @@ import type { Locale } from './types'
 
 const zh = {
   title: '规则与人工待办',
+  ruleTest: '规则测试',
+  ruleTestHint: '仅在本机测试，不发送消息或打款。',
+  ruleLocal: '规则仅保存在本机，自动执行未接入。',
   rehearsal: '本机模拟流程',
   refresh: '刷新',
   newRule: '新增规则',
@@ -64,6 +67,9 @@ const zh = {
 
 const en: Record<keyof typeof zh, string> = {
   title: 'Rules and human queue',
+  ruleTest: 'Rule test',
+  ruleTestHint: 'Local test only; no messages or payments are sent.',
+  ruleLocal: 'Rules are saved locally; automatic execution is not connected.',
   rehearsal: 'Local workflow rehearsal',
   refresh: 'Refresh',
   newRule: 'New rule',
@@ -132,6 +138,9 @@ export const customerServiceCopy: Record<Locale, Record<keyof typeof zh, string>
   en,
   'zh-hant': {
     title: '規則與人工待辦',
+    ruleTest: '規則測試',
+    ruleTestHint: '僅在本機測試，不傳送訊息或付款。',
+    ruleLocal: '規則僅儲存在本機，自動執行尚未接入。',
     rehearsal: '本機模擬流程',
     refresh: '重新整理',
     newRule: '新增規則',
@@ -194,6 +203,9 @@ export const customerServiceCopy: Record<Locale, Record<keyof typeof zh, string>
   },
   ja: {
     title: 'ルールと有人対応',
+    ruleTest: 'ルールテスト',
+    ruleTestHint: 'ローカルテストのみ。メッセージ送信や支払いは行いません。',
+    ruleLocal: 'ルールはローカルに保存され、自動実行は未接続です。',
     rehearsal: 'ローカル動作シミュレーション',
     refresh: '更新',
     newRule: 'ルール追加',
@@ -256,6 +268,9 @@ export const customerServiceCopy: Record<Locale, Record<keyof typeof zh, string>
   },
   ar: {
     title: 'القواعد وقائمة المعالجة البشرية',
+    ruleTest: 'اختبار القواعد',
+    ruleTestHint: 'اختبار محلي فقط، دون إرسال رسائل أو مدفوعات.',
+    ruleLocal: 'تُحفظ القواعد محلياً، والتنفيذ التلقائي غير متصل.',
     rehearsal: 'محاكاة محلية',
     refresh: 'تحديث',
     newRule: 'قاعدة جديدة',

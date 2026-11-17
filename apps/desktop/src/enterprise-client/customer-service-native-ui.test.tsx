@@ -34,6 +34,70 @@ const shop: ShopBrowserProfile = {
   }
 }
 
+it('keeps local test conversations out of the real reception workbench', async () => {
+  const snapshot: CustomerServiceSnapshot = {
+    revision: 2, profile: shop, rules: [],
+    conversations: [{id: 'local-test-customer', mode: 'pending', version: 1, lastMatched: []}],
+    tasks: [{id:'local-task', conversationId:'local-test-customer', reason:'test', status:'pending', seen:false, createdAt:1}],
+    events: [{id:'event', at:1, conversationId:'local-test-customer', action:'send_message', detail:'local-test-reply'}]
+  }
+
+  const send = vi.fn(async () => ({ok:true, snapshot}))
+  render(<CustomerServicePreviewPanel profileId={shop.id} profiles={[shop]} runtime={{customerService:send} as unknown as EnterpriseClientRuntime} view="workbench" />)
+  expect(await screen.findByText('接待服务未接入')).toBeTruthy()
+  expect(screen.queryByText('local-test-customer')).toBeNull()
+  expect(screen.queryByText('local-test-reply')).toBeNull()
+  expect(send).not.toHaveBeenCalled()
+})
+
+it('refreshes authorized shops without requesting a local preview snapshot', async () => {
+  const send = vi.fn()
+  const refresh = vi.fn()
+  render(<CustomerServicePreviewPanel onRefresh={refresh} profileId={shop.id} profiles={[shop]} runtime={{customerService:send} as unknown as EnterpriseClientRuntime} view="workbench" />)
+  fireEvent.click(screen.getByRole('button', {name:'刷新'}))
+  expect(refresh).toHaveBeenCalledOnce()
+  expect(send).not.toHaveBeenCalled()
+})
+
+it('keeps the pending shop filter unavailable while reception data is not connected', () => {
+  render(<CustomerServicePreviewPanel profileId={shop.id} profiles={[shop]} runtime={{} as EnterpriseClientRuntime} view="workbench" />)
+  expect((screen.getByRole('option', {name:'待处理'}) as HTMLOptionElement).disabled).toBe(true)
+  expect(screen.getByLabelText('店铺筛选')).toBeTruthy()
+})
+
+it('offers local rule testing explicitly with an empty conversation and visible test history', async () => {
+  const snapshot: CustomerServiceSnapshot = {
+    revision: 2, profile: shop, rules: [], conversations: [], tasks: [],
+    events: [{id:'event', at:1, conversationId:'old-test', action:'send_message', detail:'earlier-test-reply'}]
+  }
+
+  const send = vi.fn(async () => ({ok:true, snapshot}))
+  render(<CustomerServicePreviewPanel profileId={shop.id} profiles={[shop]} runtime={{customerService:send} as unknown as EnterpriseClientRuntime} view="rules" />)
+  fireEvent.click(await screen.findByText('规则测试'))
+  expect(await screen.findByText('earlier-test-reply')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', {name:'模拟接收消息'}))
+  expect((screen.getByLabelText('会话编号') as HTMLInputElement).value).toBe('')
+})
+
+it('runs a local rule test with the selected profile and displays its recorded result', async () => {
+  const snapshot: CustomerServiceSnapshot = {revision: 2, profile: shop, rules: [], conversations: [], tasks: [], events: []}
+
+  const result: CustomerServiceSnapshot = {
+    ...snapshot, revision: 3,
+    events: [{id:'result', at:1, conversationId:'test-123', action:'send_message', detail:'test-result-only'}]
+  }
+
+  const send = vi.fn(async (request: {action:string}) => ({ok:true, snapshot:request.action === 'simulate' ? result : snapshot}))
+  render(<CustomerServicePreviewPanel profileId={shop.id} profiles={[shop]} runtime={{customerService:send} as unknown as EnterpriseClientRuntime} view="rules" />)
+  fireEvent.click(await screen.findByText('规则测试'))
+  fireEvent.click(await screen.findByRole('button', {name:'模拟接收消息'}))
+  fireEvent.change(screen.getByLabelText('会话编号'), {target:{value:'test-123'}})
+  fireEvent.change(screen.getByLabelText('消息内容'), {target:{value:'test input'}})
+  fireEvent.click(screen.getByRole('button', {name:'运行模拟'}))
+  await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({action:'simulate', profileId:shop.id, expectedRevision:2, message:expect.objectContaining({conversationId:'test-123', text:'test input'})})))
+  expect((await screen.findAllByText('test-result-only')).length).toBeGreaterThan(0)
+})
+
 it('waits for the authoritative list before showing an empty native shop state', async () => {
   vi.stubGlobal(
     'ResizeObserver',
@@ -131,13 +195,10 @@ it('keeps the four native columns, clears only displayed login warnings, and sav
 
   await screen.findByText('需重新登录', { selector: 'h4' })
   expect(view.container.querySelector('.cs-work-columns')?.children).toHaveLength(4)
-  fireEvent.change(screen.getByLabelText('店铺筛选'), { target: { value: 'pending' } })
-  expect(view.container.querySelectorAll('.cs-work-shop')).toHaveLength(0)
-  fireEvent.change(screen.getByLabelText('店铺筛选'), { target: { value: 'all' } })
   expect(view.container.querySelectorAll('.cs-work-shop')).toHaveLength(1)
   fireEvent.click(screen.getByRole('button', { name: '清空' }))
   await screen.findByText('暂无需重新登录的档案')
-  expect(send.mock.calls.length).toBe(1)
+  expect(send.mock.calls.length).toBe(0)
   view.rerender(<CustomerServicePreviewPanel profileId={shop.id} profiles={[shop]} runtime={runtime} view="rules" />)
   fireEvent.click(await screen.findByRole('button', { name: '新增规则' }))
   fireEvent.change(screen.getByLabelText('规则名称'), { target: { value: '需要人工' } })

@@ -3,12 +3,12 @@ import './customer-service.css'
 import { useCallback, useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Loader } from '@/components/ui/loader'
 import { useI18n } from '@/i18n/context'
 import { customerServiceCopy } from '@/i18n/customer-service'
 import { customerServiceLayoutCopy } from '@/i18n/customer-service-layout'
 import { shopBrowserCopy } from '@/i18n/shop-browser'
+import { shopBrowserRuntimeCopy } from '@/i18n/shop-browser-runtime'
 import { LayoutDashboard, MessageSquareText, NotebookTabs, Users } from '@/lib/icons'
 
 import type { ShopBrowserProfile } from '../../electron/shop-browser-types'
@@ -27,7 +27,6 @@ export function CustomerServicePage({ runtime }: { runtime?: EnterpriseClientRun
   const [page, setPage] = useState<Page>('shops')
   const [profiles, setProfiles] = useState<ShopBrowserProfile[]>([])
   const [selected, setSelected] = useState('')
-  const [evidenceOpen, setEvidenceOpen] = useState(false)
   const [initialTarget, setInitialTarget] = useState<'feige'>()
   const [owner, setOwner] = useState(runtime)
   const [profilesLoading, setProfilesLoading] = useState(true)
@@ -39,7 +38,6 @@ export function CustomerServicePage({ runtime }: { runtime?: EnterpriseClientRun
     setProfiles([])
     setSelected('')
     setInitialTarget(undefined)
-    setEvidenceOpen(false)
     setOwner(runtime)
     setProfilesLoading(true)
     setProfilesError('')
@@ -148,11 +146,7 @@ export function CustomerServicePage({ runtime }: { runtime?: EnterpriseClientRun
           ))}
         </nav>
         <div className="cs-sidebar-footer">
-          <i className="cs-status-dot" />
-          <span>{copy.rehearsal}</span>
-          <Button onClick={() => setEvidenceOpen(true)} variant="ghost">
-            {copy.evidence}
-          </Button>
+          <span>{shopBrowserRuntimeCopy[locale].unavailable}</span>
         </div>
       </aside>
       <main className="cs-native-content">
@@ -212,6 +206,7 @@ export function CustomerServicePage({ runtime }: { runtime?: EnterpriseClientRun
                       setInitialTarget('feige')
                       setPage('shops')
                     }}
+                    onRefresh={() => setProfilesRevision(value => value + 1)}
                     onSelectProfile={setSelected}
                     profileId={selectedProfile.id}
                     profiles={profiles}
@@ -227,18 +222,6 @@ export function CustomerServicePage({ runtime }: { runtime?: EnterpriseClientRun
           </>
         )}
       </main>
-      <Dialog onOpenChange={setEvidenceOpen} open={evidenceOpen}>
-        <DialogContent bodyClassName="cs-dialog-body" className="cs-native-dialog cs-evidence-dialog">
-          <DialogTitle>{copy.evidence}</DialogTitle>
-          <DialogDescription>{layout.layoutEvidence}</DialogDescription>
-          <p>{copy.nativeEvidence}</p>
-          <code>IntentRuleEditWindow.cs 383–505, 688–791</code>
-          <p>{copy.simulationEvidence}</p>
-          <p>{copy.recoveryEvidence}</p>
-          <code>WorkbenchPage.cs 2931–3295 / GatewayClient.cs 2595</code>
-          <p>{copy.scopeEvidence}</p>
-        </DialogContent>
-      </Dialog>
     </section>
   )
 }
