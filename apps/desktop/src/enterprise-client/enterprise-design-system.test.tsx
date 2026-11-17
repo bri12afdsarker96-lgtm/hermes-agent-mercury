@@ -63,4 +63,26 @@ describe('Enterprise design system foundation', () => {
     expect(document.activeElement).toBe(opener)
     opener.remove()
   })
+
+  it.each([[false, false], [false, true], [true, false], [true, true]])('contains Tab after controls recover (outside=%s reverse=%s)', (outside, reverse) => {
+    render(<EnterpriseModalDialog label="确认操作" onClose={() => {}}><button type="button">首项</button><button type="button">末项</button></EnterpriseModalDialog>)
+    const dialog = screen.getByRole('dialog')
+    const external = globalThis.document.createElement('button')
+    globalThis.document.body.append(external)
+
+    if (outside) {external.focus()} else {dialog.focus()}
+    const event = new KeyboardEvent('keydown', {key:'Tab', shiftKey:reverse, bubbles:true, cancelable:true})
+    window.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+    expect(globalThis.document.activeElement).toBe(screen.getByRole('button', {name:reverse ? '末项' : '首项'}))
+    external.remove()
+  })
+
+  it('keeps focus on the dialog when all of its controls are disabled', () => {
+    render(<EnterpriseModalDialog label="确认操作" onClose={() => {}}><button disabled type="button">处理</button></EnterpriseModalDialog>)
+    const event = new KeyboardEvent('keydown', {key:'Tab', bubbles:true, cancelable:true})
+    window.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+    expect(globalThis.document.activeElement).toBe(screen.getByRole('dialog'))
+  })
 })

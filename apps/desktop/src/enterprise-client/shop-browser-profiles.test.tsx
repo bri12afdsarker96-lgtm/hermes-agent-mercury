@@ -428,6 +428,86 @@ it('focuses the shop region if the original row disappears before cancellation',
   expect(f.send.mock.calls.some(([request]) => request.action === 'delete' || request.action === 'close')).toBe(false)
 })
 
+it('returns focus to the safe shop region when removal is rejected by global authorization', async () => {
+  const f = fixture(twoShops())
+  const original = f.send.getMockImplementation()!
+  f.send.mockImplementation(request => request.action === 'delete' ? Promise.resolve({ok:false, error:'SHOP_PROFILE_FORBIDDEN'} as never) : original(request))
+  render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)
+  const row = (await screen.findByText('店铺A')).closest('tr')!
+  const trigger = within(row).getByRole('button', {name:shopBrowserCopy.zh.remove})
+  trigger.focus()
+  fireEvent.click(trigger)
+  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', {name:shopBrowserCopy.zh.confirmDelete}))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  await waitFor(() => expect(trigger.isConnected).toBe(false))
+  await waitFor(() => expect(globalThis.document.activeElement).toBe(screen.getByRole('region', {name:'店铺管理'})))
+  expect(f.send.mock.calls.filter(([request]) => request.action === 'delete')).toHaveLength(1)
+})
+
+it('does not steal user focus when a pending removal loses authorization', async () => {
+  const f = fixture(twoShops())
+  const original = f.send.getMockImplementation()!
+  let release!: () => void
+  f.send.mockImplementation(request => request.action === 'delete'
+    ? new Promise(resolve => {release = () => resolve({ok:false, error:'SHOP_PROFILE_FORBIDDEN'} as never)})
+    : original(request))
+  render(<><button>其他位置</button><ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} /></>)
+  const row = (await screen.findByText('店铺A')).closest('tr')!
+  fireEvent.click(within(row).getByRole('button', {name:shopBrowserCopy.zh.remove}))
+  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', {name:shopBrowserCopy.zh.confirmDelete}))
+  await waitFor(() => expect(release).toBeTypeOf('function'))
+  const destination = screen.getByRole('button', {name:'其他位置'})
+  destination.focus()
+  await act(async () => {release(); await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))})
+  expect(globalThis.document.activeElement).toBe(destination)
+  expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+it('ignores a late authorization failure from the previous runtime', async () => {
+  const first = fixture(twoShops())
+  const second = fixture(twoShops())
+  const original = first.send.getMockImplementation()!
+  let release!: () => void
+  first.send.mockImplementation(request => request.action === 'delete'
+    ? new Promise(resolve => {release = () => resolve({ok:false, error:'SHOP_PROFILE_FORBIDDEN'} as never)})
+    : original(request))
+  const view = render(<><button>其他位置</button><ShopBrowserProfilesPanel nativeLayout runtime={first.runtime} /></>)
+  const row = (await screen.findByText('店铺A')).closest('tr')!
+  fireEvent.click(within(row).getByRole('button', {name:shopBrowserCopy.zh.remove}))
+  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', {name:shopBrowserCopy.zh.confirmDelete}))
+  await waitFor(() => expect(release).toBeTypeOf('function'))
+  view.rerender(<><button>其他位置</button><ShopBrowserProfilesPanel nativeLayout runtime={second.runtime} /></>)
+  await screen.findByText('店铺A')
+  const destination = screen.getByRole('button', {name:'其他位置'})
+  destination.focus()
+  await act(async () => {release(); await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))})
+  expect(globalThis.document.activeElement).toBe(destination)
+  expect(screen.getByText('店铺A')).toBeTruthy()
+  expect(second.send.mock.calls.some(([request]) => request.action === 'delete')).toBe(false)
+})
+
+it('restores the original trigger after a normal post-removal network rejection', async () => {
+  const f = fixture(twoShops())
+  const original = f.send.getMockImplementation()!
+  let accepted = false
+  f.send.mockImplementation(async request => {
+    if (request.action === 'list' && accepted) {throw new Error('NETWORK_FAILED')}
+    const response = await original(request)
+
+    if (request.action === 'delete') {accepted = true}
+
+    return response
+  })
+  render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)
+  const trigger = within((await screen.findByText('店铺A')).closest('tr')!).getByRole('button', {name:shopBrowserCopy.zh.remove})
+  trigger.focus()
+  fireEvent.click(trigger)
+  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', {name:shopBrowserCopy.zh.confirmDelete}))
+  await screen.findByText(/NETWORK_FAILED/)
+  expect(trigger.isConnected).toBe(true)
+  await waitFor(() => expect(globalThis.document.activeElement).toBe(trigger))
+})
+
 it('focuses the shop region after a successful removal unmounts its trigger', async () => {
   const f = fixture(twoShops())
   render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)

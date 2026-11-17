@@ -58,6 +58,8 @@ export function ShopBrowserProfilesPanel({
   const [error, setError] = useState('')
   const [cloud, setCloud] = useState<ShopBrowserReply['cloud']>()
   const [confirmation, setConfirmation] = useState<{ action: 'relogin' | 'delete'; profile: ShopBrowserProfile; runtime: EnterpriseClientRuntime } | null>(null)
+  const confirmationRef = useRef(confirmation)
+  confirmationRef.current = confirmation
   const slot = useRef<HTMLDivElement>(null)
   const section = useRef<HTMLElement>(null)
   const removalTrigger = useRef<HTMLElement | null>(null)
@@ -68,6 +70,27 @@ export function ShopBrowserProfilesPanel({
     openIntent: 0, refreshSequence: 0, resizeBounds: null as (() => void) | null }), [runtime])
 
   const selectedProfile = profiles.find(profile => profile.id === selected)
+
+  const restoreRemovalFocus = useCallback(() => {
+    const trigger = removalTrigger.current
+    const epoch = ++removalFocusEpoch.current
+
+    requestAnimationFrame(() => {
+      if (!lifecycle.alive || removalFocusEpoch.current !== epoch) {return}
+      const active = document.activeElement
+
+      if (active && active !== document.body && active !== trigger && active !== section.current && active.isConnected) {return}
+
+      if (trigger?.isConnected && !trigger.matches(':disabled')) {trigger.focus()}
+      else {section.current?.focus()}
+    })
+  }, [lifecycle])
+
+  const restoreRemovalOnAuthorityLoss = useCallback(() => {
+    if (confirmationRef.current?.action === 'delete' && confirmationRef.current.runtime === lifecycle.runtime) {
+      restoreRemovalFocus()
+    }
+  }, [lifecycle, restoreRemovalFocus])
 
   const refresh = useCallback(async () => {
     const sequence = ++lifecycle.refreshSequence
@@ -81,6 +104,7 @@ export function ShopBrowserProfilesPanel({
       const code = reason instanceof Error ? reason.message : ''
 
       if (/OWNER_CHANGED|ACCESS_UNAVAILABLE|FORBIDDEN/.test(code)) {
+        restoreRemovalOnAuthorityLoss()
         lifecycle.openIntent++
         lifecycle.refreshSequence++
         lifecycle.boundsEpoch++
@@ -112,6 +136,7 @@ export function ShopBrowserProfilesPanel({
 
     if (!reply.ok) {
       if (authorityFailure) {
+        restoreRemovalOnAuthorityLoss()
         lifecycle.openIntent++
         lifecycle.refreshSequence++
         lifecycle.boundsEpoch++
@@ -149,7 +174,7 @@ export function ShopBrowserProfilesPanel({
     setCloud(reply.cloud)
     onProfilesChange?.(reply.profiles ?? [])
     setOpened(nextOpened)
-  }, [lifecycle, onProfilesChange, onSelectedProfile])
+  }, [lifecycle, onProfilesChange, onSelectedProfile, restoreRemovalOnAuthorityLoss])
 
   const run = useCallback(
     async (operation: () => Promise<void>) => {
@@ -173,6 +198,7 @@ export function ShopBrowserProfilesPanel({
           }
 
           if (/OWNER_CHANGED|ACCESS_UNAVAILABLE|FORBIDDEN/.test(code)) {
+            restoreRemovalOnAuthorityLoss()
             lifecycle.openIntent++
             lifecycle.refreshSequence++
             lifecycle.boundsEpoch++
@@ -193,7 +219,7 @@ export function ShopBrowserProfilesPanel({
         }
       }
     },
-    [lifecycle, onProfilesChange, onSelectedProfile]
+    [lifecycle, onProfilesChange, onSelectedProfile, restoreRemovalOnAuthorityLoss]
   )
 
   useEffect(() => {
@@ -272,6 +298,7 @@ export function ShopBrowserProfilesPanel({
       setError(code ?? 'SHOP_PROFILE_FAILED')
 
       if (authorityFailure) {
+        restoreRemovalOnAuthorityLoss()
         lifecycle.openIntent++
         lifecycle.refreshSequence++
         lifecycle.boundsEpoch++
@@ -312,7 +339,7 @@ export function ShopBrowserProfilesPanel({
       window.removeEventListener('resize', resize)
       window.removeEventListener('scroll', resize, true)
     }
-  }, [opened, runtime, lifecycle, bounds, onProfilesChange, onSelectedProfile])
+  }, [opened, runtime, lifecycle, bounds, onProfilesChange, onSelectedProfile, restoreRemovalOnAuthorityLoss])
 
   const invoke = useCallback(
     (request: Omit<ShopBrowserRequest, 'sessionId'>) =>
@@ -445,21 +472,6 @@ export function ShopBrowserProfilesPanel({
     setSelected(profile.id)
     onSelectedProfile?.(profile.id)
   }
-
-  const restoreRemovalFocus = useCallback(() => {
-    const trigger = removalTrigger.current
-    const epoch = ++removalFocusEpoch.current
-
-    requestAnimationFrame(() => {
-      if (!lifecycle.alive || removalFocusEpoch.current !== epoch) {return}
-      const active = document.activeElement
-
-      if (active && active !== document.body && active !== trigger && active !== section.current && active.isConnected) {return}
-
-      if (trigger?.isConnected && !trigger.matches(':disabled')) {trigger.focus()}
-      else {section.current?.focus()}
-    })
-  }, [lifecycle])
 
   const closeRemoval = useCallback(() => {
     if (lifecycle.busy) {return}

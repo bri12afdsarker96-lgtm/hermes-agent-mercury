@@ -115,6 +115,14 @@ export function EnterpriseModalDialog({ children, label, onClose }: EnterpriseMo
       const last = controls[controls.length - 1]
       const active = document.activeElement
 
+      if (active === dialog || !dialog?.contains(active)) {
+        event.preventDefault()
+        const target = event.shiftKey ? last : first
+        target.focus()
+
+        return
+      }
+
       if (event.shiftKey && active === first) {
         event.preventDefault()
         last.focus()
