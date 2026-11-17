@@ -10,6 +10,8 @@ export interface ShopBrowserProfile {
   loginState: 'unverified' | 'verified' | 'expired'
   payoutSettings?: ShopPayoutSettings
   payoutSettingsRevision?: number
+  cloudPayoutSettingsState?: 'saved' | 'missing' | 'unknown'
+  completionState?: 'identity-unknown' | 'settings-pending'
   cloudRevision?: number
   createdBy?: string | null
   createdByName?: string | null
@@ -28,7 +30,7 @@ export interface ShopBrowserBounds {
 
 export interface ShopBrowserRequest {
   sessionId: string
-  action: 'list' | 'create' | 'open' | 'identify' | 'close' | 'relogin' | 'delete' | 'bounds' | 'browser' | 'bookmarks' | 'savePayoutSettings' | 'assign' | 'exportCsv'
+  action: 'list' | 'create' | 'open' | 'identify' | 'confirmIdentity' | 'cancelIdentity' | 'close' | 'relogin' | 'delete' | 'bounds' | 'browser' | 'bookmarks' | 'savePayoutSettings' | 'assign' | 'exportCsv'
   locale?: ShopCsvLocale
   profileId?: string
   target?: 'merchant' | 'feige'
@@ -37,6 +39,7 @@ export interface ShopBrowserRequest {
   bookmark?: ShopBookmarkCommand
   expectedRevision?: number
   payoutSettings?: ShopPayoutSettings
+  pendingToken?: string
   principalIds?: string[]
 }
 
@@ -48,6 +51,7 @@ export type ShopCsvExportResult =
 export interface ShopBrowserReply {
   ok: boolean
   error?: string
+  pendingIdentity?: { profileId: string; shopId: string; shopName: string; token: string }
   profiles?: ShopBrowserProfile[]
   profile?: ShopBrowserProfile
   openProfileId?: string | null

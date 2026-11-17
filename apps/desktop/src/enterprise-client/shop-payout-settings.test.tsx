@@ -72,3 +72,28 @@ it('rejects invalid days and keeps a conflicting edit visible for review', async
   await screen.findByText('配置已在另一页面更新，请关闭并重新打开设置。')
   expect((screen.getByLabelText('每单打款金额') as HTMLInputElement).value).toBe('5')
 })
+
+it('opens completion without a preset amount and confirms the candidate with user settings', async () => {
+  const send = vi.fn(async () => ({ ok: true }))
+  const saved = vi.fn(async () => {})
+  render(<ShopPayoutSettingsButton onSaved={saved} profile={profile}
+    pendingIdentity={{ profileId: profile.id, shopId: '123', shopName: profile.displayName, token: 'candidate' }}
+    onCancelPending={() => {}} runtime={{ shopBrowser: send } as unknown as EnterpriseClientRuntime} />)
+  expect(await screen.findByRole('dialog', { name: '补全店铺信息' })).toBeTruthy()
+  expect((screen.getByLabelText('每单打款金额') as HTMLInputElement).value).toBe('')
+  fireEvent.change(screen.getByLabelText('每单打款金额'), { target: { value: '5' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存' }))
+  await waitFor(() => expect(saved).toHaveBeenCalledOnce())
+  expect(send).toHaveBeenCalledWith(expect.objectContaining({ action: 'confirmIdentity', pendingToken: 'candidate', profileId: profile.id }))
+})
+
+it('cancels a pending identity without saving settings', async () => {
+  const send = vi.fn(async () => ({ ok: true }))
+  const canceled = vi.fn()
+  render(<ShopPayoutSettingsButton onSaved={async () => {}} profile={profile}
+    pendingIdentity={{ profileId: profile.id, shopId: '123', shopName: profile.displayName, token: 'candidate' }}
+    onCancelPending={canceled} runtime={{ shopBrowser: send } as unknown as EnterpriseClientRuntime} />)
+  fireEvent.click(await screen.findByRole('button', { name: '取消' }))
+  expect(canceled).toHaveBeenCalledOnce()
+  expect(send).not.toHaveBeenCalled()
+})

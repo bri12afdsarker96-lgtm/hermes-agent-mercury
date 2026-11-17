@@ -39,12 +39,19 @@ async function fixture(existingRoot?: string, initialScope?: ShopBrowserAuthorit
     controller.operate({ sessionId: 'test', action, ...rest })
   const create = async () => (await call('create')).profile!
   const open = (profileId: string) => call('open', { profileId, target: 'merchant', bounds })
+  const complete = async (profileId: string) => {
+    const pending = (await call('identify', { profileId })).pendingIdentity!
+    return call('confirmIdentity', { profileId, pendingToken: pending.token, payoutSettings: {
+      remitAmount: '1', payoutReviewDays: 15, payoutRequireReviewWithinDays: false,
+      payoutGoodReviewMode: 1, payoutRefundChannel: 'small_remit' } })
+  }
   return {
     root,
     controller,
     call,
     create,
     open,
+    complete,
     createView,
     identify,
     close,
@@ -65,21 +72,93 @@ async function fixture(existingRoot?: string, initialScope?: ShopBrowserAuthorit
 }
 
 describe('persistent shop browser profiles', () => {
+  it('does not commit a newly identified shop until its business settings are confirmed', async () => {
+    const f = await fixture()
+    const profile = await f.create()
+    await f.open(profile.id)
+    const preview = await f.call('identify', { profileId: profile.id })
+    expect(preview).toMatchObject({ ok: true, pendingIdentity: { shopId: '10001', shopName: 'Shop A' } })
+    expect((await f.call('list')).profiles![0]).toMatchObject({ shopId: null, loginState: 'unverified' })
+    await f.call('close')
+    expect((await (await fixture(f.root)).call('list')).profiles![0]).toMatchObject({ shopId: null, loginState: 'unverified' })
+  })
+
+  it('confirms a newly identified shop only with settings and the matching live identity', async () => {
+    const f = await fixture()
+    const profile = await f.create()
+    await f.open(profile.id)
+    const preview = await f.call('identify', { profileId: profile.id })
+    const settings = { remitAmount: '5', payoutReviewDays: 15, payoutRequireReviewWithinDays: true,
+      payoutGoodReviewMode: 0 as const, payoutRefundChannel: 'small_remit' as const }
+    const saved = await f.call('confirmIdentity' as never, { profileId: profile.id,
+      pendingToken: preview.pendingIdentity!.token, payoutSettings: settings } as never)
+    expect(saved.profile).toMatchObject({ shopId: '10001', loginState: 'verified', payoutSettings: settings })
+  })
+
+  it('discards an identity response when the shop window is closed during identification', async () => {
+    const f = await fixture()
+    const profile = await f.create()
+    await f.open(profile.id)
+    let release!: (value: { shopId: string; shopName: string }) => void
+    let started!: () => void
+    const waiting = new Promise<void>(resolve => { started = resolve })
+    f.identify.mockImplementationOnce(() => { started(); return new Promise(resolve => { release = resolve }) })
+    const identifying = f.call('identify', { profileId: profile.id })
+    await waiting
+    const closing = f.call('close')
+    release({ shopId: '10001', shopName: 'Shop A' })
+    expect((await identifying).pendingIdentity).toBeUndefined()
+    await closing
+    expect((await f.call('list')).profiles![0]).toMatchObject({ shopId: null, loginState: 'unverified' })
+  })
+
+  it('rejects a changed shop before confirming pending business settings', async () => {
+    const f = await fixture()
+    const profile = await f.create()
+    await f.open(profile.id)
+    const pending = (await f.call('identify', { profileId: profile.id })).pendingIdentity!
+    f.identify.mockResolvedValueOnce({ shopId: '20002', shopName: 'Other' })
+    const result = await f.call('confirmIdentity', { profileId: profile.id, pendingToken: pending.token,
+      payoutSettings: { remitAmount: '5', payoutReviewDays: 15, payoutRequireReviewWithinDays: true,
+        payoutGoodReviewMode: 0, payoutRefundChannel: 'small_remit' } })
+    expect(result.error).toBe('SHOP_PROFILE_IDENTITY_CHANGED')
+    expect((await f.call('list')).profiles![0]).toMatchObject({ shopId: null, loginState: 'unverified' })
+  })
+
+  it('does not confirm a pending shop when close arrives during the identity recheck', async () => {
+    const f = await fixture()
+    const profile = await f.create()
+    await f.open(profile.id)
+    const pending = (await f.call('identify', { profileId: profile.id })).pendingIdentity!
+    let release!: (value: { shopId: string; shopName: string }) => void
+    let started!: () => void
+    const waiting = new Promise<void>(resolve => { started = resolve })
+    f.identify.mockImplementationOnce(() => { started(); return new Promise(resolve => { release = resolve }) })
+    const confirming = f.call('confirmIdentity', { profileId: profile.id, pendingToken: pending.token,
+      payoutSettings: { remitAmount: '5', payoutReviewDays: 15, payoutRequireReviewWithinDays: true,
+        payoutGoodReviewMode: 0, payoutRefundChannel: 'small_remit' } })
+    await waiting
+    const closing = f.call('close')
+    release({ shopId: '10001', shopName: 'Shop A' })
+    expect((await confirming).error).toBe('SHOP_PROFILE_IDENTITY_CHANGED')
+    await closing
+    expect((await f.call('list')).profiles![0]).toMatchObject({ shopId: null, loginState: 'unverified' })
+  })
   it('saves settings per profile without altering login storage and restores them after restart', async () => {
     const f = await fixture()
     const first = await f.create()
     const second = await f.create()
 
     await f.open(first.id)
-    await f.call('identify', { profileId: first.id })
+    await f.complete(first.id)
     const storage = f.createView.mock.calls[0][0]
 
     const settings = { remitAmount: ' 5 ', payoutReviewDays: 15, payoutRequireReviewWithinDays: true,
       payoutGoodReviewMode: 0 as const, payoutRefundChannel: 'small_remit' as const }
 
-    const saved = await f.call('savePayoutSettings', { profileId: first.id, payoutSettings: settings, expectedRevision: 0 })
+    const saved = await f.call('savePayoutSettings', { profileId: first.id, payoutSettings: settings, expectedRevision: 1 })
 
-    expect(saved.profile).toMatchObject({ shopId: '10001', loginState: 'verified', payoutSettingsRevision: 1,
+    expect(saved.profile).toMatchObject({ shopId: '10001', loginState: 'verified', payoutSettingsRevision: 2,
       payoutSettings: { ...settings, remitAmount: '5' } })
     expect(f.clearStorage).not.toHaveBeenCalled()
     await f.call('close')
@@ -122,7 +201,7 @@ describe('persistent shop browser profiles', () => {
     const f = await fixture()
     const profile = await f.create()
     await f.open(profile.id)
-    await f.call('identify', { profileId: profile.id })
+    await f.complete(profile.id)
     f.execution.identify.mockRejectedValueOnce(new Error('SHOP_PROFILE_IDENTITY_UNAVAILABLE'))
     await expect(f.controller.acquireExecution(profile.id, 'merchant')).rejects.toThrow('IDENTITY_UNAVAILABLE')
     expect(f.execution.close).toHaveBeenCalledOnce()
@@ -142,7 +221,7 @@ describe('persistent shop browser profiles', () => {
     await expect(f.controller.acquireExecution(profile.id, 'merchant')).rejects.toThrow('UNVERIFIED')
     expect(f.createExecution).not.toHaveBeenCalled()
     await f.open(profile.id)
-    await f.call('identify', { profileId: profile.id })
+    await f.complete(profile.id)
     const execution = await f.controller.acquireExecution(profile.id, 'merchant')
     expect(f.createExecution).toHaveBeenCalledWith(f.createView.mock.calls[0][0], 'merchant')
     expect(execution).toMatchObject({ profileId: profile.id, shopId: '10001', shopName: 'Shop A' })
@@ -159,7 +238,7 @@ describe('persistent shop browser profiles', () => {
     const f = await fixture()
     const profile = await f.create()
     await f.open(profile.id)
-    await f.call('identify', { profileId: profile.id })
+    await f.complete(profile.id)
     f.execution.identify.mockResolvedValueOnce({ shopId: '20002', shopName: 'Other' })
     await expect(f.controller.acquireExecution(profile.id, 'feige')).rejects.toThrow('IDENTITY_CHANGED')
     expect(f.execution.close).toHaveBeenCalledTimes(1)
@@ -178,7 +257,7 @@ describe('persistent shop browser profiles', () => {
     expect((await f.call('identify', { profileId: profile.id })).error).toBe('SHOP_PROFILE_PAGE_NOT_READY')
     expect(f.close).not.toHaveBeenCalled()
     expect((await f.call('list')).openProfileId).toBe(profile.id)
-    expect((await f.call('identify', { profileId: profile.id })).profile?.shopId).toBe('10001')
+    expect((await f.complete(profile.id)).profile?.shopId).toBe('10001')
   })
   it('uses compact scope-bound storage paths and keeps legacy sessions until explicit relogin', async () => {
     const f = await fixture()
@@ -232,7 +311,7 @@ describe('persistent shop browser profiles', () => {
     const f = await fixture()
     const profile = await f.create()
     expect((await f.open(profile.id)).ok).toBe(true)
-    const identified = await f.call('identify', { profileId: profile.id })
+    const identified = await f.complete(profile.id)
     expect(identified.profile).toMatchObject({
       id: profile.id,
       shopId: '10001',
@@ -271,7 +350,7 @@ describe('persistent shop browser profiles', () => {
     const f = await fixture()
     const profile = await f.create()
     await f.open(profile.id)
-    await f.call('identify', { profileId: profile.id })
+    await f.complete(profile.id)
     const oldPath = f.createView.mock.calls[0][0]
     const reset = await f.call('relogin', { profileId: profile.id })
     expect(reset.profile).toMatchObject({
@@ -344,7 +423,7 @@ describe('persistent shop browser profiles', () => {
     const f = await fixture()
     const profile = await f.create()
     await f.open(profile.id)
-    await f.call('identify', { profileId: profile.id })
+    await f.complete(profile.id)
     f.identify.mockResolvedValue({ shopId: '20002', shopName: 'Another shop' })
     expect((await f.call('identify', { profileId: profile.id })).error).toBe('SHOP_PROFILE_IDENTITY_CHANGED')
     expect((await f.call('list')).profiles![0].shopId).toBe('10001')

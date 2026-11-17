@@ -57,6 +57,8 @@ const publicProfile = (profile: StoredProfile): ShopBrowserProfile => ({
   createdAt: profile.createdAt,
   checkedAt: profile.checkedAt,
   loginState: profile.loginState,
+  ...(profile.completionState ? { completionState: profile.completionState } : {}),
+  ...(profile.cloudRevision ? { cloudPayoutSettingsState: profile.cloudPayoutSettingsState ?? 'unknown' } : {}),
   ...(profile.cloudRevision ? {
     cloudRevision: profile.cloudMetadataRevision ?? profile.cloudRevision,
     createdBy: profile.createdBy ?? null,
@@ -101,6 +103,8 @@ export class ShopBrowserProfiles {
   private scope?: ShopBrowserAuthority
   private invalidated = false
   private opened?: { id: string; view: ShopBrowserView }
+  private pendingIdentity?: { profileId: string; shopId: string; shopName: string; token: string; view: ShopBrowserView; scopeKey: string }
+  private pendingEpoch = 0
   private executions = new Set<BoundShopExecution>()
   private bookmarks: ShopBrowserBookmarks
   private cloudStatus?: ShopBrowserReply['cloud']
@@ -183,6 +187,8 @@ export class ShopBrowserProfiles {
         (profile.shopName !== null && typeof profile.shopName !== 'string') ||
         (profile.storageLayout !== undefined && profile.storageLayout !== 2) ||
         (profile.payoutSettings !== undefined && !validShopPayoutSettings(profile.payoutSettings)) ||
+        (profile.completionState !== undefined && !['identity-unknown', 'settings-pending'].includes(profile.completionState)) ||
+        (profile.cloudPayoutSettingsState !== undefined && !['saved', 'missing', 'unknown'].includes(profile.cloudPayoutSettingsState)) ||
         (profile.payoutSettingsRevision !== undefined &&
           (!Number.isSafeInteger(profile.payoutSettingsRevision) || profile.payoutSettingsRevision < 0)) ||
         (profile.servicingPrincipalIds !== undefined && !validShopPrincipalIds(profile.servicingPrincipalIds)) ||
@@ -234,6 +240,7 @@ export class ShopBrowserProfiles {
 
   private async closeView(backup = true) {
     const opened = this.opened
+    this.pendingIdentity = undefined
 
     try {
       if (backup && opened && this.deps.cloud && !this.invalidated && this.deps.isCurrent()) {
@@ -337,8 +344,11 @@ export class ShopBrowserProfiles {
   }
 
   private applyCloudPayoutSettings(profile: StoredProfile, remote: CloudShopRecord) {
+    const state = remote.payout_settings === undefined ? 'unknown' : remote.payout_settings === null ? 'missing' : 'saved'
+    const stateChanged = profile.cloudPayoutSettingsState !== state
+    profile.cloudPayoutSettingsState = state
     if (!remote.payout_settings) {
-      return false
+      return stateChanged
     }
 
     const changed = profile.payoutSettingsRevision !== remote.payout_settings_revision ||
@@ -346,12 +356,12 @@ export class ShopBrowserProfiles {
         ([key, value]) => profile.payoutSettings?.[key as keyof typeof remote.payout_settings] !== value
       )
     if (!changed) {
-      return false
+      return stateChanged
     }
     profile.payoutSettings = { ...remote.payout_settings }
     profile.payoutSettingsRevision = remote.payout_settings_revision!
 
-    return changed
+    return changed || stateChanged
   }
 
   private applyCloudAssignment(profile: StoredProfile, remote: CloudShopRecord) {
@@ -377,14 +387,23 @@ export class ShopBrowserProfiles {
   }
 
   private async migratePayoutSettings(profile: StoredProfile, remote: CloudShopRecord) {
-    if (remote.payout_settings !== null || !profile.payoutSettings) {
+    if (remote.payout_settings !== null || !profile.payoutSettings || profile.completionState ||
+        this.pendingIdentity?.profileId === profile.id) {
       return remote
     }
 
     const saved = await this.deps.cloud!.savePayoutSettings(profile.id, remote.revision, 0, profile.payoutSettings)
     await this.authority()
     await this.checkProfileAccess(profile, true)
-    this.applyCloudPayoutSettings(profile, saved)
+    const readback = await this.deps.cloud!.get(profile.id)
+    await this.authority()
+    await this.checkProfileAccess(profile, true)
+    if (readback.revision !== saved.revision || readback.payout_settings_revision !== saved.payout_settings_revision ||
+        !readback.payout_settings || Object.entries(profile.payoutSettings).some(([key, value]) =>
+          readback.payout_settings![key as keyof typeof profile.payoutSettings] !== value)) {
+      fail('SHOP_PAYOUT_SETTINGS_CLOUD_UNAVAILABLE')
+    }
+    this.applyCloudPayoutSettings(profile, readback)
 
     if (profile.cloudRevision === remote.revision) {
       profile.cloudRevision = saved.revision
@@ -392,11 +411,12 @@ export class ShopBrowserProfiles {
 
     this.cloudAccess = undefined
 
-    return saved
+    return readback
   }
 
   private async backup(scope: ShopBrowserAuthority, profiles: StoredProfile[], profile: StoredProfile) {
-    if (!this.deps.cloud || !this.deps.exportSession || !profile.shopId || !profile.shopName) {
+    if (!this.deps.cloud || !this.deps.exportSession || !profile.shopId || !profile.shopName ||
+        profile.completionState || this.pendingIdentity?.profileId === profile.id) {
       return
     }
 
@@ -594,13 +614,14 @@ export class ShopBrowserProfiles {
           cloudRevision: detail.revision
         }
 
+        if (local?.completionState) { restored.completionState = local.completionState }
+
         this.applyCloudAssignment(restored, detail)
 
         // Cloud settings follow the enterprise asset. Legacy local settings are
         // retained only while the cloud has no configuration to restore.
-        if (detail.payout_settings) {
-          this.applyCloudPayoutSettings(restored, detail)
-        } else if (local?.payoutSettings) {
+        this.applyCloudPayoutSettings(restored, detail)
+        if (!detail.payout_settings && local?.payoutSettings) {
           restored.payoutSettings = local.payoutSettings
           restored.payoutSettingsRevision = local.payoutSettingsRevision ?? 0
         }
@@ -660,6 +681,8 @@ export class ShopBrowserProfiles {
 
   invalidate() {
     this.invalidated = true
+    this.pendingEpoch++
+    this.pendingIdentity = undefined
     // Detaching is immediate even when an identify request is still in flight.
     void this.closeView().catch(() => {})
 
@@ -847,6 +870,9 @@ export class ShopBrowserProfiles {
   }
 
   operate(request: ShopBrowserRequest): Promise<ShopBrowserReply> {
+    if (['cancelIdentity', 'close', 'open', 'relogin', 'delete'].includes(request.action)) {
+      this.pendingEpoch++
+    }
     const operation = this.tail
       .then(() => this.perform(request))
       .catch(async error => {
@@ -872,6 +898,8 @@ export class ShopBrowserProfiles {
       create: [],
       open: ['profileId', 'target', 'bounds'],
       identify: ['profileId'],
+      confirmIdentity: ['profileId', 'pendingToken', 'payoutSettings'],
+      cancelIdentity: ['profileId', 'pendingToken'],
       close: [],
       relogin: ['profileId'],
       delete: ['profileId'],
@@ -1108,13 +1136,111 @@ export class ShopBrowserProfiles {
       this.opened = { id: profile.id, view }
     }
 
+    if (request.action === 'cancelIdentity') {
+      if (this.pendingIdentity?.profileId === profile.id && this.pendingIdentity.token === request.pendingToken) {
+        this.pendingIdentity = undefined
+      }
+      return { ok: true, profile: publicProfile(profile), openProfileId: this.opened?.id ?? null }
+    }
+
+    if (request.action === 'confirmIdentity') {
+      const pending = this.pendingIdentity
+      const epoch = this.pendingEpoch
+      if (!pending || pending.profileId !== profile.id || pending.token !== request.pendingToken ||
+          pending.scopeKey !== scopeKey(scope) || this.opened?.view !== pending.view) {
+        fail('SHOP_PROFILE_IDENTITY_CHANGED')
+      }
+      if (!validShopPayoutSettings(request.payoutSettings)) {
+        fail('SHOP_PAYOUT_SETTINGS_INVALID')
+      }
+      const current = await pending.view.identify()
+      await this.authority()
+      await this.checkProfileAccess(profile, true)
+      if (this.pendingIdentity !== pending || this.pendingEpoch !== epoch || this.opened?.view !== pending.view ||
+          !current || current.shopId !== pending.shopId || current.shopName.trim() !== pending.shopName) {
+        fail('SHOP_PROFILE_IDENTITY_CHANGED')
+      }
+      if (this.deps.cloud) {
+        if (!this.deps.exportSession) { fail('SHOP_PAYOUT_SETTINGS_CLOUD_UNAVAILABLE') }
+        const settings = { ...request.payoutSettings, remitAmount: request.payoutSettings.remitAmount.trim() }
+        const initial = !profile.shopId && !profile.cloudRevision && !profile.completionState
+        if (initial) {
+          profile.shopId = pending.shopId
+          profile.shopName = pending.shopName
+          profile.displayName = pending.shopName
+          profile.checkedAt = new Date().toISOString()
+          profile.loginState = 'unverified'
+          profile.completionState = 'identity-unknown'
+          await this.save(scope, profiles)
+        }
+        try {
+          let remote: CloudShopRecord
+          if (initial) {
+            const session = await this.deps.exportSession(this.storage(scope, profile))
+            await this.authority()
+            if (this.pendingEpoch !== epoch || this.opened?.view !== pending.view) { fail('SHOP_PROFILE_IDENTITY_CHANGED') }
+            remote = await this.deps.cloud.save(publicProfile(profile), 0, session)
+          } else {
+            // On an uncertain result, read first: never blindly repeat identity POST.
+            remote = await this.deps.cloud.get(profile.id)
+          }
+          await this.authority()
+          if (this.pendingEpoch !== epoch || this.opened?.view !== pending.view) { fail('SHOP_PROFILE_IDENTITY_CHANGED') }
+          if (remote.deleted || remote.profile?.shop_id !== pending.shopId ||
+              remote.payout_settings === undefined || remote.payout_settings_revision === undefined) {
+            fail('SHOP_PAYOUT_SETTINGS_CLOUD_UNAVAILABLE')
+          }
+          profile.cloudRevision = remote.revision
+          profile.completionState = 'settings-pending'
+          await this.save(scope, profiles)
+          await this.checkProfileAccess(profile, true)
+          if (this.pendingEpoch !== epoch || this.opened?.view !== pending.view) { fail('SHOP_PROFILE_IDENTITY_CHANGED') }
+          if (remote.payout_settings === null && remote.payout_settings_revision === 0) {
+            await this.deps.cloud.savePayoutSettings(profile.id, remote.revision, 0, settings)
+          } else if (!remote.payout_settings || Object.entries(settings).some(([key, value]) =>
+            remote.payout_settings![key as keyof typeof settings] !== value)) {
+            fail('SHOP_PAYOUT_SETTINGS_CONFLICT')
+          }
+          remote = await this.deps.cloud.get(profile.id)
+          await this.authority()
+          await this.checkProfileAccess(profile, true)
+          if (this.pendingEpoch !== epoch || this.opened?.view !== pending.view) { fail('SHOP_PROFILE_IDENTITY_CHANGED') }
+          if (!remote.payout_settings || remote.payout_settings_revision! < 1 ||
+              Object.entries(settings).some(([key, value]) => remote.payout_settings![key as keyof typeof settings] !== value)) {
+            fail('SHOP_PAYOUT_SETTINGS_CLOUD_UNAVAILABLE')
+          }
+          this.applyCloudPayoutSettings(profile, remote)
+          this.applyCloudAssignment(profile, remote)
+          profile.cloudRevision = remote.revision
+        } catch (error) {
+          const code = error instanceof Error ? error.message : ''
+          if (/OWNER_CHANGED|FORBIDDEN|CONFLICT|IDENTITY_CHANGED/.test(code)) { throw error }
+          fail('SHOP_PAYOUT_SETTINGS_CLOUD_UNAVAILABLE')
+        }
+      }
+      profile.shopId = pending.shopId
+      profile.shopName = pending.shopName
+      profile.displayName = pending.shopName
+      profile.loginState = 'verified'
+      profile.checkedAt = new Date().toISOString()
+      profile.payoutSettings = { ...request.payoutSettings, remitAmount: request.payoutSettings.remitAmount.trim() }
+      if (!this.deps.cloud) { profile.payoutSettingsRevision = (profile.payoutSettingsRevision ?? 0) + 1 }
+      delete profile.completionState
+      await this.save(scope, profiles)
+      this.pendingIdentity = undefined
+      return { ok: true, profile: publicProfile(profile), openProfileId: profile.id }
+    }
+
     if (request.action === 'identify') {
       if (this.opened?.id !== profile.id) {
         fail('SHOP_PROFILE_NOT_OPEN')
       }
 
-      const identity = await this.opened.view.identify()
+      const view = this.opened.view
+      const epoch = this.pendingEpoch
+      const identity = await view.identify()
       await this.authority()
+      if (this.pendingEpoch !== epoch || this.opened?.view !== view) { fail('SHOP_PROFILE_IDENTITY_CHANGED') }
 
       if (identity) {
         if (!/^\d{1,32}$/.test(identity.shopId) || !identity.shopName.trim() || identity.shopName.length > 200) {
@@ -1125,10 +1251,41 @@ export class ShopBrowserProfiles {
           fail('SHOP_PROFILE_IDENTITY_CHANGED')
         }
 
+        let settingsSaved = Boolean(profile.shopId && profile.payoutSettings)
+        if (profile.cloudRevision) {
+          if (!this.deps.cloud) {
+            fail('SHOP_PAYOUT_SETTINGS_CLOUD_UNAVAILABLE')
+          }
+          const remote = await this.deps.cloud.get(profile.id)
+          await this.authority()
+          await this.checkProfileAccess(profile, true)
+          if (this.pendingEpoch !== epoch || this.opened?.view !== view) { fail('SHOP_PROFILE_IDENTITY_CHANGED') }
+          if (remote.deleted || remote.payout_settings === undefined || remote.payout_settings_revision === undefined) {
+            fail('SHOP_PAYOUT_SETTINGS_CLOUD_UNAVAILABLE')
+          }
+          settingsSaved = Boolean(remote.payout_settings && remote.payout_settings_revision > 0)
+          if (settingsSaved) {
+            this.applyCloudPayoutSettings(profile, remote)
+          } else {
+            profile.completionState = 'settings-pending'
+            profile.cloudPayoutSettingsState = 'missing'
+            await this.save(scope, profiles)
+          }
+        }
+
+        if (!settingsSaved) {
+          const pending = { profileId: profile.id, shopId: identity.shopId, shopName: identity.shopName.trim(),
+            token: randomUUID(), view, scopeKey: scopeKey(scope) }
+          this.pendingIdentity = pending
+          return { ok: true, pendingIdentity: { profileId: pending.profileId, shopId: pending.shopId,
+            shopName: pending.shopName, token: pending.token }, openProfileId: profile.id }
+        }
+
         profile.shopId = identity.shopId
         profile.shopName = identity.shopName.trim()
         profile.displayName = profile.shopName
         profile.loginState = 'verified'
+        delete profile.completionState
       } else {
         profile.loginState = 'expired'
       }

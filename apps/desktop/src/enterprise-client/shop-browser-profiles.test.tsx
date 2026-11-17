@@ -85,6 +85,19 @@ function twoShops(): ShopBrowserProfile[] {
   }))
 }
 
+it('does not display a stale local amount as confirmed when cloud settings are missing', async () => {
+  const [profile] = twoShops()
+  profile.cloudRevision = 1
+  profile.cloudPayoutSettingsState = 'missing'
+  profile.payoutSettings = { remitAmount: '37', payoutReviewDays: 15, payoutRequireReviewWithinDays: false,
+    payoutGoodReviewMode: 1, payoutRefundChannel: 'small_remit' }
+  const f = fixture([profile])
+  render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)
+  const row = (await screen.findByText('店铺A')).closest('tr')!
+  expect(within(row).getByText('店铺身份已保存，业务配置待完成。')).toBeTruthy()
+  expect(within(row).queryByText('37')).toBeNull()
+})
+
 it('opens employee assignments for the selected row in a dialog without changing the selected shop', async () => {
   const shops = twoShops()
   const f = fixture(shops)
@@ -723,7 +736,7 @@ it.each(['ok', '403', '404', '409', 'network', 'forbidden', 'owner', 'in-use'])(
 
   const client = (principal: string) => createShopProfileCloud({
     assertCurrent() {},
-    async request(method: string, url: string, body?: { profile_id: string; expected_revision: number; profile: unknown; session: unknown }) {
+    async request(method: string, url: string, body?: { profile_id: string; expected_revision: number; profile?: unknown; session?: unknown; payout_settings?: unknown; expected_payout_settings_revision?: number }) {
       const privateIds = hidden.get(principal) ?? new Set<string>()
       hidden.set(principal, privateIds)
       const id = body?.profile_id ?? new URL(url, 'https://enterprise.example').searchParams.get('profile_id') ?? undefined
@@ -750,6 +763,14 @@ it.each(['ok', '403', '404', '409', 'network', 'forbidden', 'owner', 'in-use'])(
         privateIds.add(id)
 
         return { profile_id: id, hidden: true }
+      }
+
+      if (body.payout_settings) {
+        if (!old || old.revision !== body.expected_revision || old.payout_settings_revision !== body.expected_payout_settings_revision) { throw new Error('409') }
+        const updated = { ...old, revision: body.expected_revision + 1, payout_settings: body.payout_settings,
+          payout_settings_revision: Number(body.expected_payout_settings_revision) + 1 }
+        records.set(id, updated)
+        return { profile: meta(updated) }
       }
 
       const record = { profile_id: id, revision: body.expected_revision + 1, deleted: false,
@@ -784,12 +805,16 @@ it.each(['ok', '403', '404', '409', 'network', 'forbidden', 'owner', 'in-use'])(
     shopNumber = 101
     const a = (await call({ action: 'create' })).profile!
     expect((await call({ action: 'open', profileId: a.id, target: 'merchant', bounds })).ok).toBe(true)
-    expect((await call({ action: 'identify', profileId: a.id })).ok).toBe(true)
+    const pendingA = (await call({ action: 'identify', profileId: a.id })).pendingIdentity!
+    const payoutSettings = { remitAmount: '5', payoutReviewDays: 15, payoutRequireReviewWithinDays: false,
+      payoutGoodReviewMode: 1 as const, payoutRefundChannel: 'small_remit' as const }
+    expect((await call({ action: 'confirmIdentity', profileId: a.id, pendingToken: pendingA.token, payoutSettings })).ok).toBe(true)
     await call({ action: 'close' })
     shopNumber = 102
     const b = (await call({ action: 'create' })).profile!
     expect((await call({ action: 'open', profileId: b.id, target: 'merchant', bounds })).ok).toBe(true)
-    expect((await call({ action: 'identify', profileId: b.id })).ok).toBe(true)
+    const pendingB = (await call({ action: 'identify', profileId: b.id })).pendingIdentity!
+    expect((await call({ action: 'confirmIdentity', profileId: b.id, pendingToken: pendingB.token, payoutSettings })).ok).toBe(true)
     await call({ action: 'close' })
     const [storageA, storageB] = storagePaths
     await fs.writeFile(path.join(storageA, 'synthetic-marker'), 'A')
@@ -996,6 +1021,46 @@ it('creates, opens, identifies and closes through the typed runtime without busi
   expect(
     f.send.mock.calls.every(([request]) => !['start', 'startPayment', 'openPayment'].includes(request.action))
   ).toBe(true)
+})
+
+it('shows completion on a real profiles runtime and cancellation leaves the shop unverified', async () => {
+  const { promises: fs } = await import('node:fs')
+  const { default: os } = await import('node:os')
+  const { default: path } = await import('node:path')
+  const { ShopBrowserRuntime } = await import('../../electron/' + 'shop-browser-runtime')
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hermes-completion-ui-'))
+  const snapshot = { tabs: [{ id: 'tab', title: '模拟', url: 'https://example.test', loading: false,
+    canGoBack: false, canGoForward: false }], activeTabId: 'tab', suspended: false }
+  const controller = new ShopBrowserRuntime({ root,
+    authorize: async () => ({ origin: 'https://example.test', tenantId: 't', principalId: 'p' }),
+    isCurrent: () => true, clearStorage: async () => {},
+    createView: async () => ({ identify: async () => ({ shopId: '123', shopName: '模拟店铺' }),
+      workspace: { snapshot: () => snapshot, operate: async () => snapshot },
+      setBounds() {}, close: async () => {} }) })
+  const send = vi.fn((request: Omit<ShopBrowserRequest, 'sessionId'>) => controller.operate({ ...request, sessionId: 'test' }))
+  try {
+    const view = render(<ShopBrowserProfilesPanel runtime={{ shopBrowser: send } as unknown as EnterpriseClientRuntime} />)
+    await screen.findByText('暂无内嵌登录档案')
+    fireEvent.click(screen.getByText(shopBrowserCopy.zh.create))
+    await screen.findByText(shopBrowserCopy.zh.loginHint)
+    await waitFor(() => expect((screen.getByText(shopBrowserCopy.zh.identify) as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(screen.getByText(shopBrowserCopy.zh.identify))
+    const dialog = await screen.findByRole('dialog', { name: '补全店铺信息' }).catch(error => {
+      throw new Error(`${error.message.slice(0, 120)} calls=${send.mock.calls.map(([request]) => request.action).join(',')}`)
+    })
+    expect(within(dialog).getByText('模拟店铺')).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '补全店铺信息' })).toBeNull())
+    const list = await controller.operate({ sessionId: 'test', action: 'list' })
+    expect(list.profiles![0]).toMatchObject({ shopId: null, loginState: 'unverified' })
+    expect(send.mock.calls.some(([request]) => request.action === 'confirmIdentity')).toBe(false)
+    view.unmount()
+  } finally {
+    controller.invalidate()
+    await controller.revalidate()
+    await fs.rm(root, { recursive: true, force: true })
+  }
 })
 
 it('closes the view before asking for destructive confirmation and does not reset automatically', async () => {

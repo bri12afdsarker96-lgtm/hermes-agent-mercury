@@ -10,6 +10,7 @@ import { nativeUiCopy } from '@/i18n/native-ui'
 import { shopBrowserCopy } from '@/i18n/shop-browser'
 import { shopBrowserRuntimeCopy } from '@/i18n/shop-browser-runtime'
 import { shopCloudCopy } from '@/i18n/shop-cloud'
+import { shopPayoutCopy } from '@/i18n/shop-payout'
 
 import type { ShopBrowserProfile, ShopBrowserReply, ShopBrowserRequest, ShopCsvExportResult } from '../../electron/shop-browser-types'
 import { recoverableShopBrowserErrors } from '../../electron/shop-browser-types'
@@ -48,6 +49,7 @@ export function ShopBrowserProfilesPanel({
   const native = nativeUiCopy[locale]
   const browserRuntime = shopBrowserRuntimeCopy[locale]
   const adminCopy = nativeBusinessAdminCopy[locale]
+  const payoutCopy = shopPayoutCopy[locale]
   const [profiles, setProfiles] = useState<ShopBrowserProfile[]>([])
   const [loaded, setLoaded] = useState(false)
   const [localSelected, setSelected] = useState('')
@@ -59,6 +61,9 @@ export function ShopBrowserProfilesPanel({
   const [opened, setOpened] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [pendingIdentity, setPendingIdentity] = useState<NonNullable<ShopBrowserReply['pendingIdentity']>>()
+  const pendingIdentityRef = useRef(pendingIdentity)
+  pendingIdentityRef.current = pendingIdentity
   const [exportResult, setExportResult] = useState<ShopCsvExportResult>()
   const currentRuntime = useRef(runtime)
   currentRuntime.current = runtime
@@ -80,6 +85,12 @@ export function ShopBrowserProfilesPanel({
     openIntent: 0, refreshSequence: 0, resizeBounds: null as (() => void) | null }), [runtime])
 
   const selectedProfile = profiles.find(profile => profile.id === selected)
+  const payoutNotice = (profile: ShopBrowserProfile) => {
+    if (profile.completionState === 'identity-unknown') { return payoutCopy.incomplete }
+    if (profile.completionState === 'settings-pending' || profile.cloudPayoutSettingsState === 'missing') { return payoutCopy.missingCloud }
+    if (profile.cloudRevision && (profile.cloudPayoutSettingsState !== 'saved' || cloud?.state === 'unavailable')) { return payoutCopy.unknownCloud }
+    return ''
+  }
 
   useEffect(() => {
     let active = true
@@ -265,6 +276,7 @@ export function ShopBrowserProfilesPanel({
     setFilter('all')
     setOpened(null)
     setConfirmation(null)
+    setPendingIdentity(undefined)
     setCloud(undefined)
     setExportResult(undefined)
     void run(refresh)
@@ -290,6 +302,7 @@ export function ShopBrowserProfilesPanel({
   }, [runtime, refresh, run, lifecycle])
 
   const bounds = useCallback(() => {
+    if (pendingIdentityRef.current) { return { x: 0, y: 0, width: 0, height: 0 } }
     const rectangle = slot.current!.getBoundingClientRect()
     let left = Math.max(0, rectangle.left)
     let top = Math.max(0, rectangle.top)
@@ -376,6 +389,8 @@ export function ShopBrowserProfilesPanel({
     }
   }, [opened, runtime, lifecycle, bounds, onProfilesChange, onSelectedProfile, restoreRemovalOnAuthorityLoss])
 
+  useEffect(() => { lifecycle.resizeBounds?.() }, [pendingIdentity, lifecycle])
+
   const invoke = useCallback(
     (request: Omit<ShopBrowserRequest, 'sessionId'>) =>
       void run(async () => {
@@ -411,6 +426,10 @@ export function ShopBrowserProfilesPanel({
 
         if (!lifecycle.alive) {
           return
+        }
+
+        if (request.action === 'identify' && reply.pendingIdentity) {
+          setPendingIdentity(reply.pendingIdentity)
         }
 
         if (reply.profile) {
@@ -586,6 +605,19 @@ export function ShopBrowserProfilesPanel({
     }
   }, [selectedProfile, busy, initialNavigation, open])
 
+  const pendingProfile = profiles.find(profile => profile.id === pendingIdentity?.profileId)
+  const pendingDialog = pendingIdentity && pendingProfile ? (
+    <ShopPayoutSettingsButton runtime={runtime}
+      profile={{ ...pendingProfile, shopId: pendingIdentity.shopId, shopName: pendingIdentity.shopName }}
+      pendingIdentity={pendingIdentity}
+      onCancelPending={() => {
+        const candidate = pendingIdentity
+        setPendingIdentity(undefined)
+        void runtime.shopBrowser?.({ action: 'cancelIdentity', profileId: candidate.profileId, pendingToken: candidate.token })
+      }}
+      onSaved={async () => { setPendingIdentity(undefined); await refresh() }} />
+  ) : null
+
   if (nativeLayout) {
     return (
       <section aria-label={layout.shops} className="cs-native-page cs-shops" data-browser-open={!!opened} ref={section} tabIndex={-1}>
@@ -699,8 +731,9 @@ export function ShopBrowserProfilesPanel({
                         {profile.shopName || profile.displayName}
                       </button>
                       <span className="cs-profile-login-state">{copy[profile.loginState]}</span>
+                      {payoutNotice(profile) ? <span role="status">{payoutNotice(profile)}</span> : null}
                     </td>
-                    <td className="cs-amber">{profile.payoutSettings?.remitAmount || '—'}</td>
+                    <td className="cs-amber">{!payoutNotice(profile) ? profile.payoutSettings?.remitAmount || '—' : '—'}</td>
                     <td>
                       <span className="cs-badge">{browserRuntime.unavailable}</span>
                     </td>
@@ -790,7 +823,8 @@ export function ShopBrowserProfilesPanel({
             <span role="status">
               {copy[selectedProfile.loginState]} · {selectedProfile.shopName || selectedProfile.displayName}
             </span>
-            {selectedProfile.loginState === 'verified' ? <p role="status">{copy.sharedReady}</p> : null}
+            {payoutNotice(selectedProfile) ? <p role="status">{payoutNotice(selectedProfile)}</p> :
+              selectedProfile.loginState === 'verified' ? <p role="status">{copy.sharedReady}</p> : null}
             <div className="cs-actions">
               <Button disabled={busy} onClick={() => open('merchant')} variant="secondary">
                 {copy.merchant}
@@ -901,6 +935,7 @@ export function ShopBrowserProfilesPanel({
         ) : (
           <div className="cs-native-browser" ref={slot} style={{ height: 0 }} />
         )}
+        {pendingDialog}
       </section>
     )
   }
@@ -955,7 +990,8 @@ export function ShopBrowserProfilesPanel({
           <p role="status">
             {copy[selectedProfile.loginState]} {selectedProfile.shopName ?? ''} {selectedProfile.checkedAt ?? ''}
           </p>
-          {selectedProfile.loginState === 'verified' ? <p role="status">{copy.sharedReady}</p> : null}
+          {payoutNotice(selectedProfile) ? <p role="status">{payoutNotice(selectedProfile)}</p> :
+            selectedProfile.loginState === 'verified' ? <p role="status">{copy.sharedReady}</p> : null}
           <ShopServiceAssignment onTransferred={refresh} profileId={selectedProfile.id} runtime={runtime} />
           <div className="flex flex-wrap items-center gap-2">
             <ShopPayoutSettingsButton
@@ -1018,6 +1054,7 @@ export function ShopBrowserProfilesPanel({
       ) : (
         <div className="w-full" ref={slot} style={{ height: 0 }} />
       )}
+      {pendingDialog}
     </section>
   )
 }

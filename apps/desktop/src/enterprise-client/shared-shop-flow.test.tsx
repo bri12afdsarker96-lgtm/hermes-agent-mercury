@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode, RefObject } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -215,7 +215,21 @@ async function clickWhenReady(name: string) {
 
 async function verifyShop() {
   fireEvent.click(screen.getAllByRole('button', { name: shopBrowserCopy.zh.identify })[0])
+  const dialog = await screen.findByRole('dialog', { name: '补全店铺信息' })
+  fireEvent.change(within(dialog).getByLabelText('每单打款金额'), { target: { value: '5' } })
+  fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
   await screen.findByText(shopBrowserCopy.zh.sharedReady)
+}
+
+async function confirmShop(f: Awaited<ReturnType<typeof fixture>>, profileId: string) {
+  const result = await f.shopBrowser({ action: 'identify', profileId })
+  expect(result.pendingIdentity).toBeDefined()
+  const confirmed = await f.shopBrowser({ action: 'confirmIdentity', profileId,
+    pendingToken: result.pendingIdentity!.token, payoutSettings: {
+      remitAmount: '5', payoutReviewDays: 15, payoutRequireReviewWithinDays: true,
+      payoutGoodReviewMode: 0, payoutRefundChannel: 'small_remit'
+    } })
+  expect(confirmed.ok).toBe(true)
 }
 
 describe('shared shop flow through real controllers and temporary profile storage', () => {
@@ -240,7 +254,7 @@ describe('shared shop flow through real controllers and temporary profile storag
     expect(f.createView.mock.calls[1]).toEqual([storage, 'feige', expect.any(Object)])
     fireEvent.click(screen.getByRole('button', { name: customerServiceCopy.zh.rules }))
     await screen.findByText(customerServiceCopy.zh.emptyRules)
-    expect(f.runtime.customerService).toHaveBeenCalledWith({ action: 'snapshot', profileId: profile.id })
+    expect(f.runtime.customerService).toHaveBeenCalledWith({ action: 'rulesSnapshot', profileId: profile.id })
     const customer = await f.runtime.customerService!({ action: 'snapshot', profileId: profile.id })
     expect(customer.snapshot?.profile).toEqual(profile)
 
@@ -377,7 +391,7 @@ describe('shared shop flow through real controllers and temporary profile storag
     const f = await fixture()
     const profile = (await f.shopBrowser({ action: 'create' })).profile!
     await f.shopBrowser({ action: 'open', profileId: profile.id, target: 'merchant', bounds })
-    await f.shopBrowser({ action: 'identify', profileId: profile.id })
+    await confirmShop(f, profile.id)
     expect((await f.runtime.doudian!({ action: 'shops' })).shops?.[0].id).toBe(profile.id)
     const execution = await f.profiles.acquireExecution(profile.id, 'feige')
 
@@ -431,7 +445,7 @@ describe('shared shop flow through real controllers and temporary profile storag
     next.setIdentity({ shopId: '20002', shopName: 'Verified shop B' })
     const nextProfile = (await next.shopBrowser({ action: 'create' })).profile!
     await next.shopBrowser({ action: 'open', profileId: nextProfile.id, target: 'merchant', bounds })
-    await next.shopBrowser({ action: 'identify', profileId: nextProfile.id })
+    await confirmShop(next, nextProfile.id)
     await next.shopBrowser({ action: 'close' })
     view.rerender(localized(<CustomerServicePage runtime={next.runtime} />))
     expect(screen.queryByText('Verified shop A')).toBeNull()
@@ -442,7 +456,7 @@ describe('shared shop flow through real controllers and temporary profile storag
     fireEvent.click(screen.getByRole('button', { name: customerServiceCopy.zh.rules }))
     await screen.findByText(customerServiceCopy.zh.emptyRules)
     expect((screen.getByRole('combobox', { name: customerServiceLayoutCopy.zh.selectShop }) as HTMLSelectElement).value).toBe(nextProfile.id)
-    expect(next.runtime.customerService).toHaveBeenCalledWith({ action: 'snapshot', profileId: nextProfile.id })
+    expect(next.runtime.customerService).toHaveBeenCalledWith({ action: 'rulesSnapshot', profileId: nextProfile.id })
     view.rerender(localized(<CustomerServicePage runtime={null} />))
     expect(screen.queryByRole('option', { name: /Verified shop B/ })).toBeNull()
     expect(screen.queryByText('Verified shop B')).toBeNull()

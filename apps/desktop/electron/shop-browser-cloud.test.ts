@@ -41,6 +41,165 @@ const portable: PortableShopSession = {
 
 const bounds = { x: 0, y: 0, width: 800, height: 600 }
 
+it('confirms identity and settings through the cloud, then reads both back', async () => {
+  const remote = remoteBoundary()
+  const f = await computer(remote)
+  const profile = (await f.call('create')).profile!
+  await f.call('open', { profileId: profile.id, target: 'merchant', bounds })
+  const pending = (await f.call('identify', { profileId: profile.id })).pendingIdentity!
+  const payoutSettings = { remitAmount: '5', payoutReviewDays: 15, payoutRequireReviewWithinDays: true,
+    payoutGoodReviewMode: 0 as const, payoutRefundChannel: 'small_remit' as const }
+  expect(remote.tenants.get('tenant-a')?.size ?? 0).toBe(0)
+  const result = await f.call('confirmIdentity', { profileId: profile.id, pendingToken: pending.token, payoutSettings })
+  expect(result).toMatchObject({ ok: true, profile: { shopId: '12345', payoutSettings, loginState: 'verified' } })
+  expect(remote.tenants.get('tenant-a')!.get(profile.id)).toMatchObject({ payout_settings: payoutSettings, payout_settings_revision: 1 })
+})
+
+it('reads back an uncertain settings write before retrying without reposting the identity', async () => {
+  const remote = remoteBoundary()
+  const original = remote.request.getMockImplementation()!
+  let loseResponse = true
+  remote.request.mockImplementation(async (...args) => {
+    const result = await original(...args)
+    if (args[2] === 'POST' && args[4]?.payout_settings && loseResponse) {
+      loseResponse = false
+      throw new Error('synthetic lost response')
+    }
+    return result
+  })
+  const f = await computer(remote)
+  const profile = (await f.call('create')).profile!
+  await f.call('open', { profileId: profile.id, target: 'merchant', bounds })
+  const pending = (await f.call('identify', { profileId: profile.id })).pendingIdentity!
+  const payoutSettings = { remitAmount: '5', payoutReviewDays: 15, payoutRequireReviewWithinDays: true,
+    payoutGoodReviewMode: 0 as const, payoutRefundChannel: 'small_remit' as const }
+  const input = { profileId: profile.id, pendingToken: pending.token, payoutSettings }
+  expect((await f.call('confirmIdentity', input)).error).toBe('SHOP_PAYOUT_SETTINGS_CLOUD_UNAVAILABLE')
+  expect((await f.call('confirmIdentity', input))).toMatchObject({ ok: true, profile: { payoutSettings } })
+  const posts = remote.request.mock.calls.filter(args => args[2] === 'POST')
+  expect(posts.filter(args => args[4]?.profile)).toHaveLength(1)
+  expect(posts.filter(args => args[4]?.payout_settings)).toHaveLength(1)
+})
+
+it('recovers a lost identity write response after restart without reposting identity', async () => {
+  const remote = remoteBoundary()
+  const original = remote.request.getMockImplementation()!
+  let loseResponse = true
+  remote.request.mockImplementation(async (...args) => {
+    const result = await original(...args)
+    if (args[2] === 'POST' && args[4]?.profile && loseResponse) {
+      loseResponse = false
+      throw new Error('synthetic lost identity response')
+    }
+    return result
+  })
+  const f = await computer(remote)
+  const profile = (await f.call('create')).profile!
+  await f.call('open', { profileId: profile.id, target: 'merchant', bounds })
+  const pending = (await f.call('identify', { profileId: profile.id })).pendingIdentity!
+  const settings = { remitAmount: '5', payoutReviewDays: 15, payoutRequireReviewWithinDays: true,
+    payoutGoodReviewMode: 0 as const, payoutRefundChannel: 'small_remit' as const }
+  expect((await f.call('confirmIdentity', { profileId: profile.id, pendingToken: pending.token, payoutSettings: settings })).ok).toBe(false)
+  await f.call('close')
+  const restarted = await computer(remote, 'employee-a', 'tenant-a', f.root)
+  await restarted.call('list')
+  await restarted.call('open', { profileId: profile.id, target: 'merchant', bounds })
+  const recovered = (await restarted.call('identify', { profileId: profile.id })).pendingIdentity!
+  const result = await restarted.call('confirmIdentity', { profileId: profile.id, pendingToken: recovered.token, payoutSettings: settings })
+  expect(result).toMatchObject({ ok: true, profile: { payoutSettings: settings } })
+  expect(remote.request.mock.calls.filter(args => args[2] === 'POST' && args[4]?.profile)).toHaveLength(1)
+})
+
+it('clears incomplete state after a lost settings response and restart with authoritative settings', async () => {
+  const remote = remoteBoundary()
+  const original = remote.request.getMockImplementation()!
+  let loseResponse = true
+  remote.request.mockImplementation(async (...args) => {
+    const result = await original(...args)
+    if (args[2] === 'POST' && args[4]?.payout_settings && loseResponse) {
+      loseResponse = false
+      throw new Error('synthetic lost settings response')
+    }
+    return result
+  })
+  const f = await computer(remote)
+  const profile = (await f.call('create')).profile!
+  await f.call('open', { profileId: profile.id, target: 'merchant', bounds })
+  const pending = (await f.call('identify', { profileId: profile.id })).pendingIdentity!
+  const settings = { remitAmount: '5', payoutReviewDays: 15, payoutRequireReviewWithinDays: true,
+    payoutGoodReviewMode: 0 as const, payoutRefundChannel: 'small_remit' as const }
+  expect((await f.call('confirmIdentity', { profileId: profile.id, pendingToken: pending.token, payoutSettings: settings })).ok).toBe(false)
+  await f.call('close')
+  const restarted = await computer(remote, 'employee-a', 'tenant-a', f.root)
+  await restarted.call('list')
+  await restarted.call('open', { profileId: profile.id, target: 'merchant', bounds })
+  const identified = await restarted.call('identify', { profileId: profile.id })
+  expect(identified.pendingIdentity).toBeUndefined()
+  expect(identified.profile).toMatchObject({ loginState: 'verified', payoutSettings: settings, cloudPayoutSettingsState: 'saved' })
+  expect(identified.profile?.completionState).toBeUndefined()
+  expect(remote.request.mock.calls.filter(args => args[2] === 'POST' && args[4]?.payout_settings)).toHaveLength(1)
+})
+
+it('does not silently migrate incomplete settings on close, restart or cloud sync', async () => {
+  const remote = remoteBoundary()
+  const original = remote.request.getMockImplementation()!
+  remote.request.mockImplementation(async (...args) => {
+    if (args[2] === 'POST' && args[4]?.payout_settings) { throw new Error('synthetic unavailable') }
+    return original(...args)
+  })
+  const f = await computer(remote)
+  const profile = (await f.call('create')).profile!
+  const oldLocalSettings = { remitAmount: '3', payoutReviewDays: 10, payoutRequireReviewWithinDays: false,
+    payoutGoodReviewMode: 1 as const, payoutRefundChannel: 'small_remit' as const }
+  await f.call('savePayoutSettings', { profileId: profile.id, expectedRevision: 0, payoutSettings: oldLocalSettings })
+  await f.call('open', { profileId: profile.id, target: 'merchant', bounds })
+  const pending = (await f.call('identify', { profileId: profile.id })).pendingIdentity!
+  const payoutSettings = { remitAmount: '5', payoutReviewDays: 15, payoutRequireReviewWithinDays: true,
+    payoutGoodReviewMode: 0 as const, payoutRefundChannel: 'small_remit' as const }
+  expect((await f.call('confirmIdentity', { profileId: profile.id, pendingToken: pending.token, payoutSettings })).ok).toBe(false)
+  await f.call('close')
+  const reopened = await computer(remote, 'employee-a', 'tenant-a', f.root)
+  const result = await reopened.call('list')
+  expect(result.profiles!.find(item => item.id === profile.id)).toMatchObject({ completionState: 'settings-pending', cloudPayoutSettingsState: 'missing', payoutSettings: oldLocalSettings })
+  const otherComputer = await computer(remote)
+  expect((await otherComputer.call('list')).profiles!.find(item => item.id === profile.id)).toMatchObject({ cloudPayoutSettingsState: 'missing' })
+  expect(remote.tenants.get('tenant-a')!.get(profile.id)!.payout_settings).toBeNull()
+  expect(remote.request.mock.calls.filter(args => args[2] === 'POST' && args[4]?.payout_settings)).toHaveLength(1)
+})
+
+it('treats missing old-server settings fields as unknown without opening first-time configuration', async () => {
+  const remote = remoteBoundary()
+  const f = await computer(remote)
+  const profile = await f.register()
+  const record = remote.tenants.get('tenant-a')!.get(profile.id)!
+  delete record.payout_settings
+  delete record.payout_settings_revision
+  const result = await f.call('identify', { profileId: profile.id })
+  expect(result).toMatchObject({ ok: false, error: 'SHOP_PAYOUT_SETTINGS_CLOUD_UNAVAILABLE' })
+  expect(result.pendingIdentity).toBeUndefined()
+  expect((await f.call('list')).profiles!.find(item => item.id === profile.id)?.cloudPayoutSettingsState).toBe('unknown')
+  expect(remote.request.mock.calls.filter(args => args[2] === 'POST' && args[4]?.payout_settings)).toHaveLength(0)
+})
+
+it('exposes a missing cloud configuration without migrating stale local settings after cancellation', async () => {
+  const remote = remoteBoundary()
+  const f = await computer(remote)
+  const profile = await f.register()
+  const old = { remitAmount: '3', payoutReviewDays: 10, payoutRequireReviewWithinDays: false,
+    payoutGoodReviewMode: 1 as const, payoutRefundChannel: 'small_remit' as const }
+  const files = await fs.readdir(f.root, { recursive: true })
+  const metadataPath = path.join(f.root, String(files.find(item => String(item).endsWith('profiles.json'))))
+  const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'))
+  Object.assign(metadata.profiles[0], { payoutSettings: old, payoutSettingsRevision: 1 })
+  await fs.writeFile(metadataPath, JSON.stringify(metadata))
+  const candidate = (await f.call('identify', { profileId: profile.id })).pendingIdentity!
+  await f.call('cancelIdentity', { profileId: profile.id, pendingToken: candidate.token })
+  await f.call('close')
+  const restarted = await computer(remote, 'employee-a', 'tenant-a', f.root)
+  expect((await restarted.call('list')).profiles![0]).toMatchObject({ cloudPayoutSettingsState: 'missing', payoutSettings: old })
+  expect(remote.request.mock.calls.filter(args => args[2] === 'POST' && args[4]?.payout_settings)).toHaveLength(0)
+})
+
 function remoteBoundary() {
   const tenants = new Map<string, Map<string, CloudShopRecord>>()
   const hidden = new Map<string, Set<string>>()
@@ -233,8 +392,21 @@ async function computer(remote: ReturnType<typeof remoteBoundary>, principalId =
   const register = async () => {
     const profile = (await call('create')).profile!
     await call('open', { profileId: profile.id, target: 'merchant', bounds })
-
-    return (await call('identify', { profileId: profile.id })).profile!
+    // Historical recovery and permission tests start with an already verified
+    // legacy profile. New identity creation is exercised separately above.
+    const checkedAt = new Date().toISOString()
+    const identity = await identify()
+    const legacy = { ...profile, shopId: identity.shopId, shopName: identity.shopName, displayName: identity.shopName,
+      loginState: 'verified' as const, checkedAt }
+    let revision: number | undefined
+    try { revision = (await cloud.save(legacy, 0, portable)).revision } catch { /* legacy offline fixture */ }
+    const files = await fs.readdir(root, { recursive: true })
+    const metadataPath = path.join(root, String(files.find(item => String(item).endsWith('profiles.json'))))
+    const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'))
+    Object.assign(metadata.profiles.find((item: { id: string }) => item.id === profile.id), legacy,
+      revision ? { cloudRevision: revision } : {})
+    await fs.writeFile(metadataPath, JSON.stringify(metadata))
+    return (await call('list')).profiles!.find(item => item.id === profile.id)!
   }
 
   return {
@@ -575,12 +747,13 @@ describe('tenant cloud shop profile recovery', () => {
     const remote = remoteBoundary()
     const first = await computer(remote)
     const profile = await first.register()
+    await first.call('savePayoutSettings', { profileId: profile.id, expectedRevision: 0, payoutSettings })
     const second = await computer(remote)
     await second.call('list')
     await second.call('open', { profileId: profile.id, target: 'merchant', bounds })
     await second.call('identify', { profileId: profile.id })
     const current = structuredClone(remote.tenants.get('tenant-a')!.get(profile.id)!)
-    expect(current.revision).toBe(2)
+    expect(current.revision).toBe(3)
     const stale = await first.call('identify', { profileId: profile.id })
     expect(stale.ok).toBe(true)
     expect(stale.cloud?.state).toBe('conflict')
@@ -630,6 +803,7 @@ describe('tenant cloud shop profile recovery', () => {
     const remote = remoteBoundary()
     const first = await computer(remote)
     const profile = await first.register()
+    await first.call('savePayoutSettings', { profileId: profile.id, expectedRevision: 0, payoutSettings })
     const before = structuredClone(remote.tenants.get('tenant-a')!.get(profile.id))
     const reset = await first.call('relogin', { profileId: profile.id })
     expect(reset.profile).toMatchObject({ id: profile.id, shopId: '12345', loginState: 'unverified' })
@@ -641,7 +815,7 @@ describe('tenant cloud shop profile recovery', () => {
     await first.call('open', { profileId: profile.id, target: 'merchant', bounds })
     const verified = await first.call('identify', { profileId: profile.id })
     expect(verified.profile?.id).toBe(profile.id)
-    expect(remote.tenants.get('tenant-a')!.get(profile.id)?.revision).toBe(2)
+    expect(remote.tenants.get('tenant-a')!.get(profile.id)?.revision).toBe(before!.revision + 1)
     expect(remote.request.mock.calls.some(call => call[3] === '/api/shop-login-profiles-delete')).toBe(false)
   })
 
@@ -921,7 +1095,8 @@ describe('enterprise-owned cloud payout settings', () => {
     expect((await first.call('savePayoutSettings', { profileId: profile.id, expectedRevision: 0, payoutSettings })).ok).toBe(true)
     expect(remote.tenants.size).toBe(0)
     await first.call('open', { profileId: profile.id, target: 'merchant', bounds })
-    expect((await first.call('identify', { profileId: profile.id })).profile).toMatchObject({
+    const candidate = (await first.call('identify', { profileId: profile.id })).pendingIdentity!
+    expect((await first.call('confirmIdentity', { profileId: profile.id, pendingToken: candidate.token, payoutSettings })).profile).toMatchObject({
       payoutSettings, payoutSettingsRevision: 1
     })
     expect(remote.tenants.get('tenant-a')!.get(profile.id)).toMatchObject({ payout_settings: payoutSettings })

@@ -2,6 +2,10 @@ import type { Locale } from './types'
 
 const zh = {
   title: '店铺设置',
+  completeTitle: '补全店铺信息',
+  incomplete: '店铺身份可能已保存，业务配置尚未确认。请重试并核对云端状态。',
+  missingCloud: '店铺身份已保存，业务配置待完成。',
+  unknownCloud: '无法确认云端业务配置，请检查连接或服务版本。',
   amount: '每单打款金额',
   channel: '退款渠道',
   smallRemit: '小额打款',
@@ -29,6 +33,10 @@ export const shopPayoutCopy: Record<Locale, Record<keyof typeof zh, string>> = {
   zh,
   en: {
     title: 'Shop settings',
+    completeTitle: 'Complete shop information',
+    incomplete: 'The shop identity may have been saved; business settings are not confirmed. Retry and check the cloud state.',
+    missingCloud: 'Shop identity saved; business settings still need to be completed.',
+    unknownCloud: 'Cloud business settings cannot be confirmed. Check the connection or service version.',
     amount: 'Payment per order',
     channel: 'Refund channel',
     smallRemit: 'Small payment',
@@ -53,6 +61,10 @@ export const shopPayoutCopy: Record<Locale, Record<keyof typeof zh, string>> = {
   },
   'zh-hant': {
     title: '店鋪設定',
+    completeTitle: '補全店鋪資訊',
+    incomplete: '店鋪身分可能已儲存，業務設定尚未確認。請重試並核對雲端狀態。',
+    missingCloud: '店鋪身分已儲存，業務設定待完成。',
+    unknownCloud: '無法確認雲端業務設定，請檢查連線或服務版本。',
     amount: '每單打款金額',
     channel: '退款管道',
     smallRemit: '小額打款',
@@ -77,6 +89,10 @@ export const shopPayoutCopy: Record<Locale, Record<keyof typeof zh, string>> = {
   },
   ja: {
     title: '店舗設定',
+    completeTitle: '店舗情報の入力',
+    incomplete: '店舗情報が保存済みの可能性がありますが、業務設定は未確認です。再試行してクラウドの状態を確認してください。',
+    missingCloud: '店舗情報は保存済みですが、業務設定は未完了です。',
+    unknownCloud: 'クラウドの業務設定を確認できません。接続またはサービスのバージョンを確認してください。',
     amount: '注文ごとの支払額',
     channel: '返金方法',
     smallRemit: '少額送金',
@@ -101,6 +117,10 @@ export const shopPayoutCopy: Record<Locale, Record<keyof typeof zh, string>> = {
   },
   ar: {
     title: 'إعدادات المتجر',
+    completeTitle: 'إكمال معلومات المتجر',
+    incomplete: 'قد تكون هوية المتجر محفوظة، لكن إعدادات النشاط غير مؤكدة. أعد المحاولة وتحقق من حالة السحابة.',
+    missingCloud: 'تم حفظ هوية المتجر، ولم تكتمل إعدادات النشاط.',
+    unknownCloud: 'تعذر تأكيد إعدادات السحابة. تحقق من الاتصال أو إصدار الخدمة.',
     amount: 'المبلغ لكل طلب',
     channel: 'قناة الاسترداد',
     smallRemit: 'دفعة صغيرة',

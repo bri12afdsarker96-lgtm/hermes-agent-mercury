@@ -22,9 +22,11 @@ interface Props {
   profile: ShopBrowserProfile
   disabled?: boolean
   onSaved(): Promise<void>
+  pendingIdentity?: { profileId: string; shopId: string; shopName: string; token: string }
+  onCancelPending?(): void
 }
 
-export function ShopPayoutSettingsButton({ runtime, profile, disabled, onSaved }: Props) {
+export function ShopPayoutSettingsButton({ runtime, profile, disabled, onSaved, pendingIdentity, onCancelPending }: Props) {
   const { locale } = useI18n()
   const copy = shopPayoutCopy[locale]
   const layout = customerServiceLayoutCopy[locale]
@@ -55,6 +57,16 @@ export function ShopPayoutSettingsButton({ runtime, profile, disabled, onSaved }
     setError('')
   }
 
+  useEffect(() => {
+    if (pendingIdentity?.profileId === profile.id) {
+      const settings = profile.payoutSettings ?? defaultShopPayoutSettings
+      setDraft({ ...settings })
+      setDays(String(settings.payoutReviewDays))
+      setRevision(profile.payoutSettingsRevision ?? 0)
+      setError('')
+    }
+  }, [pendingIdentity])
+
   const save = async () => {
     if (!draft || lifecycle.busy || !lifecycle.runtime.shopBrowser) {
       return
@@ -74,10 +86,10 @@ export function ShopPayoutSettingsButton({ runtime, profile, disabled, onSaved }
 
     try {
       const result = await lifecycle.runtime.shopBrowser({
-        action: 'savePayoutSettings',
+        action: pendingIdentity ? 'confirmIdentity' : 'savePayoutSettings',
         profileId: lifecycle.profileId,
         payoutSettings: settings,
-        expectedRevision: revision
+        ...(pendingIdentity ? { pendingToken: pendingIdentity.token } : { expectedRevision: revision })
       })
 
       if (!lifecycle.alive) {
@@ -85,7 +97,7 @@ export function ShopPayoutSettingsButton({ runtime, profile, disabled, onSaved }
       }
 
       if (!result.ok) {
-        if (result.error === 'SHOP_PAYOUT_SETTINGS_CONFLICT') {
+        if (result.error === 'SHOP_PAYOUT_SETTINGS_CONFLICT' && !pendingIdentity) {
           await onSaved()
         }
 
@@ -100,7 +112,8 @@ export function ShopPayoutSettingsButton({ runtime, profile, disabled, onSaved }
     } catch (reason) {
       if (lifecycle.alive) {
         const code = reason instanceof Error ? reason.message : 'SHOP_PROFILE_FAILED'
-        setError(code === 'SHOP_PAYOUT_SETTINGS_CONFLICT' ? copy.conflict : `${copy.failed} (${code})`)
+        setError(code === 'SHOP_PAYOUT_SETTINGS_CONFLICT' ? copy.conflict :
+          pendingIdentity && code === 'SHOP_PAYOUT_SETTINGS_CLOUD_UNAVAILABLE' ? copy.incomplete : `${copy.failed} (${code})`)
       }
     } finally {
       lifecycle.busy = false
@@ -113,13 +126,14 @@ export function ShopPayoutSettingsButton({ runtime, profile, disabled, onSaved }
 
   return (
     <>
-      <Button data-native-tone="amber" disabled={disabled} onClick={begin} variant="secondary">
+      {!pendingIdentity ? <Button data-native-tone="amber" disabled={disabled} onClick={begin} variant="secondary">
         {copy.title}
-      </Button>
+      </Button> : null}
       <Dialog
         onOpenChange={open => {
           if (!open && !busy) {
             setDraft(undefined)
+            if (pendingIdentity) { onCancelPending?.() }
           }
         }}
         open={!!draft}
@@ -129,7 +143,7 @@ export function ShopPayoutSettingsButton({ runtime, profile, disabled, onSaved }
           className="cs-native-dialog cs-payout-dialog"
           showCloseButton={false}
         >
-          <DialogTitle>{copy.title}</DialogTitle>
+          <DialogTitle>{pendingIdentity ? copy.completeTitle : copy.title}</DialogTitle>
           <DialogDescription className="sr-only">{copy.evidence}</DialogDescription>
           {draft ? (
             <div className="cs-message-form">
@@ -212,7 +226,7 @@ export function ShopPayoutSettingsButton({ runtime, profile, disabled, onSaved }
                 </p>
               ) : null}
               <div className="cs-dialog-actions">
-                <Button disabled={busy} onClick={() => setDraft(undefined)} variant="secondary">
+                <Button disabled={busy} onClick={() => { setDraft(undefined); if (pendingIdentity) { onCancelPending?.() } }} variant="secondary">
                   {copy.cancel}
                 </Button>
                 <Button disabled={busy} onClick={() => void save()}>
