@@ -806,7 +806,7 @@ export function ShopBrowserProfilesPanel({
                           {layout.select}
                         </Button>
                         {assignmentAccess?.runtime === runtime && assignmentAccess.allowed ? (
-                          <Button disabled={busy} onClick={() => setAssignmentProfile({profile, runtime, epoch: ++assignmentEpoch.current})} variant="secondary">
+                          <Button disabled={busy} onClick={event => {event.stopPropagation(); setAssignmentProfile({profile, runtime, epoch: ++assignmentEpoch.current})}} variant="secondary">
                             {adminCopy.assignments}
                           </Button>
                         ) : null}

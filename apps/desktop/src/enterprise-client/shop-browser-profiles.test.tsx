@@ -1,6 +1,7 @@
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
+import { useState } from 'react'
 
 import { nativeBusinessAdminCopy } from '@/i18n/native-business-admin'
 import { shopBrowserCopy } from '@/i18n/shop-browser'
@@ -84,6 +85,67 @@ function twoShops(): ShopBrowserProfile[] {
     checkedAt: null, loginState: 'verified' as const
   }))
 }
+
+it.each(['mouse', 'Enter', 'Space'] as const)('keeps the controlled shop when opening another shop assignment via %s', async activation => {
+  const shops = twoShops()
+  const f = fixture(shops)
+  const records = shops.map((shop, index) => ({ profile_id: shop.id, revision: 7, deleted: false,
+    servicing_principal_ids: index ? ['staff'] : [], profile: { shop_name: shop.shopName } }))
+  const get = vi.fn(async (url: string) => {
+    if (url === '/api/whoami') { return { role: 'tenant_admin', tenant_id: 'tenant', principal_id: 'admin' } }
+    if (url === '/api/shop-login-profiles') { return { profiles: records } }
+    if (url === '/api/principals') { return { principals: [
+      { principal_id: 'staff', tenant_id: 'tenant', role: 'operator', status: 'active', name: '模拟员工' },
+      { principal_id: 'staff2', tenant_id: 'tenant', role: 'operator', status: 'active', name: '模拟员工二' }
+    ] } }
+    throw new Error(`unexpected endpoint ${url}`)
+  })
+  const post = vi.fn(async (_url: string, body: { profile_id: string; principal_ids: string[]; expected_revision: number }) => {
+    const record = records.find(item => item.profile_id === body.profile_id)!
+    if (record.revision !== body.expected_revision) { throw new Error('409') }
+    record.revision++
+    record.servicing_principal_ids = [...body.principal_ids]
+    return { profile: record }
+  })
+  Object.assign(f.runtime, { get, post })
+  const selections = vi.fn()
+  function Parent() {
+    const [selected, setSelected] = useState(shops[0].id)
+    return <ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} selectedProfileId={selected}
+      onSelectedProfile={id => { selections(id); setSelected(id) }} />
+  }
+  render(<Parent />)
+  const rowA = (await screen.findByText('店铺A')).closest('tr')!
+  const rowB = (await screen.findByText('店铺B')).closest('tr')!
+  const button = await within(rowB).findByRole('button', { name: '员工分配' })
+  expect(rowA.getAttribute('data-selected')).toBe('true')
+  if (activation !== 'mouse') {
+    const key = activation === 'Space' ? ' ' : 'Enter'
+    button.focus()
+    fireEvent.keyDown(button, { key, code: activation })
+    fireEvent.click(button, { detail: 0 })
+    fireEvent.keyUp(button, { key, code: activation })
+  } else { fireEvent.click(button) }
+  expect(rowA.getAttribute('data-selected')).toBe('true')
+  expect(rowB.getAttribute('data-selected')).toBe('false')
+  expect(selections).not.toHaveBeenCalledWith(shops[1].id)
+  const dialog = await screen.findByRole('dialog', { name: '员工分配 · 店铺B' })
+  const staff2 = await within(dialog).findByRole('checkbox', { name: '模拟员工二' })
+  await waitFor(() => expect((staff2 as HTMLInputElement).disabled).toBe(false))
+  fireEvent.click(staff2)
+  fireEvent.click(within(dialog).getByRole('button', { name: nativeBusinessAdminCopy.zh.save }))
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/shop-login-profiles-assign', expect.objectContaining({
+    profile_id: shops[1].id, principal_ids: ['staff', 'staff2'], expected_revision: 7
+  })))
+  expect(post).toHaveBeenCalledTimes(1)
+  expect(records[0]).toMatchObject({ revision: 7, servicing_principal_ids: [] })
+  await waitFor(() => expect((within(dialog).getByRole('button', { name: '关闭' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(rowA.getAttribute('data-selected')).toBe('true')
+  fireEvent.click(screen.getByText(shopBrowserCopy.zh.merchant))
+  await waitFor(() => expect(f.send).toHaveBeenCalledWith(expect.objectContaining({ action: 'open', profileId: shops[0].id })))
+})
 
 it('does not display a stale local amount as confirmed when cloud settings are missing', async () => {
   const [profile] = twoShops()
