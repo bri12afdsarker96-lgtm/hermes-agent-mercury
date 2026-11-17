@@ -68,6 +68,135 @@ afterEach(() => {
 })
 
 describe('EnterpriseClientApp authority lifecycle', () => {
+  it('clears prior staff secrets, confirmation and draft after foreground identity changes', async () => {
+    let identity = {name: '旧管理员', tenant_id: 'tenant-a', principal_id: 'admin-a', role: 'tenant_admin', effective_permissions: ['principal.crud'], desktop_surfaces: {surfaces: {governance: {available: true}}}, product_capabilities: {}}
+    const bridge = installAuthorityBridge({})
+    bridge.request.mockImplementation(async (request: {path: string; method?: string}) => {
+      if (request.path === '/api/health') {return {kind: 'ok', data: HEALTH}}
+
+      if (request.path === '/api/whoami') {return {kind: 'ok', data: {...identity}}}
+
+      if (request.path === '/api/principals' && request.method === 'GET') {return {kind: 'ok', data: {principals: [{principal_id:'seat', name:'员工甲', login_name:'seat-a', role:'operator', status:'active'}]}}}
+
+      if (request.path === '/api/principals' && request.method === 'POST') {return {kind: 'ok', data: {login_name:'created-a', temporary_password:'synthetic-secret-a'}}}
+
+      return {kind: 'error', code: 'not_found', message: 'unavailable', status: 404}
+    })
+    render(<EnterpriseClientApp />)
+    fireEvent.click(await screen.findByRole('button', {name:'员工与权限'}))
+    await screen.findByText('seat-a')
+    fireEvent.change(screen.getByLabelText('员工姓名'), {target:{value:'员工甲'}})
+    fireEvent.change(screen.getByLabelText('员工登录账号'), {target:{value:'created-a'}})
+    fireEvent.click(screen.getByRole('button', {name:'开通员工账号'}))
+    await screen.findByText(/synthetic-secret-a/)
+    fireEvent.change(screen.getByLabelText('员工姓名'), {target:{value:'旧企业草稿'}})
+    fireEvent.click(screen.getByRole('button', {name:'删除账号'}))
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    identity = {...identity, name:'新管理员', tenant_id:'tenant-b', principal_id:'admin-b'}
+    fireEvent.focus(window)
+    await waitFor(() => expect(globalThis.document.body.textContent).toContain('新管理员'))
+    expect(screen.queryByText(/synthetic-secret-a/)).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await screen.findByText('seat-a')
+    expect((screen.getByLabelText('员工姓名') as HTMLInputElement).value).toBe('')
+  })
+  it('preserves staff draft when refreshed authority is semantically unchanged', async () => {
+    const identity = {name:'管理员', tenant_id:'tenant-a', principal_id:'admin-a', role:'tenant_admin', effective_permissions:['principal.crud','tenant.read'], desktop_surfaces:{surfaces:{governance:{available:true}}}, product_capabilities:{}}
+    const bridge = installAuthorityBridge({})
+    let reads = 0
+    bridge.request.mockImplementation(async (request: {path:string; method?:string}) => {
+      if (request.path === '/api/health') {return {kind:'ok', data:HEALTH}}
+
+      if (request.path === '/api/whoami') {return {kind:'ok', data:{...identity, effective_permissions: ++reads % 2 ? [...identity.effective_permissions] : [...identity.effective_permissions].reverse()}}}
+
+      if (request.path === '/api/principals') {return {kind:'ok', data:{principals:[]}}}
+
+      return {kind:'error', code:'not_found', message:'unavailable', status:404}
+    })
+    render(<EnterpriseClientApp />)
+    fireEvent.click(await screen.findByRole('button', {name:'员工与权限'}))
+    fireEvent.change(await screen.findByLabelText('员工姓名'), {target:{value:'保留草稿'}})
+    const before = bridge.request.mock.calls.filter(([request]) => request.path === '/api/whoami').length
+    fireEvent.focus(window)
+    await waitFor(() => expect(bridge.request.mock.calls.filter(([request]) => request.path === '/api/whoami').length).toBeGreaterThan(before))
+    await act(async () => {await new Promise(resolve=>setTimeout(resolve, 30))})
+    expect((screen.getByLabelText('员工姓名') as HTMLInputElement).value).toBe('保留草稿')
+  })
+  it('clears staff draft when effective permissions change for the same actor', async () => {
+    let permissions = ['principal.crud', 'tenant.read']
+    const bridge = installAuthorityBridge({})
+    bridge.request.mockImplementation(async (request: {path:string}) => {
+      if (request.path === '/api/health') {return {kind:'ok', data:HEALTH}}
+
+      if (request.path === '/api/whoami') {return {kind:'ok', data:{name:'权限管理员', tenant_id:'tenant-a', principal_id:'admin-a', role:'tenant_admin', effective_permissions:permissions, desktop_surfaces:{surfaces:{governance:{available:true}}}, product_capabilities:{}}}}
+
+      if (request.path === '/api/principals') {return {kind:'ok', data:{principals:[]}}}
+
+      return {kind:'error', code:'not_found', message:'unavailable', status:404}
+    })
+    render(<EnterpriseClientApp />)
+    fireEvent.click(await screen.findByRole('button', {name:'员工与权限'}))
+    fireEvent.change(await screen.findByLabelText('员工姓名'), {target:{value:'权限变化前草稿'}})
+    const before = bridge.request.mock.calls.filter(([request]) => request.path === '/api/whoami').length
+    permissions = ['principal.crud']
+    fireEvent.focus(window)
+    await waitFor(() => expect(bridge.request.mock.calls.filter(([request]) => request.path === '/api/whoami').length).toBeGreaterThan(before))
+    await waitFor(() => expect((screen.getByLabelText('员工姓名') as HTMLInputElement).value).toBe(''))
+  })
+  it('does not show a late provisioning result after the foreground actor changes', async () => {
+    let finish!: (result: EnterpriseBridgeResponse) => void
+    const pending = new Promise<EnterpriseBridgeResponse>(resolve => {finish = resolve})
+    let identity = {name:'旧管理员', tenant_id:'tenant-a', principal_id:'admin-a', role:'tenant_admin', effective_permissions:['principal.crud'], desktop_surfaces:{surfaces:{governance:{available:true}}}, product_capabilities:{}}
+    const bridge = installAuthorityBridge({})
+    bridge.request.mockImplementation(async (request: {path:string; method?:string}) => {
+      if (request.path === '/api/health') {return {kind:'ok', data:HEALTH}}
+
+      if (request.path === '/api/whoami') {return {kind:'ok', data:{...identity}}}
+
+      if (request.path === '/api/principals' && request.method === 'POST') {return await pending}
+
+      if (request.path === '/api/principals') {return {kind:'ok', data:{principals:[]}}}
+
+      return {kind:'error', code:'not_found', message:'unavailable', status:404}
+    })
+    render(<EnterpriseClientApp />)
+    fireEvent.click(await screen.findByRole('button', {name:'员工与权限'}))
+    fireEvent.change(await screen.findByLabelText('员工姓名'), {target:{value:'员工甲'}})
+    fireEvent.change(screen.getByLabelText('员工登录账号'), {target:{value:'seat-a'}})
+    fireEvent.click(screen.getByRole('button', {name:'开通员工账号'}))
+    await waitFor(() => expect(bridge.request.mock.calls.filter(([request]) => request.path === '/api/principals' && (request as {method?: string}).method === 'POST')).toHaveLength(1))
+    identity = {...identity, name:'新管理员', tenant_id:'tenant-b', principal_id:'admin-b'}
+    fireEvent.focus(window)
+    await waitFor(() => expect(globalThis.document.body.textContent).toContain('新管理员'))
+    await act(async () => {finish({kind:'ok', data:{login_name:'seat-a', temporary_password:'late-secret-a'}}); await pending; await new Promise(resolve => setTimeout(resolve, 30))})
+    expect(screen.queryByText(/late-secret-a/)).toBeNull()
+    expect((await screen.findByLabelText('员工姓名') as HTMLInputElement).value).toBe('')
+  })
+  it('clears the staff draft when the same actor changes role and returns', async () => {
+    let role = 'tenant_admin'
+    const bridge = installAuthorityBridge({})
+    bridge.request.mockImplementation(async (request: {path:string}) => {
+      if (request.path === '/api/health') {return {kind:'ok', data:HEALTH}}
+
+      if (request.path === '/api/whoami') {return {kind:'ok', data:{name:'角色管理员', tenant_id:'tenant-a', principal_id:'admin-a', role, effective_permissions:['principal.crud'], desktop_surfaces:{surfaces:{governance:{available:true}}}, product_capabilities:{}}}}
+
+      if (request.path === '/api/principals') {return {kind:'ok', data:{principals:[]}}}
+
+      if (request.path === '/api/audit-list') {return {kind:'ok', data:{events:[]}}}
+
+      return {kind:'error', code:'not_found', message:'unavailable', status:404}
+    })
+    render(<EnterpriseClientApp />)
+    fireEvent.click(await screen.findByRole('button', {name:'员工与权限'}))
+    fireEvent.change(await screen.findByLabelText('员工姓名'), {target:{value:'角色变化前草稿'}})
+    role = 'operator'
+    fireEvent.focus(window)
+    await waitFor(() => expect(screen.queryByLabelText('员工姓名')).toBeNull())
+    role = 'tenant_admin'
+    fireEvent.focus(window)
+    fireEvent.click(await screen.findByRole('button', {name:'员工与权限'}))
+    expect((await screen.findByLabelText('员工姓名') as HTMLInputElement).value).toBe('')
+  })
   it('opens staff governance without shop capability and sends reset and status once through the actual runtime', async () => {
     let status = 'active'
     const bridge = installAuthorityBridge({})

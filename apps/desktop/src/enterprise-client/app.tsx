@@ -796,7 +796,7 @@ function EnterpriseClientContent({ additionalAccountActions, onBeforeLogout, rec
         {activeDefinition.id === 'handoffs' ? (
           <HandoffsPage principalId={authoritySnapshot?.identity.principal_id} runtime={authorityRuntime} />
         ) : null}
-        {activeDefinition.id === 'governance' ? <GovernancePage runtime={authorityRuntime} reviewRequest={reviewRequest} /> : null}
+        {activeDefinition.id === 'governance' ? <GovernancePage key={JSON.stringify([authorityRuntime?.serverOrigin, authoritySnapshot?.identity.tenant_id, authoritySnapshot?.identity.principal_id, authoritySnapshot?.identity.role, authoritySnapshot?.identity.effective_permissions?.slice().sort()])} reviewRequest={reviewRequest} runtime={authorityRuntime} /> : null}
         {activeDefinition.id === 'knowledge' ? <KnowledgePage runtime={authorityRuntime} /> : null}
         {activeDefinition.id === 'tools' ? <ToolsPage runtime={authorityRuntime} role={authoritySnapshot?.identity.role} /> : null}
         {activeDefinition.id === 'overdue' && authorityRuntime && authoritySnapshot ? <OverduePage
