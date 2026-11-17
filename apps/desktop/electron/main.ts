@@ -2,6 +2,7 @@ import { execFile, execFileSync, spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import { allowForegroundLocalDoudian, assertDoudianCapability, DoudianController, doudianScope, doudianWorkbookExtensions } from './doudian-host'
 import type { DoudianRequest } from './doudian-types'
+import { exportShopCsv, isShopCsvExportRequest } from './shop-browser-csv-export'
 import { validShopBounds } from './shop-browser-profiles'
 import { ShopBrowserRuntime } from './shop-browser-runtime'
 import type { ShopBrowserRuntimeRequest } from './shop-browser-runtime-types'
@@ -13653,7 +13654,8 @@ ipcMain.handle('hermes:api', async (_event, request) => {
 // posture stays intact). Consumed by the independent client's runtime adapter.
 const enterpriseSessions = new EnterpriseSessionStore()
 
-const shopBrowserControllers = new Map<number, { sessionId: string; controller: ShopBrowserRuntime; preview?: CustomerServicePreview; current(): boolean }>()
+const shopBrowserControllers = new Map<number, { sessionId: string; controller: ShopBrowserRuntime; preview?: CustomerServicePreview; current(): boolean; authorize(): Promise<{ origin: string; tenantId: string; principalId: string; role?: string }>; epoch(): number }>()
+
 function invalidateShopBrowser(senderId: number) {
   shopBrowserControllers.get(senderId)?.controller.invalidate()
   shopBrowserControllers.delete(senderId)
@@ -13701,23 +13703,37 @@ function shopBrowserController(event: IpcMainInvokeEvent, sessionId: string) {
         }
       }
     })
+
+    let authorizationEpoch = 0
+    let lastAuthorization = ''
+
+    const authorize = async () => {
+      const active = await refreshedEnterpriseSession(event.sender.id, activeSession.sessionId)
+
+      if (!active || !current()) { authorizationEpoch++; lastAuthorization = ''; throw new Error('SHOP_PROFILE_OWNER_CHANGED') }
+      let identity: { tenant_id?: string; principal_id?: string; role?: string }
+
+      try {
+        identity = await fetchJson(resolveEnterpriseUrl(active.baseUrl, '/api/whoami'), '', {
+          bearer: active.token, headers: { Origin: new URL(active.baseUrl).origin }, method: 'GET', timeoutMs: 15000
+        })
+        assertDoudianCapability(identity, 'shopManagementList')
+        doudianScope(active.baseUrl, identity)
+      } catch { authorizationEpoch++; lastAuthorization = ''; throw new Error('SHOP_PROFILE_ACCESS_UNAVAILABLE') }
+
+      if (!current()) { authorizationEpoch++; lastAuthorization = ''; throw new Error('SHOP_PROFILE_OWNER_CHANGED') }
+      const scope = { origin: new URL(active.baseUrl).origin, tenantId: identity.tenant_id!, principalId: identity.principal_id!, role: identity.role }
+      const signature = JSON.stringify([scope.origin, scope.tenantId, scope.principalId, scope.role])
+
+      if (signature !== lastAuthorization) { lastAuthorization = signature; authorizationEpoch++ }
+
+      return scope
+    }
+
     const controller = new ShopBrowserRuntime({
       root: path.join(app.getPath('userData'), 'shop-browser-profiles'),
       isCurrent: current,
-      async authorize() {
-        const active = await refreshedEnterpriseSession(event.sender.id, activeSession.sessionId)
-        if (!active || !current()) throw new Error('SHOP_PROFILE_OWNER_CHANGED')
-        let identity: { tenant_id?: string; principal_id?: string; role?: string }
-        try {
-          identity = await fetchJson(resolveEnterpriseUrl(active.baseUrl, '/api/whoami'), '', {
-            bearer: active.token, headers: { Origin: new URL(active.baseUrl).origin }, method: 'GET', timeoutMs: 15000
-          })
-          assertDoudianCapability(identity, 'shopManagementList')
-          doudianScope(active.baseUrl, identity)
-        } catch { throw new Error('SHOP_PROFILE_ACCESS_UNAVAILABLE') }
-        if (!current()) throw new Error('SHOP_PROFILE_OWNER_CHANGED')
-        return { origin: new URL(active.baseUrl).origin, tenantId: identity.tenant_id!, principalId: identity.principal_id!, role: identity.role }
-      },
+      authorize,
       createView: (storage, target, bounds) => createShopBrowserWorkspace(parent, storage, target, bounds, current),
       createExecution: (storage, target) => createShopExecutionTransport(shopBrowserExecutionTargets[target],
         url => createShopExecutionPage(storage, url, parent), current),
@@ -13726,16 +13742,44 @@ function shopBrowserController(event: IpcMainInvokeEvent, sessionId: string) {
       exportSession: storage => exportShopBrowserSession(storage, assertCurrent),
       importSession: (storage, data) => importShopBrowserSession(storage, data, assertCurrent)
     })
-    entry = { sessionId: activeSession.sessionId, controller, current }
+
+    entry = { sessionId: activeSession.sessionId, controller, current, authorize, epoch: () => authorizationEpoch }
     shopBrowserControllers.set(event.sender.id, entry)
   }
   return entry
 }
 ipcMain.handle('hermes:enterprise:shop-browser', async (event, payload: ShopBrowserRequest) => {
   if (!isEnterpriseUpdateSender(event)) return { ok: false, error: 'SHOP_PROFILE_FORBIDDEN' }
+
+  if (payload?.action === 'exportCsv' && !isShopCsvExportRequest(payload)) {return { ok: false, error: 'SHOP_PROFILE_INVALID_REQUEST' }}
+
   if (payload?.bounds !== undefined && !validShopBounds(payload.bounds)) return { ok: false, error: 'SHOP_PROFILE_INVALID_REQUEST' }
   const entry = shopBrowserController(event, payload?.sessionId)
   if (!entry) return { ok: false, error: 'SHOP_PROFILE_OWNER_CHANGED' }
+
+  if (payload.action === 'exportCsv' && isShopCsvExportRequest(payload)) {
+    const exportResult = await exportShopCsv(payload.locale, {
+      authorize: entry.authorize,
+      current: entry.current,
+      epoch: entry.epoch,
+      list: () => entry.controller.operate({ sessionId: payload.sessionId, action: 'list' }),
+      async choose(defaultName) {
+        const parent = BrowserWindow.fromWebContents(event.sender)
+
+        if (!parent) {throw new Error('SHOP_PROFILE_OWNER_CHANGED')}
+
+        const result = await dialog.showSaveDialog(parent, {
+          defaultPath: path.join(app.getPath('downloads'), defaultName),
+          filters: [{ name: 'CSV', extensions: ['csv'] }]
+        })
+
+        return result.canceled ? undefined : result.filePath
+      }
+    })
+
+    return { ok: true, exportResult }
+  }
+
   const zoom = event.sender.getZoomFactor()
   const request = payload?.bounds ? { ...payload, bounds: Object.fromEntries(Object.entries(payload.bounds).map(([key, value]) => [key, Math.round(value * zoom)])) as unknown as ShopBrowserRequest['bounds'] } : payload
   return entry.controller.operate(request)

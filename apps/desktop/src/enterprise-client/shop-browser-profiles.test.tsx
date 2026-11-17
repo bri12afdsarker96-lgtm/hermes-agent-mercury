@@ -358,6 +358,58 @@ it('does not apply a bounds response after component unmount', async () => {
   expect(screen.queryByText(/SHOP_PROFILE_NOT_OPEN/)).toBeNull()
 })
 
+it('requests a bounded CSV export and reports saved only after the main-process reply', async () => {
+  const f = fixture(twoShops())
+  const original = f.send.getMockImplementation()!
+  let complete!: (reply: unknown) => void
+  f.send.mockImplementation(request => request.action === 'exportCsv'
+    ? new Promise(resolve => {complete = resolve as (reply: unknown) => void})
+    : original(request))
+  render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)
+  await screen.findByText('店铺A')
+  fireEvent.click(screen.getByRole('button', {name:'一键导出'}))
+  await waitFor(() => expect(f.send).toHaveBeenCalledWith({action:'exportCsv', locale:'zh'}))
+  expect(screen.queryByText(/导出成功/)).toBeNull()
+  await act(async () => {complete({ok:true, exportResult:{status:'saved', count:2}})})
+  expect(await screen.findByText(/导出成功.*2/)).toBeTruthy()
+})
+
+it.each([
+  ['canceled', '已取消导出'],
+  ['empty', '没有可导出的店铺'],
+  ['busy', '导出正在进行'],
+  ['cloud_unavailable', '云端店铺列表不可用，未导出'],
+  ['write_failed', '文件保存失败']
+] as const)('shows the truthful export result for %s', async (status, message) => {
+  const f = fixture(twoShops())
+  const original = f.send.getMockImplementation()!
+  f.send.mockImplementation(async request => request.action === 'exportCsv'
+    ? {ok:true, exportResult:{status}} as never
+    : original(request))
+  render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)
+  await screen.findByText('店铺A')
+  fireEvent.click(screen.getByRole('button', {name:'一键导出'}))
+  expect(await screen.findByText(message)).toBeTruthy()
+  expect(screen.queryByText(/导出成功/)).toBeNull()
+})
+
+it('drops an old export reply after the runtime is replaced', async () => {
+  const first = fixture(twoShops())
+  const second = fixture(twoShops())
+  const original = first.send.getMockImplementation()!
+  let complete!: (value: unknown) => void
+  first.send.mockImplementation(request => request.action === 'exportCsv'
+    ? new Promise(resolve => {complete = resolve as (value:unknown) => void})
+    : original(request))
+  const view = render(<ShopBrowserProfilesPanel nativeLayout runtime={first.runtime} />)
+  await screen.findByText('店铺A')
+  fireEvent.click(screen.getByRole('button', {name:'一键导出'}))
+  await waitFor(() => expect(complete).toBeTypeOf('function'))
+  view.rerender(<ShopBrowserProfilesPanel nativeLayout runtime={second.runtime} />)
+  await act(async () => {complete({ok:true, exportResult:{status:'saved', count:2}})})
+  expect(screen.queryByText(/导出成功/)).toBeNull()
+})
+
 it('opens a focused personal removal dialog for the exact row and cancels on Escape', async () => {
   const f = fixture(twoShops())
   render(<ShopBrowserProfilesPanel nativeLayout runtime={f.runtime} />)

@@ -28,7 +28,8 @@ export interface ShopBrowserBounds {
 
 export interface ShopBrowserRequest {
   sessionId: string
-  action: 'list' | 'create' | 'open' | 'identify' | 'close' | 'relogin' | 'delete' | 'bounds' | 'browser' | 'bookmarks' | 'savePayoutSettings' | 'assign'
+  action: 'list' | 'create' | 'open' | 'identify' | 'close' | 'relogin' | 'delete' | 'bounds' | 'browser' | 'bookmarks' | 'savePayoutSettings' | 'assign' | 'exportCsv'
+  locale?: ShopCsvLocale
   profileId?: string
   target?: 'merchant' | 'feige'
   bounds?: ShopBrowserBounds
@@ -39,6 +40,11 @@ export interface ShopBrowserRequest {
   principalIds?: string[]
 }
 
+export type ShopCsvLocale = 'zh' | 'zh-hant' | 'en' | 'ja' | 'ar'
+export type ShopCsvExportResult =
+  | { status: 'saved'; count: number }
+  | { status: 'canceled' | 'empty' | 'busy' | 'owner_changed' | 'authorization_unavailable' | 'cloud_unavailable' | 'write_failed' }
+
 export interface ShopBrowserReply {
   ok: boolean
   error?: string
@@ -48,6 +54,7 @@ export interface ShopBrowserReply {
   browser?: ShopBrowserSnapshot
   bookmarks?: ShopBookmarkSnapshot
   cloud?: { state: 'synced' | 'unavailable' | 'conflict'; checkedAt: string }
+  exportResult?: ShopCsvExportResult
 }
 export function isShopBrowserUrl(raw: string): boolean {
   try {

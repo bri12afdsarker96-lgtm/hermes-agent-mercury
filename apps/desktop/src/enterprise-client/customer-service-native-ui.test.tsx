@@ -61,7 +61,7 @@ it('waits for the authoritative list before showing an empty native shop state',
   await waitFor(() => expect(view.container.querySelector('.cs-empty')).not.toBeNull())
 })
 
-it('exports the freshly authorized list and keeps the native two CSV fields and quote escaping', async () => {
+it('requests the authorized export independently of the visible shop filter', async () => {
   vi.stubGlobal(
     'ResizeObserver',
     class {
@@ -69,34 +69,20 @@ it('exports the freshly authorized list and keeps the native two CSV fields and 
       disconnect() {}
     }
   )
-  const create = vi.fn((_blob: Blob) => 'blob:isolated-csv')
-  vi.stubGlobal(
-    'URL',
-    class extends URL {
-      static createObjectURL = create
-      static revokeObjectURL = vi.fn()
-    }
-  )
-  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
-  let available = [shop]
-  const send = vi.fn(async (_request: { action: string }) => ({ ok: true, profiles: available }))
+
+  const send = vi.fn(async (request: { action: string }) => request.action === 'exportCsv'
+    ? {ok:true, exportResult:{status:'saved', count:1}}
+    : {ok:true, profiles:[shop]})
+
   render(
     <ShopBrowserProfilesPanel nativeLayout runtime={{ shopBrowser: send } as unknown as EnterpriseClientRuntime} />
   )
   await screen.findByText('五元店铺')
   expect(screen.getByText('5')).toBeTruthy()
   fireEvent.change(screen.getByLabelText('店铺筛选'), { target: { value: 'expired' } })
-  available = [{ ...shop, displayName: '授权后店铺', shopName: '授权后店铺"A' }]
   fireEvent.click(screen.getByRole('button', { name: '一键导出' }))
-  await waitFor(() => expect(create).toHaveBeenCalledOnce())
-
-  const csv = await new Promise<string>(resolve => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result))
-    reader.readAsText(create.mock.calls[0][0] as Blob)
-  })
-
-  expect(csv).toBe('店铺名,打款金额\r\n"授权后店铺""A","5"')
+  expect(await screen.findByText(/导出成功.*1/)).toBeTruthy()
+  expect(send).toHaveBeenCalledWith({action:'exportCsv', locale:'zh'})
   expect(send.mock.calls.length).toBe(2)
 })
 

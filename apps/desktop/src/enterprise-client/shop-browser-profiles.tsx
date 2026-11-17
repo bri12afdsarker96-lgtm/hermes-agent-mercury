@@ -10,7 +10,7 @@ import { shopBrowserCopy } from '@/i18n/shop-browser'
 import { shopBrowserRuntimeCopy } from '@/i18n/shop-browser-runtime'
 import { shopCloudCopy } from '@/i18n/shop-cloud'
 
-import type { ShopBrowserProfile, ShopBrowserReply, ShopBrowserRequest } from '../../electron/shop-browser-types'
+import type { ShopBrowserProfile, ShopBrowserReply, ShopBrowserRequest, ShopCsvExportResult } from '../../electron/shop-browser-types'
 import { recoverableShopBrowserErrors } from '../../electron/shop-browser-types'
 
 import { EnterpriseModalDialog } from './enterprise-design-system'
@@ -56,6 +56,9 @@ export function ShopBrowserProfilesPanel({
   const [opened, setOpened] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [exportResult, setExportResult] = useState<ShopCsvExportResult>()
+  const currentRuntime = useRef(runtime)
+  currentRuntime.current = runtime
   const [cloud, setCloud] = useState<ShopBrowserReply['cloud']>()
   const [confirmation, setConfirmation] = useState<{ action: 'relogin' | 'delete'; profile: ShopBrowserProfile; runtime: EnterpriseClientRuntime } | null>(null)
   const confirmationRef = useRef(confirmation)
@@ -232,6 +235,7 @@ export function ShopBrowserProfilesPanel({
     setOpened(null)
     setConfirmation(null)
     setCloud(undefined)
+    setExportResult(undefined)
     void run(refresh)
 
     return () => {
@@ -422,9 +426,10 @@ export function ShopBrowserProfilesPanel({
 
   const exportShops = () =>
     void run(async () => {
-      const reply = await runtime.shopBrowser!({ action: 'list' })
+      setExportResult(undefined)
+      const reply = await runtime.shopBrowser!({ action: 'exportCsv', locale })
 
-      if (!lifecycle.alive) {
+      if (!lifecycle.alive || currentRuntime.current !== runtime) {
         return
       }
 
@@ -432,19 +437,20 @@ export function ShopBrowserProfilesPanel({
         throw new Error(reply.error)
       }
 
-      const quote = (value: string) => `"${value.replaceAll('"', '""')}"`
+      const result = reply.exportResult
 
-      const rows = (reply.profiles ?? []).map(profile =>
-        [profile.shopName || profile.displayName, profile.payoutSettings?.remitAmount ?? ''].map(quote).join(',')
-      )
+      if (!result || !['saved', 'canceled', 'empty', 'busy', 'owner_changed', 'authorization_unavailable', 'cloud_unavailable', 'write_failed'].includes(result.status) ||
+        (result.status === 'saved' && (!Number.isSafeInteger(result.count) || result.count < 1))) {
+        setExportResult({status:'write_failed'})
 
-      const csv = '\uFEFF' + [native.csvShopName + ',' + native.amount, ...rows].join('\r\n')
-      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `shops-${new Date().toISOString().slice(0, 10)}.csv`
-      link.click()
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
+        return
+      }
+
+      setExportResult(result)
+
+      if (result.status === 'owner_changed') {throw new Error('SHOP_PROFILE_OWNER_CHANGED')}
+
+      if (result.status === 'authorization_unavailable') {throw new Error('SHOP_PROFILE_ACCESS_UNAVAILABLE')}
     })
 
   const confirm = (action: 'relogin' | 'delete') =>
@@ -590,6 +596,15 @@ export function ShopBrowserProfilesPanel({
         <p className="cs-muted" id="shop-reception-service-unavailable">
           {browserRuntime.unavailableDetail}
         </p>
+        {exportResult ? <p role={['write_failed', 'cloud_unavailable', 'owner_changed', 'authorization_unavailable'].includes(exportResult.status) ? 'alert' : 'status'}>{
+          exportResult.status === 'saved' ? `${copy.exportSaved}${exportResult.count}` :
+          exportResult.status === 'canceled' ? copy.exportCanceled :
+          exportResult.status === 'empty' ? copy.exportEmpty :
+          exportResult.status === 'busy' ? copy.exportBusy :
+          exportResult.status === 'owner_changed' ? copy.exportOwnerChanged :
+          exportResult.status === 'authorization_unavailable' ? copy.exportAuthorizationUnavailable :
+          exportResult.status === 'cloud_unavailable' ? copy.exportCloudUnavailable : copy.exportWriteFailed
+        }</p> : null}
         {error && confirmation?.action !== 'delete' ? (
           <p className="cs-error" role="alert">
             {copy.failed} ({error})
