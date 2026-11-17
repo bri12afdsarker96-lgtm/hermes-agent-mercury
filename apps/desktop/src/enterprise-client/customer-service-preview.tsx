@@ -66,10 +66,24 @@ type PanelProps = {
 
 export function CustomerServicePreviewPanel(props: PanelProps) {
   if (props.view === 'workbench') {
-    return <CustomerServiceWorkbench {...props} profiles={props.profiles ?? []} />
+    return <CustomerServiceWorkbenchPanel {...props} />
   }
 
   return <CustomerServiceRulesPanel {...props} />
+}
+
+function CustomerServiceWorkbenchPanel(props: PanelProps) {
+  const { locale } = useI18n()
+  const copy = customerServiceCopy[locale]
+  const [testing, setTesting] = useState(false)
+
+  return <>
+    <details className="cs-workbench-simulation" onToggle={event => setTesting(event.currentTarget.open)}>
+      <summary>{copy.rehearsal}</summary>
+      {testing ? <><p>{copy.ruleTestHint}</p><CustomerServiceLocalPanel {...props} onHandle={undefined} view="workbench" /></> : null}
+    </details>
+    {!testing ? <CustomerServiceWorkbench {...props} profiles={props.profiles ?? []} /> : null}
+  </>
 }
 
 function CustomerServiceRulesPanel(props: PanelProps) {

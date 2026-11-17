@@ -78,9 +78,9 @@ The Enterprise root derives its semantic palette from the shared ThemeProvider
 through `src/enterprise-client/enterprise-design-tokens.css`. The default Codex
 skin uses neutral light surfaces. Existing saved skin and mode preferences retain
 their precedence. `enterprise-codex.css` owns the flat shell and theme-aware
-status colors. The customer-service surface uses the recovered native module
-navigation and page geometry in `customer-service.css`, including its 220px
-sidebar, four-column agent workspace and 520px shop-settings dialog. This
+status colors. The customer-service surface integrates its navigation as top
+tabs within the enterprise shell, while retaining recovered page geometry in
+`customer-service.css`, including the four-column agent workspace and 520px shop-settings dialog. This
 explicit native-parity requirement uses the native teal accent and recovered
 dark palette. Light mode uses the active Hermes surface tokens. Status wording
 continues to distinguish local simulation, profile verification and production

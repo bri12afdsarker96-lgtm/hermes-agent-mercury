@@ -121,14 +121,12 @@ export function CustomerServicePage({ runtime }: { runtime?: EnterpriseClientRun
 
   return (
     <section className="cs-native" data-native-layout="true" data-testid="customer-service-page">
-      <aside className="cs-sidebar">
-        <div className="cs-brand">
-          <span aria-hidden="true">
-            <MessageSquareText />
-          </span>
-          <strong>{layout.title}</strong>
+      <header className="cs-section-header">
+        <div className="cs-section-heading">
+          <h1>{layout.title}</h1>
+          <span role="status">{shopBrowserRuntimeCopy[locale].unavailable}</span>
         </div>
-        <nav aria-label={layout.title}>
+        <nav aria-label={layout.title} className="cs-section-nav">
           {(
             [
               ['shops', LayoutDashboard, layout.shops],
@@ -137,7 +135,7 @@ export function CustomerServicePage({ runtime }: { runtime?: EnterpriseClientRun
               ['authorization', Users, layout.authorization]
             ] as const
           ).map(([id, Icon, title]) => (
-            <button data-active={page === id} key={id} onClick={() => navigate(id)} type="button">
+            <button aria-current={page === id ? 'page' : undefined} data-active={page === id} key={id} onClick={() => navigate(id)} type="button">
               <span aria-hidden="true">
                 <Icon />
               </span>
@@ -145,10 +143,7 @@ export function CustomerServicePage({ runtime }: { runtime?: EnterpriseClientRun
             </button>
           ))}
         </nav>
-        <div className="cs-sidebar-footer">
-          <span>{shopBrowserRuntimeCopy[locale].unavailable}</span>
-        </div>
-      </aside>
+      </header>
       <main className="cs-native-content">
         {!runtime?.shopBrowser ? (
           <p className="cs-empty">{copy.noTransport}</p>

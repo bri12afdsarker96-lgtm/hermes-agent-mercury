@@ -100,6 +100,20 @@ it('keeps local test conversations out of the real reception workbench', async (
   expect(send).not.toHaveBeenCalled()
 })
 
+it('opens local reception simulation only on request and leaves production reception unavailable', async () => {
+  const snapshot: CustomerServiceSnapshot = {revision:2, profile:shop, rules:[], conversations:[], tasks:[], events:[]}
+  const send = vi.fn(async () => ({ok:true, snapshot}))
+  render(<CustomerServicePreviewPanel profileId={shop.id} profiles={[shop]} runtime={{customerService:send} as unknown as EnterpriseClientRuntime} view="workbench" />)
+  expect(screen.getByText('接待服务未接入')).toBeTruthy()
+  expect(send).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByText('本机模拟流程'))
+  expect(await screen.findByRole('button', {name:'模拟接收消息'})).toBeTruthy()
+  expect(send).toHaveBeenCalledWith({action:'snapshot', profileId:shop.id})
+  expect(screen.queryByTestId('customer-service-workbench')).toBeNull()
+  fireEvent.click(screen.getAllByText('本机模拟流程')[0])
+  expect(await screen.findByText('接待服务未接入')).toBeTruthy()
+})
+
 it('refreshes authorized shops without requesting a local preview snapshot', async () => {
   const send = vi.fn()
   const refresh = vi.fn()

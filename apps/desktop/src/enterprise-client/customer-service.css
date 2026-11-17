@@ -10,6 +10,56 @@
   font-family: 'HarmonyOS Sans SC', 'Microsoft YaHei UI', sans-serif;
   font-size: 13px;
 }
+
+/* The module uses the enterprise shell's page structure instead of a second sidebar. */
+.cs-section-header {
+  flex: 0 0 auto;
+  padding: 0 24px;
+}
+.cs-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 52px;
+}
+.cs-section-heading h1 {
+  margin: 0;
+  color: var(--ui-text-primary);
+  font-size: 20px;
+  font-weight: 600;
+}
+.cs-section-heading [role='status'] {
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+}
+.cs-section-nav {
+  display: flex;
+  gap: 20px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--ui-stroke-secondary);
+}
+.cs-section-nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  flex: 0 0 auto;
+  border-bottom: 2px solid transparent;
+  color: var(--ui-text-secondary);
+  white-space: nowrap;
+}
+.cs-section-nav button[data-active='true'] {
+  border-bottom-color: var(--ui-text-primary);
+  color: var(--ui-text-primary);
+}
+.cs-section-nav button span { display: inline-flex; }
+.cs-section-nav button svg { width: 15px; height: 15px; }
+.cs-workbench-simulation { padding: 12px 24px; }
+.cs-workbench-simulation > summary { cursor: pointer; color: var(--ui-text-secondary); }
+.cs-workbench-simulation > p { color: var(--ui-text-secondary); }
+.cs-workbench-simulation[open] { flex: 1; min-height: 0; overflow: auto; }
+.cs-workbench-simulation[open] > .cs-service { min-height: 460px; }
 .cs-sidebar {
   width: 190px;
   flex: 0 0 190px;
@@ -1192,4 +1242,18 @@ html[data-hermes-mode='dark'] .cs-native .cs-sidebar nav button[data-active='tru
   width: 90px;
   flex-shrink: 0;
   height: 30px;
+}
+
+.hesc-root .cs-native[data-native-layout='true'] {
+  flex-direction: column;
+  min-height: 540px;
+  border: 0;
+  background: transparent;
+}
+.hesc-root .cs-native[data-native-layout='true'] .cs-native-page {
+  padding: 20px 24px;
+}
+@media (max-width: 700px) {
+  .cs-section-header { padding-inline: 16px; }
+  .hesc-root .cs-native[data-native-layout='true'] .cs-native-page { padding-inline: 16px; }
 }

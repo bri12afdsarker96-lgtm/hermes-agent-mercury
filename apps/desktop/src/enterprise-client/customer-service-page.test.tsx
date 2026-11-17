@@ -65,6 +65,22 @@ function fixture() {
   return { requests, send, runtime: { shopBrowser: send, get } as unknown as EnterpriseClientRuntime }
 }
 
+it('keeps the selected section available in the integrated navigation', async () => {
+  const f = fixture()
+  render(<CustomerServicePage runtime={f.runtime} />)
+  const navigation = screen.getByRole('navigation', { name: '店铺与客服' })
+  const shops = screen.getByRole('button', { name: '店铺管理' })
+  const rules = screen.getByRole('button', { name: '话术规则' })
+  expect(navigation.contains(shops)).toBe(true)
+  expect(shops.getAttribute('aria-current')).toBe('page')
+  fireEvent.click(rules)
+  expect(rules.getAttribute('aria-current')).toBe('page')
+  expect(shops.hasAttribute('aria-current')).toBe(false)
+  await waitFor(() => expect(f.requests).toHaveLength(2))
+  await act(async () => f.requests[1]({ ok: true, profiles: [profile] }))
+  expect((await screen.findByTestId('loaded-workflow')).textContent).toBe(profile.id)
+})
+
 it.each(['话术规则', '坐席工作台', '坐席与授权'])(
   'loads saved profiles after navigating immediately to %s',
   async destination => {
