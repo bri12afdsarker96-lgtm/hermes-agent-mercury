@@ -53,6 +53,7 @@ test('real cloud test build has a separate identity and no OS protocol or publis
   assert.equal(testConfig.nsis.allowToChangeInstallationDirectory, false)
   assert.notEqual(testConfig.extraMetadata.name, 'hermes')
   assert.notEqual(testConfig.nsis.include, build.nsis.include)
+  assert.equal(testConfig.nsis.include, 'scripts/cloud-test-installer.nsh')
 })
 
 test('startup applies test profile and identity before instance lock while production stays unchanged', () => {
@@ -63,9 +64,10 @@ test('startup applies test profile and identity before instance lock while produ
   assert.equal(deployment.applyCloudTestStartup({ ...opts, enabled: false }), null)
   assert.deepEqual(calls, [])
   const result = deployment.applyCloudTestStartup({ ...opts, enabled: true })
-  assert.deepEqual(calls.map(call => call[0]), ['mkdir', 'path', 'name', 'id'])
+  assert.deepEqual(calls.map(call => call[0]), ['mkdir', 'path', 'path', 'name', 'id'])
   assert.equal(calls[1][2], result.userData)
-  assert.equal(calls[3][1], 'com.qiqiaoban.hermes-enterprise-assistant.localtest')
+  assert.deepEqual(calls[2], ['path', 'sessionData', result.userData])
+  assert.equal(calls[4][1], 'com.qiqiaoban.hermes-enterprise-assistant.localtest')
 })
 
 test('cloud test build record states real cloud and cannot be published', () => {

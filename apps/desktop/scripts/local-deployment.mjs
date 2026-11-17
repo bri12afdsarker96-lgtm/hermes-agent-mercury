@@ -37,7 +37,7 @@ export function makeCloudTestBuilderConfig(build, electronDist) {
     artifactName: 'Hermes-企业助手-${version}-${arch}-localtest.${ext}', protocols: [], publish: null,
     extraMetadata: { ...build.extraMetadata, name: 'hermes-enterprise-localtest', productName: 'Hermes-企业助手-测试版' },
     electronDist, win: { ...build.win, signAndEditExecutable: false },
-    nsis: { ...build.nsis, include: 'scripts/localprep-installer.nsh',
+    nsis: { ...build.nsis, include: 'scripts/cloud-test-installer.nsh',
       shortcutName: 'Hermes-企业助手-测试版', uninstallDisplayName: 'Hermes-企业助手-测试版', runAfterFinish: false,
       allowToChangeInstallationDirectory: false } }
 }
@@ -67,6 +67,7 @@ export function applyCloudTestStartup({ enabled, app, platform, mkdir, ...option
   const paths = cloudTestPaths(options)
   mkdir(paths.userData)
   app.setPath('userData', paths.userData)
+  app.setPath('sessionData', paths.userData)
   app.setName('Hermes-企业助手-测试版')
   if (platform === 'win32') app.setAppUserModelId('com.qiqiaoban.hermes-enterprise-assistant.localtest')
   return paths
