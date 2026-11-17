@@ -41,6 +41,107 @@ const portable: PortableShopSession = {
 
 const bounds = { x: 0, y: 0, width: 800, height: 600 }
 
+it('retries a failed session export without treating it as a dispatched identity write', async () => {
+  const remote = remoteBoundary()
+  const f = await computer(remote)
+  const profile = (await f.call('create')).profile!
+  await f.call('open', { profileId: profile.id, target: 'merchant', bounds })
+  const pending = (await f.call('identify', { profileId: profile.id })).pendingIdentity!
+  const settings = { remitAmount: '5', payoutReviewDays: 15, payoutRequireReviewWithinDays: true,
+    payoutGoodReviewMode: 0 as const, payoutRefundChannel: 'small_remit' as const }
+  f.exported.mockRejectedValueOnce(new Error('synthetic export failure'))
+  const input = { profileId: profile.id, pendingToken: pending.token, payoutSettings: settings }
+  expect((await f.call('confirmIdentity', input)).ok).toBe(false)
+  expect(remote.request.mock.calls.filter(args => args[2] === 'POST')).toHaveLength(0)
+  expect((await f.call('list')).profiles![0]).toMatchObject({ shopId: null, loginState: 'unverified' })
+  expect((await f.call('confirmIdentity', input))).toMatchObject({ ok: true, profile: { loginState: 'verified', payoutSettings: settings } })
+  expect(remote.request.mock.calls.filter(args => args[2] === 'POST' && args[4]?.profile)).toHaveLength(1)
+})
+
+it('retries a failed prewrite export after closing and reopening without creating an uncertain record', async () => {
+  const remote = remoteBoundary()
+  const f = await computer(remote)
+  const profile = (await f.call('create')).profile!
+  await f.call('open', { profileId: profile.id, target: 'merchant', bounds })
+  const pending = (await f.call('identify', { profileId: profile.id })).pendingIdentity!
+  const settings = { remitAmount: '5', payoutReviewDays: 15, payoutRequireReviewWithinDays: true,
+    payoutGoodReviewMode: 0 as const, payoutRefundChannel: 'small_remit' as const }
+  f.exported.mockRejectedValueOnce(new Error('synthetic export failure'))
+  expect((await f.call('confirmIdentity', { profileId: profile.id, pendingToken: pending.token, payoutSettings: settings })).ok).toBe(false)
+  await f.call('close')
+  expect(remote.request.mock.calls.filter(args => args[2] === 'POST')).toHaveLength(0)
+  const restarted = await computer(remote, 'employee-a', 'tenant-a', f.root)
+  await restarted.call('open', { profileId: profile.id, target: 'merchant', bounds })
+  const again = (await restarted.call('identify', { profileId: profile.id })).pendingIdentity!
+  expect((await restarted.call('confirmIdentity', { profileId: profile.id, pendingToken: again.token, payoutSettings: settings })).ok).toBe(true)
+  expect(remote.request.mock.calls.filter(args => args[2] === 'POST' && args[4]?.profile)).toHaveLength(1)
+})
+
+it('does not dispatch a cloud write when the window is closed during session export', async () => {
+  const remote = remoteBoundary()
+  const f = await computer(remote)
+  const profile = (await f.call('create')).profile!
+  await f.call('open', { profileId: profile.id, target: 'merchant', bounds })
+  const pending = (await f.call('identify', { profileId: profile.id })).pendingIdentity!
+  let release!: (session: PortableShopSession) => void
+  let started!: () => void
+  const waiting = new Promise<void>(resolve => { started = resolve })
+  f.exported.mockImplementationOnce(() => { started(); return new Promise(resolve => { release = resolve }) })
+  const confirming = f.call('confirmIdentity', { profileId: profile.id, pendingToken: pending.token, payoutSettings: {
+    remitAmount: '5', payoutReviewDays: 15, payoutRequireReviewWithinDays: true, payoutGoodReviewMode: 0, payoutRefundChannel: 'small_remit' } })
+  await waiting
+  const closing = f.call('close')
+  release(portable)
+  expect((await confirming).error).toBe('SHOP_PROFILE_IDENTITY_CHANGED')
+  await closing
+  expect(remote.request.mock.calls.filter(args => args[2] === 'POST')).toHaveLength(0)
+  expect((await f.call('list')).profiles![0]).toMatchObject({ shopId: null, loginState: 'unverified' })
+})
+
+it('does not verify or upload stale settings from a historic unknown identity after restart', async () => {
+  const remote = remoteBoundary()
+  const original = remote.request.getMockImplementation()!
+  remote.request.mockImplementation(async (...args) => {
+    if (args[2] === 'POST' && args[4]?.profile) throw new Error('synthetic uncertain identity write')
+    return original(...args)
+  })
+  const f = await computer(remote)
+  const profile = (await f.call('create')).profile!
+  const old = { remitAmount: '3', payoutReviewDays: 10, payoutRequireReviewWithinDays: false,
+    payoutGoodReviewMode: 1 as const, payoutRefundChannel: 'small_remit' as const }
+  await f.call('savePayoutSettings', { profileId: profile.id, expectedRevision: 0, payoutSettings: old })
+  await f.call('open', { profileId: profile.id, target: 'merchant', bounds })
+  const pending = (await f.call('identify', { profileId: profile.id })).pendingIdentity!
+  const settings = { ...old, remitAmount: '5' }
+  expect((await f.call('confirmIdentity', { profileId: profile.id, pendingToken: pending.token, payoutSettings: settings })).ok).toBe(false)
+  await f.call('close')
+  const restarted = await computer(remote, 'employee-a', 'tenant-a', f.root)
+  await restarted.call('list')
+  await restarted.call('open', { profileId: profile.id, target: 'merchant', bounds })
+  const postCount = remote.request.mock.calls.filter(args => args[2] === 'POST').length
+  const result = await restarted.call('identify', { profileId: profile.id })
+  expect(result.pendingIdentity).toMatchObject({ shopId: '12345' })
+  expect((await restarted.call('list')).profiles![0]).toMatchObject({ loginState: 'unverified', completionState: 'identity-unknown' })
+  expect(remote.request.mock.calls.filter(args => args[2] === 'POST')).toHaveLength(postCount)
+})
+
+it('does not expose an older verified flag on a pending record or allow it to execute', async () => {
+  const remote = remoteBoundary()
+  const f = await computer(remote)
+  const profile = (await f.call('create')).profile!
+  const files = await fs.readdir(f.root, { recursive: true })
+  const metadataPath = path.join(f.root, String(files.find(item => String(item).endsWith('profiles.json'))))
+  const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'))
+  const old = { remitAmount: '3', payoutReviewDays: 10, payoutRequireReviewWithinDays: false,
+    payoutGoodReviewMode: 1 as const, payoutRefundChannel: 'small_remit' as const }
+  Object.assign(metadata.profiles[0], { shopId: '12345', shopName: 'Synthetic shop',
+    loginState: 'verified', completionState: 'identity-unknown', payoutSettings: old, payoutSettingsRevision: 1 })
+  await fs.writeFile(metadataPath, JSON.stringify(metadata))
+  expect((await f.call('list')).profiles![0]).toMatchObject({ loginState: 'unverified', completionState: 'identity-unknown', payoutSettings: old })
+  await expect(f.controller.acquireExecution(profile.id, 'feige')).rejects.toThrow('SHOP_PROFILE_UNVERIFIED')
+  expect(remote.request.mock.calls.filter(args => args[2] === 'POST')).toHaveLength(0)
+})
+
 it('confirms identity and settings through the cloud, then reads both back', async () => {
   const remote = remoteBoundary()
   const f = await computer(remote)
@@ -110,7 +211,7 @@ it('recovers a lost identity write response after restart without reposting iden
   expect(remote.request.mock.calls.filter(args => args[2] === 'POST' && args[4]?.profile)).toHaveLength(1)
 })
 
-it('clears incomplete state after a lost settings response and restart with authoritative settings', async () => {
+it('requires reconfirmation after a lost settings response, then reads back authoritative settings', async () => {
   const remote = remoteBoundary()
   const original = remote.request.getMockImplementation()!
   let loseResponse = true
@@ -134,9 +235,11 @@ it('clears incomplete state after a lost settings response and restart with auth
   await restarted.call('list')
   await restarted.call('open', { profileId: profile.id, target: 'merchant', bounds })
   const identified = await restarted.call('identify', { profileId: profile.id })
-  expect(identified.pendingIdentity).toBeUndefined()
-  expect(identified.profile).toMatchObject({ loginState: 'verified', payoutSettings: settings, cloudPayoutSettingsState: 'saved' })
-  expect(identified.profile?.completionState).toBeUndefined()
+  expect(identified.pendingIdentity).toMatchObject({ shopId: '12345' })
+  expect((await restarted.call('list')).profiles![0]).toMatchObject({ loginState: 'unverified', completionState: 'settings-pending' })
+  const confirmed = await restarted.call('confirmIdentity', { profileId: profile.id, pendingToken: identified.pendingIdentity!.token, payoutSettings: settings })
+  expect(confirmed.profile).toMatchObject({ loginState: 'verified', payoutSettings: settings, cloudPayoutSettingsState: 'saved' })
+  expect(confirmed.profile?.completionState).toBeUndefined()
   expect(remote.request.mock.calls.filter(args => args[2] === 'POST' && args[4]?.payout_settings)).toHaveLength(1)
 })
 

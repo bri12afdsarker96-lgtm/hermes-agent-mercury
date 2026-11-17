@@ -204,6 +204,11 @@ export class ShopBrowserProfiles {
         fail('SHOP_PROFILE_STORE_INVALID')
       }
 
+      // Older interrupted attempts may have persisted a verified flag while
+      // completion was still pending; never expose that flag as executable.
+      if (profile.completionState && profile.loginState === 'verified') {
+        profile.loginState = 'unverified'
+      }
       ids.add(profile.id)
     }
 
@@ -637,8 +642,8 @@ export class ShopBrowserProfiles {
           try {
             const identity = await check.identify()
             await this.authority()
-            restored.loginState =
-              identity?.shopId === restored.shopId && identity.shopName === restored.shopName ? 'verified' : 'expired'
+            restored.loginState = identity?.shopId === restored.shopId && identity.shopName === restored.shopName
+              ? (restored.completionState ? 'unverified' : 'verified') : 'expired'
             restored.checkedAt = new Date().toISOString()
           } finally {
             await check.close()
@@ -1164,19 +1169,21 @@ export class ShopBrowserProfiles {
         if (!this.deps.exportSession) { fail('SHOP_PAYOUT_SETTINGS_CLOUD_UNAVAILABLE') }
         const settings = { ...request.payoutSettings, remitAmount: request.payoutSettings.remitAmount.trim() }
         const initial = !profile.shopId && !profile.cloudRevision && !profile.completionState
-        if (initial) {
-          profile.shopId = pending.shopId
-          profile.shopName = pending.shopName
-          profile.displayName = pending.shopName
-          profile.checkedAt = new Date().toISOString()
-          profile.loginState = 'unverified'
-          profile.completionState = 'identity-unknown'
-          await this.save(scope, profiles)
-        }
         try {
           let remote: CloudShopRecord
           if (initial) {
             const session = await this.deps.exportSession(this.storage(scope, profile))
+            await this.authority()
+            if (this.pendingEpoch !== epoch || this.opened?.view !== pending.view) { fail('SHOP_PROFILE_IDENTITY_CHANGED') }
+            // From this durable boundary onward the write may have been sent.
+            // A crash before the call remains conservatively unknown.
+            profile.shopId = pending.shopId
+            profile.shopName = pending.shopName
+            profile.displayName = pending.shopName
+            profile.checkedAt = new Date().toISOString()
+            profile.loginState = 'unverified'
+            profile.completionState = 'identity-unknown'
+            await this.save(scope, profiles)
             await this.authority()
             if (this.pendingEpoch !== epoch || this.opened?.view !== pending.view) { fail('SHOP_PROFILE_IDENTITY_CHANGED') }
             remote = await this.deps.cloud.save(publicProfile(profile), 0, session)
@@ -1251,7 +1258,7 @@ export class ShopBrowserProfiles {
           fail('SHOP_PROFILE_IDENTITY_CHANGED')
         }
 
-        let settingsSaved = Boolean(profile.shopId && profile.payoutSettings)
+        let settingsSaved = Boolean(profile.shopId && profile.payoutSettings && !profile.completionState)
         if (profile.cloudRevision) {
           if (!this.deps.cloud) {
             fail('SHOP_PAYOUT_SETTINGS_CLOUD_UNAVAILABLE')
@@ -1263,8 +1270,9 @@ export class ShopBrowserProfiles {
           if (remote.deleted || remote.payout_settings === undefined || remote.payout_settings_revision === undefined) {
             fail('SHOP_PAYOUT_SETTINGS_CLOUD_UNAVAILABLE')
           }
-          settingsSaved = Boolean(remote.payout_settings && remote.payout_settings_revision > 0)
-          if (settingsSaved) {
+          const cloudSettingsSaved = Boolean(remote.payout_settings && remote.payout_settings_revision > 0)
+          settingsSaved = cloudSettingsSaved && !profile.completionState
+          if (cloudSettingsSaved) {
             this.applyCloudPayoutSettings(profile, remote)
           } else {
             profile.completionState = 'settings-pending'
